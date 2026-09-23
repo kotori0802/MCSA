@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -57,6 +58,56 @@ from .charts import IntervalChart, ScatterChart
 from .styles import get_palette, get_style
 
 
+def parse_auto_stop_seconds(enabled: bool, raw: Any) -> float | None:
+    """Return auto-stop offset in seconds, or None if auto-stop is off.
+
+    When auto-stop is disabled the seconds field is ignored, including
+    invalid text. When enabled, the field must be a finite positive number.
+    """
+    if not enabled:
+        return None
+    if raw is None:
+        raise ValueError("Auto Stop seconds must be a finite positive number")
+    text = str(raw).strip()
+    try:
+        sec = float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Auto Stop seconds must be a finite positive number") from exc
+    if not math.isfinite(sec) or sec <= 0.0:
+        raise ValueError("Auto Stop seconds must be a finite positive number")
+    return sec
+
+
+def contain_qt_runtime_click_expectation(
+    settings: dict[str, Any],
+    auto_stop_sec: float | None,
+) -> dict[str, Any]:
+    """Neutralize duration-derived click counts for the Qt live/runtime path.
+
+    Auto Stop seconds only control when recording stops. They must not create
+    an expected click count. Auto Stop OFF must not expose a fake 60 s duration.
+    """
+    out = dict(settings)
+    out["target_clicks"] = 0
+    out["expected_clicks"] = 0
+    out["expected_clicks_auto"] = 0
+    if auto_stop_sec is None:
+        out["duration_sec"] = 0
+    else:
+        out["duration_sec"] = auto_stop_sec
+    return out
+
+
+def qt_button_label(text: Any) -> str:
+    """Escape '&' so QPushButton shows a literal ampersand."""
+    return str(text).replace("&", "&&")
+
+
+def setup_controls_editable(*, running: bool, completed: bool) -> bool:
+    """Setup is editable only before a run starts (LISTEN / fresh)."""
+    return (not running) and (not completed)
+
+
 class CaptureBridge(QObject):
     """Marshals Raw Input callbacks onto the Qt UI thread."""
 
@@ -96,6 +147,7 @@ class MainWindow(QMainWindow):
         self.raw_input: WindowsRawInputSubprocess | None = None
         self.start_time: float | None = None
         self.end_time: float | None = None
+        self.stop_time: float | None = None
         self.first_press_time = None
         self.last_press_time = None
         self.first_release_time = None
@@ -200,14 +252,34 @@ class MainWindow(QMainWindow):
         self.hz_combo.setCurrentText("10")
         side_l.addWidget(self.hz_combo)
 
-        self.duration_label = QLabel("Duration sec")
-        self._field_labels.append(self.duration_label)
-        side_l.addWidget(self.duration_label)
-        self.duration_combo = QComboBox()
-        self.duration_combo.setEditable(True)
-        self.duration_combo.addItems(["30", "60", "120", "300"])
-        self.duration_combo.setCurrentText("60")
-        side_l.addWidget(self.duration_combo)
+        self.auto_stop_label = QLabel("Auto Stop")
+        self._field_labels.append(self.auto_stop_label)
+        side_l.addWidget(self.auto_stop_label)
+        auto_stop_row = QHBoxLayout()
+        auto_stop_row.setSpacing(6)
+        self.auto_stop_off = QPushButton("OFF")
+        self.auto_stop_on = QPushButton("ON")
+        for btn in (self.auto_stop_off, self.auto_stop_on):
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMinimumHeight(32)
+            auto_stop_row.addWidget(btn)
+        self.auto_stop_off.setChecked(True)
+        self.auto_stop_on.setChecked(False)
+        self.auto_stop_group = QButtonGroup(self)
+        self.auto_stop_group.setExclusive(True)
+        self.auto_stop_group.addButton(self.auto_stop_off)
+        self.auto_stop_group.addButton(self.auto_stop_on)
+        self.auto_stop_on.toggled.connect(self._sync_auto_stop_widgets)
+        side_l.addLayout(auto_stop_row)
+        self.auto_stop_sec_label = QLabel("Auto Stop After (s)")
+        self._field_labels.append(self.auto_stop_sec_label)
+        side_l.addWidget(self.auto_stop_sec_label)
+        self.auto_stop_sec_combo = QComboBox()
+        self.auto_stop_sec_combo.setEditable(True)
+        self.auto_stop_sec_combo.addItems(["30", "60", "120", "300"])
+        self.auto_stop_sec_combo.setCurrentText("60")
+        side_l.addWidget(self.auto_stop_sec_combo)
 
         self.segment_label = QLabel("Segment sec")
         self._field_labels.append(self.segment_label)
@@ -387,6 +459,7 @@ class MainWindow(QMainWindow):
         self.theme = self.theme_combo.currentData() or "light"
         self._apply_theme()
         self._retranslate_ui()
+        self._update_controls()
 
     def _on_lang_changed(self):
         self.lang = self.lang_combo.currentData() or "en"
@@ -394,6 +467,7 @@ class MainWindow(QMainWindow):
         self._apply_mode_fields()
         self._apply_theme()
         self._refresh_live_texts()
+        self._update_controls()
 
     def _refresh_live_texts(self):
         """Re-apply translated runtime strings (charts, review, overlay, verdict)."""
@@ -428,7 +502,8 @@ class MainWindow(QMainWindow):
         self.device_edit.setPlaceholderText(self._tr("device_placeholder"))
         self.lbl_button.setText(self._tr("button"))
         self.hz_label.setText(self._tr("fixture_hz"))
-        self.duration_label.setText(self._tr("duration_sec"))
+        self.auto_stop_label.setText(self._tr("auto_stop"))
+        self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
         self.segment_label.setText(self._tr("segment_sec"))
         self.lbl_rules.setText(self._tr("rules"))
         rule_items = [self._tr("loose"), self._tr("medium"), self._tr("strict")]
@@ -443,7 +518,7 @@ class MainWindow(QMainWindow):
         self.rules_combo.blockSignals(False)
         self.btn_stop.setText(self._tr("stop"))
         self.btn_new.setText(self._tr("new_run"))
-        self.btn_finish.setText(self._tr("finish_button"))
+        self.btn_finish.setText(qt_button_label(self._tr("finish_button")))
         self.btn_save.setText(self._tr("save_report_as"))
         self.btn_overlay.setText(self._tr("compare_overlay"))
         self.btn_clear_overlay.setText(self._tr("clear_overlay"))
@@ -456,6 +531,7 @@ class MainWindow(QMainWindow):
         for key, lab in self._stat_name_labels.items():
             lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
         self.hint.setText(self._tr("test_area_hint"))
+        self._sync_auto_stop_widgets()
 
     # ── Settings / mode ─────────────────────────────────────────────
     def _is_manual(self) -> bool:
@@ -469,8 +545,10 @@ class MainWindow(QMainWindow):
         manual = self._is_manual()
         self.hz_label.setVisible(not manual)
         self.hz_combo.setVisible(not manual)
-        self.duration_label.setVisible(not manual)
-        self.duration_combo.setVisible(not manual)
+        self.auto_stop_label.setVisible(not manual)
+        self.auto_stop_off.setVisible(not manual)
+        self.auto_stop_on.setVisible(not manual)
+        self._sync_auto_stop_widgets()
         self.segment_label.setVisible(manual)
         self.segment_combo.setVisible(manual)
         if manual:
@@ -483,13 +561,31 @@ class MainWindow(QMainWindow):
             if not self.running and not self.completed:
                 self.status_label.setText(self._tr("fixture_warn"))
 
+    def _sync_auto_stop_widgets(self):
+        fixture = not self._is_manual()
+        on = self.auto_stop_on.isChecked()
+        self.auto_stop_label.setVisible(fixture)
+        self.auto_stop_off.setVisible(fixture)
+        self.auto_stop_on.setVisible(fixture)
+        self.auto_stop_sec_label.setVisible(fixture and on)
+        self.auto_stop_sec_combo.setVisible(fixture and on)
+        self.auto_stop_off.setObjectName("Primary" if not on else "Secondary")
+        self.auto_stop_on.setObjectName("Primary" if on else "Secondary")
+        for btn in (self.auto_stop_off, self.auto_stop_on):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+
+    def _auto_stop_seconds(self) -> float | None:
+        enabled = (not self._is_manual()) and self.auto_stop_on.isChecked()
+        return parse_auto_stop_seconds(enabled, self.auto_stop_sec_combo.currentText())
+
     def settings(self) -> dict[str, Any]:
         manual = self._is_manual()
         device = self.device_edit.text().strip()
         if device:
             self.target = device
         hz = 0.0 if manual else float(self.hz_combo.currentText())
-        dur = int(float(self.duration_combo.currentText() or 60))
         rule_key = self._rule_preset_key()
         rule = dict(RULE_PRESETS.get(rule_key) or RULE_PRESETS["Strict"])
         base = {
@@ -498,17 +594,23 @@ class MainWindow(QMainWindow):
             "focus_button": self.button_combo.currentText(),
             "button": self.button_combo.currentText(),
             "fixture_hz": hz,
-            "duration_sec": dur,
-            "expected_clicks": 0 if manual else int(round(dur * hz)),
             "manual_segment_sec": float(self.segment_combo.currentText() or MANUAL_SEGMENT_SEC_DEFAULT),
             "capture_mode": "Windows Raw Input / 裝置RawInput",
             "language": self._report_lang(),
             "judgement_mode": rule_key,
             **rule,
         }
+        try:
+            auto_sec = self._auto_stop_seconds()
+        except ValueError:
+            auto_sec = None
+        if auto_sec is not None:
+            # Legacy reports still read duration_sec; do not derive expected_clicks here.
+            base["duration_sec"] = auto_sec
         if not manual:
             base["test_profile"] = f"Fixture {rule_key}"
-        return normalize_auto_settings({"settings": base})
+        normalized = normalize_auto_settings({"settings": base})
+        return contain_qt_runtime_click_expectation(normalized, auto_sec)
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
@@ -783,7 +885,7 @@ class MainWindow(QMainWindow):
         self.device_press_queues.clear()
         self.first_press_time = self.last_press_time = None
         self.first_release_time = self.last_release_time = None
-        self.start_time = self.end_time = None
+        self.start_time = self.end_time = self.stop_time = None
         self.locked = None
         self.run_id = _now_run_id()
         self.alert_label.setText("")
@@ -794,6 +896,10 @@ class MainWindow(QMainWindow):
     def stop_run(self):
         if not self.running:
             return
+        now = time.perf_counter()
+        self.stop_time = now
+        if self.start_time is not None:
+            self.val_time.setText(f"{max(0.0, now - float(self.start_time)):.1f}s")
         self.running = False
         self.listening = False
         self.completed = True
@@ -868,11 +974,13 @@ class MainWindow(QMainWindow):
         self.btn_new.setEnabled(not self.running)
         self.btn_finish.setEnabled(self.completed and not self.running)
         self.btn_save.setEnabled(self.report_written)
+        editable = setup_controls_editable(running=self.running, completed=self.completed)
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
-            self.duration_combo, self.segment_combo, self.device_edit, self.rules_combo,
+            self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
+            self.segment_combo, self.device_edit, self.rules_combo,
         ):
-            w.setEnabled(not self.running)
+            w.setEnabled(editable)
 
     def _cursor_in_test_area(self) -> bool:
         try:
@@ -936,6 +1044,12 @@ class MainWindow(QMainWindow):
         if not self._cursor_in_test_area():
             self._arming_scheduled = False
             return
+        try:
+            auto_sec = self._auto_stop_seconds()
+        except ValueError:
+            self.alert_label.setText(self._tr("auto_stop_invalid"))
+            self._arming_scheduled = False
+            return
         s = self.settings()
         target = str(s.get("focus_button") or "Left")
         if button != target:
@@ -950,8 +1064,8 @@ class MainWindow(QMainWindow):
         self.locked = dict(s)
         self._locked_button = target
         self.start_time = press
-        manual = _is_manual_profile(s)
-        self.end_time = None if manual else press + float(s.get("duration_sec") or 60)
+        self.stop_time = None
+        self.end_time = None if auto_sec is None else press + float(auto_sec)
         self.running = True
         self.listening = False
         self.completed = False
@@ -961,7 +1075,10 @@ class MainWindow(QMainWindow):
         self.test_area.setProperty("active", True)
         self.test_area.style().unpolish(self.test_area)
         self.test_area.style().polish(self.test_area)
-        self.status_label.setText(self._tr("recording_manual") if manual else self._tr("recording_fixture"))
+        if auto_sec is None:
+            self.status_label.setText(self._tr("recording_manual") if self._is_manual() else self._tr("recording_fixture"))
+        else:
+            self.status_label.setText(self._tr("recording_fixture_autostop", sec=f"{auto_sec:g}"))
         self.alert_label.setText("")
         self._update_controls()
         self.record_click(button, press, release, event)
@@ -998,14 +1115,10 @@ class MainWindow(QMainWindow):
     def _tick(self):
         if self.running:
             now = time.perf_counter()
-            if self.end_time is None:
-                self.val_time.setText(f"{max(0.0, now - float(self.start_time or now)):.1f}s")
-            else:
-                remain = max(0.0, float(self.end_time) - now)
-                self.val_time.setText(f"{remain:.1f}s")
-                if remain <= 0:
-                    self.stop_run()
-                    return
+            self.val_time.setText(f"{max(0.0, now - float(self.start_time or now)):.1f}s")
+            if self.end_time is not None and now >= float(self.end_time):
+                self.stop_run()
+                return
             if now - self._last_metric_ts >= 0.45:
                 self._last_metric_ts = now
                 self._refresh_metrics(final=False)
@@ -1018,7 +1131,7 @@ class MainWindow(QMainWindow):
         tags = _metrics_issue_tags(m, settings, annotated) if (self.running or self.completed) else []
         verdict = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
         accepted = [e for e in annotated if e.get("accepted")]
-        self.val_clicks.setText(str(len(accepted)) if _is_manual_profile(settings) else f"{len(accepted)} / {settings.get('expected_clicks')}")
+        self.val_clicks.setText(str(len(accepted)))
         if accepted:
             last = accepted[-1]
             if last.get("press_interval_ms") is not None:
