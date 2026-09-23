@@ -36,11 +36,9 @@ from PySide6.QtWidgets import (
 from ..adapters.raw_input_subprocess import WindowsRawInputSubprocess
 from ..app import (
     ARMING_SEC,
-    MANUAL_SEGMENT_SEC_DEFAULT,
     RULE_PRESETS,
     annotate_events,
     build_payload,
-    compute_manual_segments,
     normalize_auto_settings,
     write_reports,
     _is_manual_profile,
@@ -150,6 +148,40 @@ def qt_button_label(text: Any) -> str:
 def setup_controls_editable(*, running: bool, completed: bool) -> bool:
     """Setup is editable only before a run starts (LISTEN / fresh)."""
     return (not running) and (not completed)
+
+
+_QT_ALERT_TAGS = (
+    "FIXTURE_HZ_MISMATCH",
+    "HIGH_PROBABILITY_DOUBLE_CLICK",
+    "CHATTER_HARD",
+)
+
+
+def qt_present_issue_tags(tags: Any) -> list[str]:
+    """Primary Qt live/review tag list. Hides OPERATOR_FATIGUE presentation only."""
+    out: list[str] = []
+    for tag in tags or []:
+        name = str(tag or "").strip()
+        if not name or name == "OPERATOR_FATIGUE":
+            continue
+        out.append(name)
+    return out
+
+
+def qt_visible_verdict(
+    tags: Any,
+    metrics: dict[str, Any] | None,
+    settings: dict[str, Any] | None = None,
+) -> str:
+    """Primary Qt live/review verdict from presentation tags only.
+
+    Does not mutate the legacy tag list. OPERATOR_FATIGUE cannot drive the
+    visible VERDICT after Segment/Fatigue retirement from the Qt path.
+    """
+    m = metrics or {}
+    if int(m.get("click_count") or m.get("actual_clicks") or 0) <= 0:
+        return "IDLE"
+    return _result_from_tags(qt_present_issue_tags(tags), m, settings)
 
 
 class CaptureBridge(QObject):
@@ -328,14 +360,6 @@ class MainWindow(QMainWindow):
         self.auto_stop_sec_combo.setCurrentText("60")
         side_l.addWidget(self.auto_stop_sec_combo)
 
-        self.segment_label = QLabel("Segment sec")
-        self._field_labels.append(self.segment_label)
-        side_l.addWidget(self.segment_label)
-        self.segment_combo = QComboBox()
-        self.segment_combo.addItems(["5", "10", "15"])
-        self.segment_combo.setCurrentText(str(int(MANUAL_SEGMENT_SEC_DEFAULT)))
-        side_l.addWidget(self.segment_combo)
-
         self.lbl_rules = QLabel("Rules")
         self._field_labels.append(self.lbl_rules)
         side_l.addWidget(self.lbl_rules)
@@ -406,7 +430,7 @@ class MainWindow(QMainWindow):
         live = self._card()
         live_l = QVBoxLayout(live)
         live_l.setContentsMargins(16, 14, 16, 14)
-        self.mode_label = QLabel("Manual · stability")
+        self.mode_label = QLabel("Manual · Observation")
         self.mode_label.setObjectName("Subtitle")
         live_l.addWidget(self.mode_label)
         self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
@@ -419,9 +443,7 @@ class MainWindow(QMainWindow):
         self.val_clicks = self._add_stat(stats, 2, "CLICKS", "clicks")
         self.val_interval = self._add_stat(stats, 3, "INTERVAL", "interval")
         self.val_hold = self._add_stat(stats, 4, "HOLD", "hold")
-        self.val_seg = self._add_stat(stats, 5, "SEG AVG", "seg_avg")
-        self.val_cv = self._add_stat(stats, 6, "SEG CV", "seg_cv")
-        self.val_verdict = self._add_stat(stats, 7, "VERDICT", "verdict")
+        self.val_verdict = self._add_stat(stats, 5, "VERDICT", "verdict")
         live_l.addLayout(stats)
 
         issues = QGridLayout()
@@ -529,7 +551,7 @@ class MainWindow(QMainWindow):
             payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
             m = payload.get("metrics") or {}
             tags = _metrics_issue_tags(m, settings, annotated)
-            verdict = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+            verdict = qt_visible_verdict(tags, m, settings)
             if verdict == "PASS" and _is_manual_profile(settings):
                 self.status_label.setText(self._tr("pass_manual"))
             elif verdict == "WARN":
@@ -552,7 +574,6 @@ class MainWindow(QMainWindow):
         self.hz_label.setText(self._tr("reference_rate_hz"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
-        self.segment_label.setText(self._tr("segment_sec"))
         self.lbl_rules.setText(self._tr("rules"))
         rule_items = [self._tr("loose"), self._tr("medium"), self._tr("strict")]
         current_rule = self.rules_combo.currentText()
@@ -581,7 +602,7 @@ class MainWindow(QMainWindow):
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
         if self._is_manual():
-            self.mode_label.setText(self._tr("mode_manual", seg=self.segment_combo.currentText()))
+            self.mode_label.setText(self._tr("mode_manual"))
         else:
             self._refresh_fixture_mode_label()
 
@@ -601,10 +622,8 @@ class MainWindow(QMainWindow):
         self.auto_stop_off.setVisible(not manual)
         self.auto_stop_on.setVisible(not manual)
         self._sync_auto_stop_widgets()
-        self.segment_label.setVisible(manual)
-        self.segment_combo.setVisible(manual)
         if manual:
-            self.mode_label.setText(self._tr("mode_manual", seg=self.segment_combo.currentText()))
+            self.mode_label.setText(self._tr("mode_manual"))
             if not self.running and not self.completed:
                 self.status_label.setText(self._tr("listen_hint"))
         else:
@@ -659,7 +678,6 @@ class MainWindow(QMainWindow):
             "button": self.button_combo.currentText(),
             "fixture_hz": hz,
             "fixture_reference_hz": hz,
-            "manual_segment_sec": float(self.segment_combo.currentText() or MANUAL_SEGMENT_SEC_DEFAULT),
             "capture_mode": "Windows Raw Input / 裝置RawInput",
             "language": self._report_lang(),
             "judgement_mode": rule_key,
@@ -898,8 +916,6 @@ class MainWindow(QMainWindow):
         self.val_clicks.setText("0")
         self.val_interval.setText("--")
         self.val_hold.setText("--")
-        self.val_seg.setText("--")
-        self.val_cv.setText("--")
         self.val_verdict.setText("--")
         self.val_extra.setText("0")
         self.val_rebound.setText("0")
@@ -1059,7 +1075,7 @@ class MainWindow(QMainWindow):
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
             self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
-            self.segment_combo, self.device_edit, self.rules_combo,
+            self.device_edit, self.rules_combo,
         ):
             w.setEnabled(editable)
 
@@ -1217,7 +1233,7 @@ class MainWindow(QMainWindow):
         payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
         m = payload.get("metrics") or {}
         tags = _metrics_issue_tags(m, settings, annotated) if (self.running or self.completed) else []
-        verdict = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+        verdict = qt_visible_verdict(tags, m, settings)
         accepted = [e for e in annotated if e.get("accepted")]
         self.val_clicks.setText(str(len(accepted)))
         if accepted:
@@ -1233,21 +1249,9 @@ class MainWindow(QMainWindow):
         if _is_manual_profile(settings):
             self.val_dut.setText(self._tr("na"))
             self.val_setup.setText(self._tr("na"))
-            segs = (m.get("manual_segments") or {}).get("segments") or []
-            if not segs:
-                segs = compute_manual_segments(annotated, segment_sec=float(settings.get("manual_segment_sec") or 10)).get("segments") or []
-            if segs:
-                last_seg = segs[-1]
-                self.val_seg.setText(f"{last_seg.get('avg_interval_ms')} ms")
-                self.val_cv.setText(f"{float(last_seg.get('cv_pct') or 0):.2f}")
-            elif m.get("interval_avg_ms") is not None:
-                self.val_seg.setText(f"{m.get('interval_avg_ms')} ms")
-                self.val_cv.setText(f"{float(m.get('interval_cv_pct') or 0):.2f}" if m.get("interval_cv_pct") is not None else "--")
         else:
             self.val_dut.setText(str(m.get("dut_score", "--")))
             self.val_setup.setText(str(m.get("setup_score", "--")))
-            self.val_seg.setText(f"{m.get('interval_avg_ms')} ms" if m.get("interval_avg_ms") is not None else "--")
-            self.val_cv.setText(f"{float(m.get('interval_cv_pct')):.2f}" if m.get("interval_cv_pct") is not None else "--")
         self.val_verdict.setText(str(verdict))
         if final or self.completed:
             if _is_manual_profile(settings) and verdict == "PASS":
@@ -1256,16 +1260,17 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(self._tr("warn_manual") if _is_manual_profile(settings) else self._tr("warn_fixture"))
             elif verdict == "FAIL":
                 self.status_label.setText(self._tr("fail_verdict"))
-            alert = []
-            for tag in ("OPERATOR_FATIGUE", "FIXTURE_HZ_MISMATCH", "HIGH_PROBABILITY_DOUBLE_CLICK", "CHATTER_HARD"):
-                if tag in tags:
-                    alert.append(tag)
+            alert = [tag for tag in _QT_ALERT_TAGS if tag in tags]
             self.alert_label.setText(" · ".join(alert))
+            visible_tags = qt_present_issue_tags(tags)
             lines = [
                 self._tr("review_mode", mode=self.mode_label.text(), button=settings.get("focus_button")),
                 self._tr("review_clicks", clicks=m.get("click_count"), verdict=verdict),
                 self._tr("review_interval", avg=m.get("interval_avg_ms"), cv=m.get("interval_cv_pct")),
-                self._tr("review_tags", tags=", ".join(tags) if tags else self._tr("review_tags_none")),
+                self._tr(
+                    "review_tags",
+                    tags=", ".join(visible_tags) if visible_tags else self._tr("review_tags_none"),
+                ),
             ]
             self.review_text.setPlainText("\n".join(lines))
 
