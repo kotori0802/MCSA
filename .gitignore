@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+
+# Local test output (never commit real device sessions)
+reports/*
+!reports/.gitkeep
+*.log
+
+# Build / install artifacts
+src/**/*.egg-info/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Optional local settings
+.env
+settings.local.json

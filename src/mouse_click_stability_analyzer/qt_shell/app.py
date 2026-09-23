@@ -1,0 +1,1124 @@
+"""PySide6 MainWindow — Apple-inspired shell over existing MCSA core."""
+from __future__ import annotations
+
+import json
+import time
+from collections import defaultdict, deque
+from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import Qt, QTimer, Signal, QObject
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QButtonGroup,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QSizePolicy,
+)
+
+from ..adapters.raw_input_subprocess import WindowsRawInputSubprocess
+from ..app import (
+    ARMING_SEC,
+    MANUAL_SEGMENT_SEC_DEFAULT,
+    RULE_PRESETS,
+    annotate_events,
+    build_payload,
+    compute_manual_segments,
+    normalize_auto_settings,
+    write_reports,
+    _is_manual_profile,
+    _metrics_issue_tags,
+    _now_run_id,
+    _result_from_tags,
+    _verify_artifacts,
+)
+from ..cadence import cadence_ms, delta_cards, ranking_metrics
+from ..core import now_iso
+from ..i18n import LANG_LABELS, SUPPORTED_LANGS, t
+from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
+from ..schema import TOOL_NAME
+from .charts import IntervalChart, ScatterChart
+from .styles import get_palette, get_style
+
+
+class CaptureBridge(QObject):
+    """Marshals Raw Input callbacks onto the Qt UI thread."""
+
+    event_received = Signal(dict)
+
+
+class MainWindow(QMainWindow):
+    def __init__(
+        self,
+        *,
+        report_root: Path,
+        target: str = "",
+        operator: str = "",
+        run_id: str = "",
+        lang: str = "en",
+        theme: str = "light",
+    ):
+        super().__init__()
+        self.lang = lang if lang in SUPPORTED_LANGS else "en"
+        self.theme = theme if theme in ("light", "dark") else "light"
+        self.setWindowTitle(t(self.lang, "app_title"))
+        self.resize(1280, 840)
+        self.report_root = Path(report_root)
+        self.report_root.mkdir(parents=True, exist_ok=True)
+        self.target = target or ""
+        self.operator = operator or ""
+        self.run_id = run_id or _now_run_id()
+
+        self.events: list[dict[str, Any]] = []
+        self.raw_events: list[dict[str, Any]] = []
+        self.device_press_queues: dict[tuple[str, str], deque] = defaultdict(deque)
+        self.listening = False
+        self.running = False
+        self.completed = False
+        self.report_written = False
+        self.report_paths: dict[str, str] = {}
+        self.raw_input: WindowsRawInputSubprocess | None = None
+        self.start_time: float | None = None
+        self.end_time: float | None = None
+        self.first_press_time = None
+        self.last_press_time = None
+        self.first_release_time = None
+        self.last_release_time = None
+        self.locked: dict[str, Any] | None = None
+        self._arming_scheduled = False
+        self._ignore_arm_until = 0.0
+        self._locked_button = "Left"
+        self._last_metric_ts = 0.0
+        self.bridge = CaptureBridge()
+        self.bridge.event_received.connect(self._on_raw_event_ui)
+
+        self.overlay_events: list[dict[str, Any]] = []
+        self.overlay_metrics: dict[str, Any] = {}
+        self.overlay_path = ""
+        self.session_runs: list[dict[str, Any]] = []
+        self._stat_name_labels: dict[str, QLabel] = {}
+        self._section_labels: list[QLabel] = []
+        self._field_labels: list[QLabel] = []
+
+        self._build_ui()
+        self._apply_theme()
+        self._retranslate_ui()
+        self._apply_mode_fields()
+        self._update_controls()
+        QShortcut(QKeySequence("F5"), self, activated=self.stop_run)
+        QShortcut(QKeySequence("Esc"), self, activated=self.stop_run)
+
+        self.ui_timer = QTimer(self)
+        self.ui_timer.setInterval(100)
+        self.ui_timer.timeout.connect(self._tick)
+        self.ui_timer.start()
+        QTimer.singleShot(150, self.enter_listen)
+
+    def _tr(self, key: str, **kwargs) -> str:
+        return t(self.lang, key, **kwargs)
+
+    def _chart_labels(self) -> dict[str, str]:
+        keys = (
+            "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s",
+            "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
+            "legend_overlay", "legend_target", "chart_interval",
+        )
+        return {k: self._tr(k) for k in keys}
+
+    def _report_lang(self) -> str:
+        return "zh" if self.lang == "zh" else "en"
+
+    # ── UI ──────────────────────────────────────────────────────────
+    def _card(self) -> QFrame:
+        f = QFrame()
+        f.setObjectName("Card")
+        return f
+
+    def _build_ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QHBoxLayout(root)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(14)
+
+        side = QFrame()
+        side.setObjectName("SideCard")
+        side.setFixedWidth(280)
+        side_l = QVBoxLayout(side)
+        side_l.setContentsMargins(16, 16, 16, 16)
+        side_l.setSpacing(10)
+
+        self.lbl_setup = self._section("SETUP")
+        side_l.addWidget(self.lbl_setup)
+        mode_row = QHBoxLayout()
+        self.radio_manual = QRadioButton("Manual")
+        self.radio_fixture = QRadioButton("Fixture")
+        self.radio_manual.setChecked(True)
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.addButton(self.radio_manual)
+        self.mode_group.addButton(self.radio_fixture)
+        mode_row.addWidget(self.radio_manual)
+        mode_row.addWidget(self.radio_fixture)
+        side_l.addLayout(mode_row)
+        self.radio_manual.toggled.connect(self._apply_mode_fields)
+
+        self.lbl_device = QLabel("Device")
+        self._field_labels.append(self.lbl_device)
+        side_l.addWidget(self.lbl_device)
+        self.device_edit = QLineEdit(self.target)
+        self.device_edit.setPlaceholderText("Device name (optional)")
+        side_l.addWidget(self.device_edit)
+
+        self.lbl_button = QLabel("Button")
+        self._field_labels.append(self.lbl_button)
+        side_l.addWidget(self.lbl_button)
+        self.button_combo = QComboBox()
+        self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
+        side_l.addWidget(self.button_combo)
+
+        self.hz_label = QLabel("Fixture Hz")
+        self._field_labels.append(self.hz_label)
+        side_l.addWidget(self.hz_label)
+        self.hz_combo = QComboBox()
+        self.hz_combo.addItems(["5", "10", "20", "40"])
+        self.hz_combo.setCurrentText("10")
+        side_l.addWidget(self.hz_combo)
+
+        self.duration_label = QLabel("Duration sec")
+        self._field_labels.append(self.duration_label)
+        side_l.addWidget(self.duration_label)
+        self.duration_combo = QComboBox()
+        self.duration_combo.setEditable(True)
+        self.duration_combo.addItems(["30", "60", "120", "300"])
+        self.duration_combo.setCurrentText("60")
+        side_l.addWidget(self.duration_combo)
+
+        self.segment_label = QLabel("Segment sec")
+        self._field_labels.append(self.segment_label)
+        side_l.addWidget(self.segment_label)
+        self.segment_combo = QComboBox()
+        self.segment_combo.addItems(["5", "10", "15"])
+        self.segment_combo.setCurrentText(str(int(MANUAL_SEGMENT_SEC_DEFAULT)))
+        side_l.addWidget(self.segment_combo)
+
+        self.lbl_rules = QLabel("Rules")
+        self._field_labels.append(self.lbl_rules)
+        side_l.addWidget(self.lbl_rules)
+        self.rules_combo = QComboBox()
+        self.rules_combo.addItems(["Loose", "Medium", "Strict"])
+        self.rules_combo.setCurrentText("Strict")
+        side_l.addWidget(self.rules_combo)
+
+        side_l.addSpacing(8)
+        self.lbl_controls = self._section("CONTROLS")
+        side_l.addWidget(self.lbl_controls)
+        self.btn_stop = QPushButton("Stop (F5 / Esc)")
+        self.btn_stop.setObjectName("Danger")
+        self.btn_stop.clicked.connect(self.stop_run)
+        self.btn_new = QPushButton("New Run")
+        self.btn_new.clicked.connect(self.new_run)
+        self.btn_finish = QPushButton("Finish & Generate Report")
+        self.btn_finish.setObjectName("Primary")
+        self.btn_finish.clicked.connect(self.finish_report)
+        self.btn_save = QPushButton("Save Report As…")
+        self.btn_save.clicked.connect(self.save_report_as)
+        self.btn_overlay = QPushButton("Compare Overlay")
+        self.btn_overlay.setObjectName("Secondary")
+        self.btn_overlay.clicked.connect(self.load_overlay_run)
+        self.btn_clear_overlay = QPushButton("Clear Overlay")
+        self.btn_clear_overlay.setObjectName("Secondary")
+        self.btn_clear_overlay.clicked.connect(self.clear_overlay)
+        self.btn_help = QPushButton("Quick Start")
+        self.btn_help.clicked.connect(self.show_guide)
+        for b in (
+            self.btn_stop, self.btn_new, self.btn_finish, self.btn_save,
+            self.btn_overlay, self.btn_clear_overlay, self.btn_help,
+        ):
+            side_l.addWidget(b)
+        side_l.addStretch(1)
+        outer.addWidget(side)
+
+        right = QVBoxLayout()
+        right.setSpacing(12)
+        header = QHBoxLayout()
+        self.title_label = QLabel(TOOL_NAME)
+        self.title_label.setObjectName("Title")
+        header.addWidget(self.title_label)
+        header.addStretch(1)
+
+        self.lbl_theme = QLabel("Theme")
+        self._field_labels.append(self.lbl_theme)
+        header.addWidget(self.lbl_theme)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.setCurrentIndex(0 if self.theme == "light" else 1)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        header.addWidget(self.theme_combo)
+
+        self.lbl_lang = QLabel("Language")
+        self._field_labels.append(self.lbl_lang)
+        header.addWidget(self.lbl_lang)
+        self.lang_combo = QComboBox()
+        for code in SUPPORTED_LANGS:
+            self.lang_combo.addItem(LANG_LABELS.get(code, code), code)
+        idx = SUPPORTED_LANGS.index(self.lang) if self.lang in SUPPORTED_LANGS else 0
+        self.lang_combo.setCurrentIndex(idx)
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
+        header.addWidget(self.lang_combo)
+        right.addLayout(header)
+
+        live = self._card()
+        live_l = QVBoxLayout(live)
+        live_l.setContentsMargins(16, 14, 16, 14)
+        self.mode_label = QLabel("Manual · stability")
+        self.mode_label.setObjectName("Subtitle")
+        live_l.addWidget(self.mode_label)
+
+        stats = QGridLayout()
+        stats.setHorizontalSpacing(14)
+        stats.setVerticalSpacing(2)
+        self.val_phase = self._add_stat(stats, 0, "PHASE", "phase")
+        self.val_time = self._add_stat(stats, 1, "TIME", "time")
+        self.val_clicks = self._add_stat(stats, 2, "CLICKS", "clicks")
+        self.val_interval = self._add_stat(stats, 3, "INTERVAL", "interval")
+        self.val_hold = self._add_stat(stats, 4, "HOLD", "hold")
+        self.val_seg = self._add_stat(stats, 5, "SEG AVG", "seg_avg")
+        self.val_cv = self._add_stat(stats, 6, "SEG CV", "seg_cv")
+        self.val_verdict = self._add_stat(stats, 7, "VERDICT", "verdict")
+        live_l.addLayout(stats)
+
+        issues = QGridLayout()
+        self.val_extra = self._add_stat(issues, 0, "EXTRA", "extra")
+        self.val_rebound = self._add_stat(issues, 1, "REBOUND", "rebound")
+        self.val_delay = self._add_stat(issues, 2, "DELAY", "delay")
+        self.val_dut = self._add_stat(issues, 3, "DUT", "dut")
+        self.val_setup = self._add_stat(issues, 4, "SETUP", "setup_score")
+        live_l.addSpacing(6)
+        self.issue_title = QLabel("ISSUES")
+        self.issue_title.setObjectName("StatLabel")
+        live_l.addWidget(self.issue_title)
+        live_l.addLayout(issues)
+
+        self.status_label = QLabel("Click in the Test Area to start.")
+        self.status_label.setObjectName("Muted")
+        self.alert_label = QLabel("")
+        self.alert_label.setObjectName("Alert")
+        self.overlay_delta_label = QLabel("")
+        self.overlay_delta_label.setObjectName("OverlayDelta")
+        live_l.addWidget(self.status_label)
+        live_l.addWidget(self.alert_label)
+        live_l.addWidget(self.overlay_delta_label)
+        right.addWidget(live)
+
+        charts_card = self._card()
+        charts_l = QVBoxLayout(charts_card)
+        charts_l.setContentsMargins(12, 12, 12, 12)
+        self.test_area = QFrame()
+        self.test_area.setObjectName("TestArea")
+        self.test_area.setProperty("active", False)
+        ta_l = QVBoxLayout(self.test_area)
+        self.hint = QLabel("TEST AREA\nClick here with the target button to start\nStop with F5 or Esc")
+        self.hint.setObjectName("Hint")
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ta_l.addWidget(self.hint)
+        self.scatter = ScatterChart()
+        self.interval_chart = IntervalChart()
+        self.scatter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.interval_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        ta_l.addWidget(self.scatter, 3)
+        ta_l.addWidget(self.interval_chart, 2)
+        charts_l.addWidget(self.test_area)
+        self.review_text = QTextEdit()
+        self.review_text.setReadOnly(True)
+        self.review_text.setMaximumHeight(120)
+        self.review_text.hide()
+        charts_l.addWidget(self.review_text)
+        right.addWidget(charts_card, 1)
+        outer.addLayout(right, 1)
+
+    def _section(self, text: str) -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("StatLabel")
+        self._section_labels.append(lab)
+        return lab
+
+    def _add_stat(self, grid: QGridLayout, col: int, name: str, key: str) -> QLabel:
+        lab = QLabel(name)
+        lab.setObjectName("StatLabel")
+        self._stat_name_labels[key] = lab
+        val = QLabel("--")
+        val.setObjectName("StatValue")
+        box = QVBoxLayout()
+        box.setSpacing(0)
+        box.addWidget(lab)
+        box.addWidget(val)
+        w = QWidget()
+        w.setLayout(box)
+        grid.addWidget(w, 0, col)
+        return val
+
+    def _apply_theme(self):
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(get_style(self.theme))
+        pal = get_palette(self.theme)
+        labels = self._chart_labels()
+        self.scatter.set_theme(pal, labels)
+        self.interval_chart.set_theme(pal, labels)
+
+    def _on_theme_changed(self):
+        self.theme = self.theme_combo.currentData() or "light"
+        self._apply_theme()
+        self._retranslate_ui()
+
+    def _on_lang_changed(self):
+        self.lang = self.lang_combo.currentData() or "en"
+        self._retranslate_ui()
+        self._apply_mode_fields()
+        self._apply_theme()
+        self._refresh_live_texts()
+
+    def _refresh_live_texts(self):
+        """Re-apply translated runtime strings (charts, review, overlay, verdict)."""
+        if self.completed or self.events:
+            self._refresh_metrics(final=self.completed)
+        elif self.overlay_path:
+            self._update_overlay_deltas({})
+        if self.completed:
+            settings = self.locked or self.settings()
+            annotated = annotate_events(list(self.events), settings)
+            payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
+            m = payload.get("metrics") or {}
+            tags = _metrics_issue_tags(m, settings, annotated)
+            verdict = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+            if verdict == "PASS" and _is_manual_profile(settings):
+                self.status_label.setText(self._tr("pass_manual"))
+            elif verdict == "WARN":
+                self.status_label.setText(self._tr("warn_manual") if _is_manual_profile(settings) else self._tr("warn_fixture"))
+            elif verdict == "FAIL":
+                self.status_label.setText(self._tr("fail_verdict"))
+            elif not self.running:
+                self.status_label.setText(self._tr("review_hint"))
+
+    def _retranslate_ui(self):
+        self.setWindowTitle(self._tr("app_title"))
+        self.title_label.setText(self._tr("app_title"))
+        self.lbl_setup.setText(self._tr("setup"))
+        self.lbl_controls.setText(self._tr("controls"))
+        self.radio_manual.setText(self._tr("manual"))
+        self.radio_fixture.setText(self._tr("fixture"))
+        self.lbl_device.setText(self._tr("device"))
+        self.device_edit.setPlaceholderText(self._tr("device_placeholder"))
+        self.lbl_button.setText(self._tr("button"))
+        self.hz_label.setText(self._tr("fixture_hz"))
+        self.duration_label.setText(self._tr("duration_sec"))
+        self.segment_label.setText(self._tr("segment_sec"))
+        self.lbl_rules.setText(self._tr("rules"))
+        rule_items = [self._tr("loose"), self._tr("medium"), self._tr("strict")]
+        current_rule = self.rules_combo.currentText()
+        rule_map = {"Loose": 0, "Medium": 1, "Strict": 2}
+        self.rules_combo.blockSignals(True)
+        self.rules_combo.clear()
+        self.rules_combo.addItems(["Loose", "Medium", "Strict"])
+        for i, label in enumerate(rule_items):
+            self.rules_combo.setItemText(i, label)
+        self.rules_combo.setCurrentIndex(rule_map.get(current_rule, 2))
+        self.rules_combo.blockSignals(False)
+        self.btn_stop.setText(self._tr("stop"))
+        self.btn_new.setText(self._tr("new_run"))
+        self.btn_finish.setText(self._tr("finish_button"))
+        self.btn_save.setText(self._tr("save_report_as"))
+        self.btn_overlay.setText(self._tr("compare_overlay"))
+        self.btn_clear_overlay.setText(self._tr("clear_overlay"))
+        self.btn_help.setText(self._tr("quick_start"))
+        self.lbl_theme.setText(self._tr("theme"))
+        self.theme_combo.setItemText(0, self._tr("theme_light"))
+        self.theme_combo.setItemText(1, self._tr("theme_dark"))
+        self.lbl_lang.setText(self._tr("language"))
+        self.issue_title.setText(self._tr("issues"))
+        for key, lab in self._stat_name_labels.items():
+            lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
+        self.hint.setText(self._tr("test_area_hint"))
+
+    # ── Settings / mode ─────────────────────────────────────────────
+    def _is_manual(self) -> bool:
+        return self.radio_manual.isChecked()
+
+    def _rule_preset_key(self) -> str:
+        idx = self.rules_combo.currentIndex()
+        return ("Loose", "Medium", "Strict")[max(0, min(2, idx))]
+
+    def _apply_mode_fields(self):
+        manual = self._is_manual()
+        self.hz_label.setVisible(not manual)
+        self.hz_combo.setVisible(not manual)
+        self.duration_label.setVisible(not manual)
+        self.duration_combo.setVisible(not manual)
+        self.segment_label.setVisible(manual)
+        self.segment_combo.setVisible(manual)
+        if manual:
+            self.mode_label.setText(self._tr("mode_manual", seg=self.segment_combo.currentText()))
+            if not self.running and not self.completed:
+                self.status_label.setText(self._tr("listen_hint"))
+        else:
+            hz = self.hz_combo.currentText()
+            self.mode_label.setText(self._tr("mode_fixture", hz=hz))
+            if not self.running and not self.completed:
+                self.status_label.setText(self._tr("fixture_warn"))
+
+    def settings(self) -> dict[str, Any]:
+        manual = self._is_manual()
+        device = self.device_edit.text().strip()
+        if device:
+            self.target = device
+        hz = 0.0 if manual else float(self.hz_combo.currentText())
+        dur = int(float(self.duration_combo.currentText() or 60))
+        rule_key = self._rule_preset_key()
+        rule = dict(RULE_PRESETS.get(rule_key) or RULE_PRESETS["Strict"])
+        base = {
+            "manual_mode": manual,
+            "profile_name": "Manual_Left_Stable" if manual else f"Fixture_Left_{int(hz)}Hz_Strict" if hz >= 25 else "Fixture_Left_10Hz_Strict",
+            "focus_button": self.button_combo.currentText(),
+            "button": self.button_combo.currentText(),
+            "fixture_hz": hz,
+            "duration_sec": dur,
+            "expected_clicks": 0 if manual else int(round(dur * hz)),
+            "manual_segment_sec": float(self.segment_combo.currentText() or MANUAL_SEGMENT_SEC_DEFAULT),
+            "capture_mode": "Windows Raw Input / 裝置RawInput",
+            "language": self._report_lang(),
+            "judgement_mode": rule_key,
+            **rule,
+        }
+        if not manual:
+            base["test_profile"] = f"Fixture {rule_key}"
+        return normalize_auto_settings({"settings": base})
+
+    # ── Overlay ─────────────────────────────────────────────────────
+    def _run_result_and_clicks(
+        self,
+        payload: dict[str, Any],
+        *,
+        settings: dict[str, Any] | None = None,
+        events: list[dict[str, Any]] | None = None,
+    ) -> tuple[str, str]:
+        result = str(payload.get("result") or "").strip()
+        metrics = dict(payload.get("metrics") or {})
+        ev = events or payload.get("events") or payload.get("all_click_events") or []
+        s = settings or payload.get("settings") or {}
+        if ev and (not result or result == "?"):
+            annotated = annotate_events(list(ev), s)
+            if not metrics.get("click_count"):
+                metrics = (build_payload(
+                    str(payload.get("target") or self.target),
+                    str(payload.get("operator") or self.operator),
+                    s,
+                    annotated,
+                    run_id=str(payload.get("run_id") or ""),
+                ).get("metrics") or {})
+            tags = _metrics_issue_tags(metrics, s, annotated)
+            result = _result_from_tags(tags, metrics, s) if int(metrics.get("click_count") or 0) > 0 else "IDLE"
+        clicks = str(metrics.get("click_count") if metrics.get("click_count") is not None else len(ev) or "?")
+        return result or "?", clicks
+
+    def _overlay_list_label(self, run_id: str, result: str, clicks: str, target: str = "") -> str:
+        label = f"{run_id} · {target}" if target else run_id
+        return self._tr("overlay_list_line", label=label, result=result, n=clicks)
+
+    def _load_run_meta_from_disk(self, detail_path: Path) -> dict[str, Any] | None:
+        rid = detail_path.name.replace("mcsa_", "").replace("_detail.json", "")
+        summary_path = self.report_root / f"mcsa_{rid}_summary.json"
+        payload: dict[str, Any] = {}
+        try:
+            if summary_path.exists():
+                payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            elif detail_path.exists():
+                payload = json.loads(detail_path.read_text(encoding="utf-8"))
+            else:
+                return None
+        except Exception:
+            return None
+        result, clicks = self._run_result_and_clicks(payload)
+        target = str(payload.get("target_product") or payload.get("target") or "").strip()
+        return {
+            "run_id": rid,
+            "label": self._overlay_list_label(rid, result, clicks, target),
+            "detail_path": str(detail_path),
+            "summary_path": str(summary_path) if summary_path.exists() else "",
+            "mtime": detail_path.stat().st_mtime,
+        }
+
+    def _session_run_meta(self, run: dict[str, Any]) -> dict[str, Any]:
+        rid = str(run.get("run_id") or "")
+        events = list(run.get("events") or [])
+        settings = run.get("settings") or self.settings()
+        payload = {
+            "run_id": rid,
+            "target": self.target,
+            "settings": settings,
+            "events": events,
+            "metrics": run.get("metrics") or {},
+        }
+        result, clicks = self._run_result_and_clicks(payload, settings=settings, events=events)
+        target = str(self.target or "").strip()
+        return {
+            "run_id": rid,
+            "label": self._overlay_list_label(rid, result, clicks, target),
+            "events": events,
+            "metrics": run.get("metrics") or {},
+            "mtime": time.time(),
+        }
+
+    def _list_overlay_candidates(self) -> list[dict[str, Any]]:
+        by_id: dict[str, dict[str, Any]] = {}
+        if self.report_root.exists():
+            for detail in self.report_root.glob("mcsa_*_detail.json"):
+                meta = self._load_run_meta_from_disk(detail)
+                if meta:
+                    by_id[meta["run_id"]] = meta
+        for run in reversed(self.session_runs):
+            rid = str(run.get("run_id") or "")
+            if not rid:
+                continue
+            session_meta = self._session_run_meta(run)
+            if rid in by_id:
+                if run.get("events") and not by_id[rid].get("events"):
+                    by_id[rid]["events"] = list(run["events"])
+                    by_id[rid]["metrics"] = run.get("metrics") or {}
+            else:
+                by_id[rid] = session_meta
+        items = sorted(by_id.values(), key=lambda x: float(x.get("mtime") or 0), reverse=True)
+        return items[:25]
+
+    def load_overlay_run(self):
+        candidates = self._list_overlay_candidates()
+        if not candidates:
+            QMessageBox.information(self, self._tr("compare_overlay"), self._tr("no_runs"))
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self._tr("compare_title"))
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(self._tr("compare_pick")))
+        note = QLabel(self._tr("compare_note"))
+        note.setObjectName("Muted")
+        lay.addWidget(note)
+        listbox = QListWidget()
+        for item in candidates:
+            listbox.addItem(item.get("label") or item.get("run_id"))
+        listbox.setCurrentRow(0)
+        lay.addWidget(listbox)
+
+        def _apply_path(path: str):
+            try:
+                payload = load_overlay_payload(path)
+            except OverlayLoadError as exc:
+                QMessageBox.critical(self, self._tr("load_overlay_failed"), str(exc))
+                return
+            except Exception as exc:
+                QMessageBox.critical(self, self._tr("load_overlay_failed"), str(exc))
+                return
+            events = extract_overlay_events(payload)
+            metrics = payload.get("metrics") or {}
+            self._set_overlay(events, metrics, path)
+            dlg.accept()
+
+        def _on_compare():
+            row = listbox.currentRow()
+            if row < 0:
+                return
+            item = candidates[row]
+            if item.get("events"):
+                self._set_overlay(list(item["events"]), item.get("metrics") or {}, f"session:{item.get('run_id')}")
+                dlg.accept()
+                return
+            path = item.get("detail_path") or item.get("summary_path") or ""
+            if not path:
+                QMessageBox.critical(self, self._tr("load_overlay_failed"), self._tr("no_events"))
+                return
+            _apply_path(str(path))
+
+        def _on_browse():
+            path, _ = QFileDialog.getOpenFileName(
+                dlg,
+                self._tr("browse"),
+                str(self.report_root),
+                "MCSA detail JSON (*_detail.json);;JSON (*.json);;All (*.*)",
+            )
+            if path:
+                _apply_path(path)
+
+        buttons = QDialogButtonBox()
+        btn_browse = buttons.addButton(self._tr("browse"), QDialogButtonBox.ButtonRole.ActionRole)
+        btn_compare = buttons.addButton(self._tr("compare_btn"), QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton(self._tr("cancel"), QDialogButtonBox.ButtonRole.RejectRole)
+        btn_browse.clicked.connect(_on_browse)
+        btn_compare.clicked.connect(_on_compare)
+        buttons.rejected.connect(dlg.reject)
+        lay.addWidget(buttons)
+        dlg.exec()
+
+    def _set_overlay(self, events: list[dict[str, Any]], metrics: dict[str, Any], path: str):
+        self.overlay_events = list(events)
+        self.overlay_metrics = ranking_metrics(metrics, metrics)
+        self.overlay_path = path
+        name = Path(path).name if not path.startswith("session:") else path.replace("session:", "")
+        self.overlay_delta_label.setText(self._tr("overlay_status", name=name))
+        self._refresh_metrics(final=self.completed)
+
+    def clear_overlay(self):
+        self.overlay_events = []
+        self.overlay_metrics = {}
+        self.overlay_path = ""
+        self.overlay_delta_label.setText("")
+        self._refresh_metrics(final=self.completed)
+
+    def _update_overlay_deltas(self, current_metrics: dict[str, Any]):
+        if not self.overlay_metrics:
+            self.overlay_delta_label.setText("")
+            return
+        current = ranking_metrics(current_metrics, current_metrics)
+        a_extra = int(self.overlay_metrics.get("true_extra_click_count") or 0)
+        b_extra = int(current.get("true_extra_click_count") or 0)
+        a_delay = int(self.overlay_metrics.get("miss_or_slow_count") or 0)
+        b_delay = int(current.get("miss_or_slow_count") or 0)
+        line = self._tr("delta_line", a_extra=a_extra, a_delay=a_delay, b_extra=b_extra, b_delay=b_delay)
+        cards = delta_cards(current, self.overlay_metrics)
+        winners = [c for c in cards if c.get("winner") in ("A", "B")]
+        if winners:
+            bits = [f"{c.get('label')}: {'A' if c.get('winner') == 'A' else 'B'}" for c in winners[:3]]
+            line += "  ·  " + " | ".join(bits)
+        base = self._tr("overlay_status", name=Path(self.overlay_path).name) if self.overlay_path and not self.overlay_path.startswith("session:") else self.overlay_path
+        if self.overlay_path.startswith("session:"):
+            base = self._tr("overlay_status", name=self.overlay_path.replace("session:", ""))
+        self.overlay_delta_label.setText(f"{base}\n{line}")
+
+    def _chart_points(self, annotated: list[dict[str, Any]]) -> tuple[list, list]:
+        pts: list[tuple[float, float, str]] = []
+        series: list[tuple[float, float]] = []
+        for e in annotated:
+            if not e.get("accepted"):
+                continue
+            iv = e.get("press_interval_ms")
+            hold = e.get("hold_ms")
+            elapsed = e.get("press_elapsed_ms")
+            if iv is not None and hold is not None:
+                pts.append((float(iv), float(hold), str(e.get("click_class") or "ON_CADENCE")))
+            if iv is not None and elapsed is not None:
+                series.append((float(elapsed), float(iv)))
+        return pts, series
+
+    # ── Capture lifecycle ───────────────────────────────────────────
+    def enter_listen(self):
+        self.listening = True
+        self.running = False
+        self.completed = False
+        self.report_written = False
+        self._arming_scheduled = False
+        self.val_phase.setText(self._tr("phase_listen"))
+        self.val_time.setText("--")
+        self.val_clicks.setText("0")
+        self.val_verdict.setText("--")
+        self.hint.show()
+        self.review_text.hide()
+        self.test_area.setProperty("active", False)
+        self.test_area.style().unpolish(self.test_area)
+        self.test_area.style().polish(self.test_area)
+        self._apply_mode_fields()
+        self._update_controls()
+        self._locked_button = self.button_combo.currentText()
+        try:
+            self.ensure_raw_input()
+        except Exception as exc:
+            self.alert_label.setText(f"Raw Input failed: {exc}")
+
+    def ensure_raw_input(self):
+        if self.raw_input is None:
+            self.raw_input = WindowsRawInputSubprocess(lambda e: self.bridge.event_received.emit(e))
+        self.raw_input.start()
+
+    def stop_adapters(self):
+        if self.raw_input is not None:
+            try:
+                self.raw_input.stop()
+            except Exception:
+                pass
+            self.raw_input = None
+
+    def new_run(self):
+        if self.running:
+            return
+        if self.events and self.completed:
+            settings = self.locked or self.settings()
+            annotated = annotate_events(list(self.events), settings)
+            payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
+            m = payload.get("metrics") or {}
+            tags = _metrics_issue_tags(m, settings, annotated)
+            result = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+            self.session_runs.append({
+                "run_id": self.run_id,
+                "label": self._overlay_list_label(self.run_id, result, str(m.get("click_count") or 0), self.target),
+                "events": list(self.events),
+                "metrics": m,
+                "settings": settings,
+            })
+        self.stop_adapters()
+        self.events.clear()
+        self.raw_events.clear()
+        self.device_press_queues.clear()
+        self.first_press_time = self.last_press_time = None
+        self.first_release_time = self.last_release_time = None
+        self.start_time = self.end_time = None
+        self.locked = None
+        self.run_id = _now_run_id()
+        self.alert_label.setText("")
+        self.scatter.set_points([])
+        self.interval_chart.set_series([])
+        self.enter_listen()
+
+    def stop_run(self):
+        if not self.running:
+            return
+        self.running = False
+        self.listening = False
+        self.completed = True
+        self.stop_adapters()
+        self.val_phase.setText(self._tr("phase_review"))
+        self.hint.hide()
+        self.review_text.show()
+        self._refresh_metrics(final=True)
+        if not self.status_label.text().startswith(("PASS", "WARN", "FAIL")):
+            self.status_label.setText(self._tr("review_hint"))
+        self._update_controls()
+
+    def finish_report(self):
+        if self.running:
+            self.stop_run()
+        if not self.events:
+            QMessageBox.information(self, self._tr("report"), self._tr("no_run"))
+            return
+        self.completed = True
+        settings = self.locked or self.settings()
+        try:
+            self.report_paths = write_reports(
+                self.report_root, self.target, self.operator, settings, self.events, self.run_id, raw_events=list(self.raw_events)
+            )
+            verification = _verify_artifacts(self.report_paths)
+            if not verification.get("ok"):
+                raise RuntimeError("Missing: " + ", ".join(verification.get("missing") or []))
+            self.report_written = True
+            annotated = annotate_events(list(self.events), settings)
+            payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
+            m = payload.get("metrics") or {}
+            tags = _metrics_issue_tags(m, settings, annotated)
+            result = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+            self.session_runs.append({
+                "run_id": self.run_id,
+                "label": self._overlay_list_label(self.run_id, result, str(m.get("click_count") or 0), self.target),
+                "events": list(self.events),
+                "metrics": m,
+                "settings": settings,
+            })
+            self.status_label.setText(self._tr("report_ready"))
+            self._update_controls()
+            QMessageBox.information(self, self._tr("report"), self._tr("saved_to", path=self.report_root))
+        except Exception as exc:
+            QMessageBox.critical(self, self._tr("report_failed"), str(exc))
+
+    def save_report_as(self):
+        if not self.report_written:
+            self.finish_report()
+            if not self.report_written:
+                return
+        dest = QFileDialog.getExistingDirectory(self, self._tr("save_report_as"))
+        if not dest:
+            return
+        import shutil
+        out = Path(dest) / f"mcsa_{self.run_id}"
+        out.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for path in (self.report_paths or {}).values():
+            if path and Path(path).exists():
+                shutil.copy2(path, out / Path(path).name)
+                n += 1
+        self.status_label.setText(self._tr("saved_files", n=n, path=out))
+
+    def show_guide(self):
+        self._ignore_arm_until = time.perf_counter() + 1.5
+        QMessageBox.information(self, self._tr("guide_title"), self._tr("guide_body"))
+        self._ignore_arm_until = time.perf_counter() + 0.8
+
+    def _update_controls(self):
+        self.btn_stop.setEnabled(self.running)
+        self.btn_new.setEnabled(not self.running)
+        self.btn_finish.setEnabled(self.completed and not self.running)
+        self.btn_save.setEnabled(self.report_written)
+        for w in (
+            self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
+            self.duration_combo, self.segment_combo, self.device_edit, self.rules_combo,
+        ):
+            w.setEnabled(not self.running)
+
+    def _cursor_in_test_area(self) -> bool:
+        try:
+            gp = self.test_area.mapFromGlobal(self.cursor().pos())
+            return self.test_area.rect().contains(gp)
+        except Exception:
+            return True
+
+    # ── Raw input ───────────────────────────────────────────────────
+    def _on_raw_event_ui(self, event: dict[str, Any]):
+        if not self.running and not (self.listening and not self.completed):
+            return
+        if event.get("capture_source") != "windows_raw_input":
+            return
+        button = event.get("button")
+        event_type = event.get("event_type")
+        device_source = event.get("device_source") or "unknown_device"
+        t_perf = float(event.get("time_perf") or time.perf_counter())
+        target = self._locked_button
+        if self.running:
+            self.raw_events.append({
+                "timestamp": now_iso(), "button": button, "event_type": event_type,
+                "accepted": False, "time_perf": t_perf, "device_source": device_source,
+            })
+        if button != target:
+            if self.running and event_type == "up":
+                self.alert_label.setText(f"Wrong button: {button}")
+            return
+        key = (device_source, str(button))
+        if event_type == "down":
+            self.device_press_queues[key].append(t_perf)
+        elif event_type == "up":
+            q = self.device_press_queues[key]
+            if not q:
+                return
+            press = q.popleft()
+            if self.running:
+                if self._is_manual() and not self._cursor_in_test_area():
+                    return
+                if (not self._is_manual()) and self._cursor_in_test_area() is False and self._is_over_side():
+                    return
+                self.record_click(button, press, t_perf, event)
+            elif self.listening and not self._arming_scheduled:
+                self._arming_scheduled = True
+                self._begin_session_from_first_click(button, press, t_perf, event)
+
+    def _is_over_side(self) -> bool:
+        try:
+            local = self.mapFromGlobal(self.cursor().pos())
+            return local.x() < 300
+        except Exception:
+            return False
+
+    def _begin_session_from_first_click(self, button, press, release, event):
+        if self.running or self.completed:
+            self._arming_scheduled = False
+            return
+        if time.perf_counter() < self._ignore_arm_until:
+            self._arming_scheduled = False
+            return
+        if not self._cursor_in_test_area():
+            self._arming_scheduled = False
+            return
+        s = self.settings()
+        target = str(s.get("focus_button") or "Left")
+        if button != target:
+            self.alert_label.setText(f"Wrong button: got {button}, expected {target}")
+            self._arming_scheduled = False
+            return
+        self.events.clear()
+        self.raw_events.clear()
+        self.device_press_queues.clear()
+        self.first_press_time = self.last_press_time = None
+        self.first_release_time = self.last_release_time = None
+        self.locked = dict(s)
+        self._locked_button = target
+        self.start_time = press
+        manual = _is_manual_profile(s)
+        self.end_time = None if manual else press + float(s.get("duration_sec") or 60)
+        self.running = True
+        self.listening = False
+        self.completed = False
+        self.report_written = False
+        self.val_phase.setText(self._tr("phase_running"))
+        self.hint.hide()
+        self.test_area.setProperty("active", True)
+        self.test_area.style().unpolish(self.test_area)
+        self.test_area.style().polish(self.test_area)
+        self.status_label.setText(self._tr("recording_manual") if manual else self._tr("recording_fixture"))
+        self.alert_label.setText("")
+        self._update_controls()
+        self.record_click(button, press, release, event)
+
+    def record_click(self, button, press_time, release_time, event):
+        hold_ms = (release_time - press_time) * 1000.0
+        if ARMING_SEC > 0 and self.start_time is not None and (press_time - float(self.start_time)) < ARMING_SEC:
+            return
+        if self.first_press_time is None:
+            self.first_press_time = press_time
+        if self.first_release_time is None:
+            self.first_release_time = release_time
+        press_elapsed = (press_time - self.first_press_time) * 1000.0
+        release_elapsed = (release_time - self.first_release_time) * 1000.0
+        press_interval = None if self.last_press_time is None else (press_time - self.last_press_time) * 1000.0
+        self.last_press_time = press_time
+        self.last_release_time = release_time
+        self.events.append({
+            "index": len(self.events) + 1,
+            "timestamp": now_iso(),
+            "button": button,
+            "event_type": "click",
+            "accepted": True,
+            "press_elapsed_ms": round(press_elapsed, 4),
+            "press_interval_ms": round(press_interval, 4) if press_interval is not None else None,
+            "release_elapsed_ms": round(release_elapsed, 4),
+            "elapsed_ms": round(release_elapsed, 4),
+            "hold_ms": round(hold_ms, 4),
+            "capture_source": event.get("capture_source", "windows_raw_input"),
+            "device_source": event.get("device_source", "unknown_device"),
+        })
+
+    # ── Tick / metrics / charts ─────────────────────────────────────
+    def _tick(self):
+        if self.running:
+            now = time.perf_counter()
+            if self.end_time is None:
+                self.val_time.setText(f"{max(0.0, now - float(self.start_time or now)):.1f}s")
+            else:
+                remain = max(0.0, float(self.end_time) - now)
+                self.val_time.setText(f"{remain:.1f}s")
+                if remain <= 0:
+                    self.stop_run()
+                    return
+            if now - self._last_metric_ts >= 0.45:
+                self._last_metric_ts = now
+                self._refresh_metrics(final=False)
+
+    def _refresh_metrics(self, final: bool = False):
+        settings = self.locked or self.settings()
+        annotated = annotate_events(list(self.events), settings)
+        payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
+        m = payload.get("metrics") or {}
+        tags = _metrics_issue_tags(m, settings, annotated) if (self.running or self.completed) else []
+        verdict = _result_from_tags(tags, m, settings) if int(m.get("click_count") or 0) > 0 else "IDLE"
+        accepted = [e for e in annotated if e.get("accepted")]
+        self.val_clicks.setText(str(len(accepted)) if _is_manual_profile(settings) else f"{len(accepted)} / {settings.get('expected_clicks')}")
+        if accepted:
+            last = accepted[-1]
+            if last.get("press_interval_ms") is not None:
+                self.val_interval.setText(f"{last['press_interval_ms']:.2f} ms")
+            if last.get("hold_ms") is not None:
+                self.val_hold.setText(f"{last['hold_ms']:.2f} ms")
+        extra = int(m.get("true_extra_click_count") or 0) + int(m.get("chatter_bounce_count") or 0)
+        self.val_extra.setText(str(extra))
+        self.val_rebound.setText(str(int(m.get("incomplete_rebound_count") or 0)))
+        self.val_delay.setText(str(int(m.get("miss_or_slow_count") or 0)))
+        if _is_manual_profile(settings):
+            self.val_dut.setText(self._tr("na"))
+            self.val_setup.setText(self._tr("na"))
+            segs = (m.get("manual_segments") or {}).get("segments") or []
+            if not segs:
+                segs = compute_manual_segments(annotated, segment_sec=float(settings.get("manual_segment_sec") or 10)).get("segments") or []
+            if segs:
+                last_seg = segs[-1]
+                self.val_seg.setText(f"{last_seg.get('avg_interval_ms')} ms")
+                self.val_cv.setText(f"{float(last_seg.get('cv_pct') or 0):.2f}")
+            elif m.get("interval_avg_ms") is not None:
+                self.val_seg.setText(f"{m.get('interval_avg_ms')} ms")
+                self.val_cv.setText(f"{float(m.get('interval_cv_pct') or 0):.2f}" if m.get("interval_cv_pct") is not None else "--")
+        else:
+            self.val_dut.setText(str(m.get("dut_score", "--")))
+            self.val_setup.setText(str(m.get("setup_score", "--")))
+            self.val_seg.setText(f"{m.get('interval_avg_ms')} ms" if m.get("interval_avg_ms") is not None else "--")
+            self.val_cv.setText(f"{float(m.get('interval_cv_pct')):.2f}" if m.get("interval_cv_pct") is not None else "--")
+        self.val_verdict.setText(str(verdict))
+        if final or self.completed:
+            if _is_manual_profile(settings) and verdict == "PASS":
+                self.status_label.setText(self._tr("pass_manual"))
+            elif verdict == "WARN":
+                self.status_label.setText(self._tr("warn_manual") if _is_manual_profile(settings) else self._tr("warn_fixture"))
+            elif verdict == "FAIL":
+                self.status_label.setText(self._tr("fail_verdict"))
+            alert = []
+            for tag in ("OPERATOR_FATIGUE", "FIXTURE_HZ_MISMATCH", "HIGH_PROBABILITY_DOUBLE_CLICK", "CHATTER_HARD"):
+                if tag in tags:
+                    alert.append(tag)
+            self.alert_label.setText(" · ".join(alert))
+            lines = [
+                self._tr("review_mode", mode=self.mode_label.text(), button=settings.get("focus_button")),
+                self._tr("review_clicks", clicks=m.get("click_count"), verdict=verdict),
+                self._tr("review_interval", avg=m.get("interval_avg_ms"), cv=m.get("interval_cv_pct")),
+                self._tr("review_tags", tags=", ".join(tags) if tags else self._tr("review_tags_none")),
+            ]
+            self.review_text.setPlainText("\n".join(lines))
+
+        self._update_overlay_deltas(m)
+
+        pts, series = self._chart_points(accepted)
+        beat = cadence_ms(settings)
+        overlay_ann = annotate_events(list(self.overlay_events), settings) if self.overlay_events else []
+        ov_pts, ov_series = self._chart_points(overlay_ann)
+
+        if _is_manual_profile(settings):
+            scatter_title = self._tr("chart_scatter_manual")
+        else:
+            scatter_title = self._tr("chart_scatter_fixture", beat=f"{beat:.1f}" if beat else "-")
+        self.scatter.set_points(
+            pts,
+            title=scatter_title,
+            overlay=ov_pts,
+            target_beat_ms=beat if not _is_manual_profile(settings) else None,
+        )
+        self.interval_chart.set_series(
+            series,
+            title=self._tr("chart_interval"),
+            overlay=ov_series,
+            target_beat_ms=beat if not _is_manual_profile(settings) else None,
+        )
+
+    def closeEvent(self, event):
+        self.stop_adapters()
+        super().closeEvent(event)
+
+
+def run_qt_ui(
+    *,
+    report_root: str | Path | None = None,
+    target: str = "",
+    operator: str = "",
+    run_id: str = "",
+    lang: str = "en",
+    theme: str = "light",
+    **_kwargs,
+) -> int:
+    import sys
+    root = Path(report_root) if report_root else Path(__file__).resolve().parents[3] / "reports"
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(get_style(theme))
+    win = MainWindow(
+        report_root=root,
+        target=target,
+        operator=operator,
+        run_id=run_id or "",
+        lang=lang,
+        theme=theme,
+    )
+    win.showMaximized()
+    return app.exec()

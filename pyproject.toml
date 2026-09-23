@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mouse-click-stability-analyzer"
+version = "1.0.0"
+description = "Independent QA prototype for analyzing mouse click timing, chatter, rebound, cadence, and event stability."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Leo Cheng, PMP" }]
+requires-python = ">=3.10"
+keywords = ["mouse", "qa", "testing", "raw-input", "hardware-testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+excel = ["openpyxl>=3.1"]
+qt = ["PySide6>=6.6"]
+gui = ["PySide6>=6.6", "openpyxl>=3.1"]
+
+[project.scripts]
+mcsa = "mouse_click_stability_analyzer.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kotori0802/mouse-click-stability-analyzer"
+Repository = "https://github.com/kotori0802/mouse-click-stability-analyzer"
+
+[tool.setuptools.packages.find]
+where = ["src"]
