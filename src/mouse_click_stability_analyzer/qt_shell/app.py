@@ -78,6 +78,50 @@ def parse_auto_stop_seconds(enabled: bool, raw: Any) -> float | None:
     return sec
 
 
+def parse_reference_rate_hz(raw: Any) -> float:
+    """Parse a tester-configured Reference Rate in Hz.
+
+    Accepts finite numbers greater than zero. Does not snap to presets
+    and does not substitute a default for invalid input.
+    """
+    if raw is None or isinstance(raw, bool):
+        raise ValueError("Reference Rate must be a finite positive number")
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise ValueError("Reference Rate must be a finite positive number")
+        try:
+            hz = float(text)
+        except ValueError as exc:
+            raise ValueError("Reference Rate must be a finite positive number") from exc
+    else:
+        try:
+            hz = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Reference Rate must be a finite positive number") from exc
+    if not math.isfinite(hz) or hz <= 0.0:
+        raise ValueError("Reference Rate must be a finite positive number")
+    return hz
+
+
+def stamp_qt_reference_rate(
+    settings: dict[str, Any],
+    *,
+    manual: bool,
+    reference_rate_hz: float,
+) -> dict[str, Any]:
+    """Map Qt Reference Rate onto temporary legacy fixture_hz fields."""
+    out = dict(settings)
+    if manual:
+        out["fixture_hz"] = 0.0
+        out["fixture_reference_hz"] = 0.0
+    else:
+        out["fixture_hz"] = reference_rate_hz
+        out["fixture_reference_hz"] = reference_rate_hz
+        out["profile_name"] = "Fixture_Custom"
+    return out
+
+
 def contain_qt_runtime_click_expectation(
     settings: dict[str, Any],
     auto_stop_sec: float | None,
@@ -244,10 +288,13 @@ class MainWindow(QMainWindow):
         self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
         side_l.addWidget(self.button_combo)
 
-        self.hz_label = QLabel("Fixture Hz")
+        self.hz_label = QLabel("Reference Rate (Hz)")
         self._field_labels.append(self.hz_label)
         side_l.addWidget(self.hz_label)
         self.hz_combo = QComboBox()
+        self.hz_combo.setEditable(True)
+        self.hz_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.hz_combo.setCompleter(None)
         self.hz_combo.addItems(["5", "10", "20", "40"])
         self.hz_combo.setCurrentText("10")
         side_l.addWidget(self.hz_combo)
@@ -362,6 +409,7 @@ class MainWindow(QMainWindow):
         self.mode_label = QLabel("Manual · stability")
         self.mode_label.setObjectName("Subtitle")
         live_l.addWidget(self.mode_label)
+        self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         stats = QGridLayout()
         stats.setHorizontalSpacing(14)
@@ -501,7 +549,7 @@ class MainWindow(QMainWindow):
         self.lbl_device.setText(self._tr("device"))
         self.device_edit.setPlaceholderText(self._tr("device_placeholder"))
         self.lbl_button.setText(self._tr("button"))
-        self.hz_label.setText(self._tr("fixture_hz"))
+        self.hz_label.setText(self._tr("reference_rate_hz"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
         self.segment_label.setText(self._tr("segment_sec"))
@@ -532,6 +580,10 @@ class MainWindow(QMainWindow):
             lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
+        if self._is_manual():
+            self.mode_label.setText(self._tr("mode_manual", seg=self.segment_combo.currentText()))
+        else:
+            self._refresh_fixture_mode_label()
 
     # ── Settings / mode ─────────────────────────────────────────────
     def _is_manual(self) -> bool:
@@ -556,10 +608,19 @@ class MainWindow(QMainWindow):
             if not self.running and not self.completed:
                 self.status_label.setText(self._tr("listen_hint"))
         else:
-            hz = self.hz_combo.currentText()
-            self.mode_label.setText(self._tr("mode_fixture", hz=hz))
+            self._refresh_fixture_mode_label()
             if not self.running and not self.completed:
                 self.status_label.setText(self._tr("fixture_warn"))
+
+    def _refresh_fixture_mode_label(self, _text: str = ""):
+        if self._is_manual():
+            return
+        raw = self.hz_combo.currentText()
+        try:
+            hz_text = f"{parse_reference_rate_hz(raw):g}"
+        except ValueError:
+            hz_text = (raw or "").strip() or "—"
+        self.mode_label.setText(self._tr("mode_fixture", hz=hz_text))
 
     def _sync_auto_stop_widgets(self):
         fixture = not self._is_manual()
@@ -585,15 +646,19 @@ class MainWindow(QMainWindow):
         device = self.device_edit.text().strip()
         if device:
             self.target = device
-        hz = 0.0 if manual else float(self.hz_combo.currentText())
+        if manual:
+            hz = 0.0
+        else:
+            hz = parse_reference_rate_hz(self.hz_combo.currentText())
         rule_key = self._rule_preset_key()
         rule = dict(RULE_PRESETS.get(rule_key) or RULE_PRESETS["Strict"])
         base = {
             "manual_mode": manual,
-            "profile_name": "Manual_Left_Stable" if manual else f"Fixture_Left_{int(hz)}Hz_Strict" if hz >= 25 else "Fixture_Left_10Hz_Strict",
+            "profile_name": "Manual_Left_Stable" if manual else "Fixture_Custom",
             "focus_button": self.button_combo.currentText(),
             "button": self.button_combo.currentText(),
             "fixture_hz": hz,
+            "fixture_reference_hz": hz,
             "manual_segment_sec": float(self.segment_combo.currentText() or MANUAL_SEGMENT_SEC_DEFAULT),
             "capture_mode": "Windows Raw Input / 裝置RawInput",
             "language": self._report_lang(),
@@ -610,7 +675,8 @@ class MainWindow(QMainWindow):
         if not manual:
             base["test_profile"] = f"Fixture {rule_key}"
         normalized = normalize_auto_settings({"settings": base})
-        return contain_qt_runtime_click_expectation(normalized, auto_sec)
+        contained = contain_qt_runtime_click_expectation(normalized, auto_sec)
+        return stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
@@ -826,6 +892,24 @@ class MainWindow(QMainWindow):
         return pts, series
 
     # ── Capture lifecycle ───────────────────────────────────────────
+    def _reset_live_values_for_listen(self):
+        """Clear stale previous-run metrics when entering fresh LISTEN."""
+        self.val_time.setText("--")
+        self.val_clicks.setText("0")
+        self.val_interval.setText("--")
+        self.val_hold.setText("--")
+        self.val_seg.setText("--")
+        self.val_cv.setText("--")
+        self.val_verdict.setText("--")
+        self.val_extra.setText("0")
+        self.val_rebound.setText("0")
+        self.val_delay.setText("0")
+        self.val_dut.setText("--")
+        self.val_setup.setText("--")
+        self.review_text.clear()
+        self.review_text.hide()
+        self.alert_label.setText("")
+
     def enter_listen(self):
         self.listening = True
         self.running = False
@@ -833,11 +917,8 @@ class MainWindow(QMainWindow):
         self.report_written = False
         self._arming_scheduled = False
         self.val_phase.setText(self._tr("phase_listen"))
-        self.val_time.setText("--")
-        self.val_clicks.setText("0")
-        self.val_verdict.setText("--")
+        self._reset_live_values_for_listen()
         self.hint.show()
-        self.review_text.hide()
         self.test_area.setProperty("active", False)
         self.test_area.style().unpolish(self.test_area)
         self.test_area.style().polish(self.test_area)
@@ -1050,6 +1131,13 @@ class MainWindow(QMainWindow):
             self.alert_label.setText(self._tr("auto_stop_invalid"))
             self._arming_scheduled = False
             return
+        if not self._is_manual():
+            try:
+                parse_reference_rate_hz(self.hz_combo.currentText())
+            except ValueError:
+                self.alert_label.setText(self._tr("reference_rate_invalid"))
+                self._arming_scheduled = False
+                return
         s = self.settings()
         target = str(s.get("focus_button") or "Left")
         if button != target:
