@@ -20,6 +20,7 @@ from mouse_click_stability_analyzer.qt_shell.app import (
     qt_custom_limit_defaults,
     qt_visible_verdict,
     stamp_qt_custom_limit_metadata,
+    stamp_qt_explicit_limits,
     stamp_qt_reference_rate,
 )
 
@@ -59,7 +60,8 @@ def _qt_runtime_from_limits(raw: dict, *, manual: bool = False) -> dict:
     normalized = normalize_auto_settings({"settings": base})
     contained = contain_qt_runtime_click_expectation(normalized, None)
     stamped = stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
-    return stamp_qt_custom_limit_metadata(stamped, manual=manual)
+    stamped = stamp_qt_custom_limit_metadata(stamped, manual=manual)
+    return stamp_qt_explicit_limits(stamped, limits)
 
 
 class QtCustomLimitDefaultsTests(unittest.TestCase):

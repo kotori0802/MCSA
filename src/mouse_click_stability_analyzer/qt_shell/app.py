@@ -237,6 +237,29 @@ def stamp_qt_custom_limit_metadata(
     return out
 
 
+def qt_explicit_limit_snapshot(settings: dict[str, Any] | None) -> dict[str, float]:
+    """Copy only the five visible Custom Limit values. No cadence transform, no defaults."""
+    src = settings or {}
+    out: dict[str, float] = {}
+    for key in QT_CUSTOM_LIMIT_KEYS:
+        if key not in src or src.get(key) is None:
+            continue
+        out[key] = float(src[key])
+    return out
+
+
+def stamp_qt_explicit_limits(
+    settings: dict[str, Any],
+    limits: dict[str, float],
+) -> dict[str, Any]:
+    """Re-apply tester-configured Custom Limits after legacy normalize."""
+    out = dict(settings)
+    for key in QT_CUSTOM_LIMIT_KEYS:
+        if key in limits:
+            out[key] = float(limits[key])
+    return out
+
+
 _QT_ALERT_TAGS = (
     "FIXTURE_HZ_MISMATCH",
     "HIGH_PROBABILITY_DOUBLE_CLICK",
@@ -244,12 +267,39 @@ _QT_ALERT_TAGS = (
 )
 
 
+_QT_HIDDEN_PRESENTATION_TAGS = frozenset({"OPERATOR_FATIGUE", "HOLD_VARIATION_WARN"})
+
+# Exact prefix from core.compute_metrics hold_cv_limit_pct reason strings.
+_HOLD_CV_HEALTH_REASON_PREFIX = "hold_cv_pct "
+
+
+def _reason_is_hidden_hold_cv(reason: Any) -> bool:
+    return str(reason or "").startswith(_HOLD_CV_HEALTH_REASON_PREFIX)
+
+
+def _legacy_health_is_exclusively_hidden_hold_cv(metrics: dict[str, Any]) -> bool:
+    """True only when structured core reasons exist and every one is hold-CV.
+
+    core.compute_metrics health is aggregate. Mixed or missing reasons cannot
+    be rewritten without inventing a reconstruction formula.
+    """
+    fail = [str(r) for r in (metrics.get("fail_reasons") or []) if str(r or "").strip()]
+    warn = [str(r) for r in (metrics.get("warn_reasons") or []) if str(r or "").strip()]
+    if not fail and not warn:
+        return False
+    return all(_reason_is_hidden_hold_cv(r) for r in fail + warn)
+
+
 def qt_present_issue_tags(tags: Any) -> list[str]:
-    """Primary Qt live/review tag list. Hides OPERATOR_FATIGUE presentation only."""
+    """Primary Qt live/review tag list.
+
+    Hides OPERATOR_FATIGUE (retired Segment inference) and HOLD_VARIATION_WARN
+    (driven by unexposed hold_cv_limit_pct). Does not mutate the input list.
+    """
     out: list[str] = []
     for tag in tags or []:
         name = str(tag or "").strip()
-        if not name or name == "OPERATOR_FATIGUE":
+        if not name or name in _QT_HIDDEN_PRESENTATION_TAGS:
             continue
         out.append(name)
     return out
@@ -260,14 +310,18 @@ def qt_visible_verdict(
     metrics: dict[str, Any] | None,
     settings: dict[str, Any] | None = None,
 ) -> str:
-    """Primary Qt live/review verdict from presentation tags only.
+    """Primary Qt live/review verdict from presentation tags.
 
-    Does not mutate the legacy tag list. OPERATOR_FATIGUE cannot drive the
-    visible VERDICT after Segment/Fatigue retirement from the Qt path.
+    Does not mutate the legacy tag list or metrics. OPERATOR_FATIGUE and
+    HOLD_VARIATION_WARN cannot drive the visible VERDICT. metrics.health is
+    kept unless structured fail/warn reasons prove it is exclusively hidden
+    hold-CV.
     """
-    m = metrics or {}
+    m = dict(metrics or {})
     if int(m.get("click_count") or m.get("actual_clicks") or 0) <= 0:
         return "IDLE"
+    if _legacy_health_is_exclusively_hidden_hold_cv(m):
+        m.pop("health", None)
     return _result_from_tags(qt_present_issue_tags(tags), m, settings)
 
 
@@ -792,7 +846,8 @@ class MainWindow(QMainWindow):
         normalized = normalize_auto_settings({"settings": base})
         contained = contain_qt_runtime_click_expectation(normalized, auto_sec)
         stamped = stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
-        return stamp_qt_custom_limit_metadata(stamped, manual=manual)
+        stamped = stamp_qt_custom_limit_metadata(stamped, manual=manual)
+        return stamp_qt_explicit_limits(stamped, limits)
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
