@@ -150,6 +150,93 @@ def setup_controls_editable(*, running: bool, completed: bool) -> bool:
     return (not running) and (not completed)
 
 
+QT_CUSTOM_LIMIT_KEYS: tuple[str, ...] = (
+    "chatter_threshold_ms",
+    "duplicate_click_threshold_ms",
+    "fixture_actuation_too_short_ms",
+    "low_hold_warning_ms",
+    "interval_cv_limit_pct",
+)
+
+_QT_CUSTOM_LIMIT_LABEL_KEYS: dict[str, str] = {
+    "chatter_threshold_ms": "limit_chatter_ms",
+    "duplicate_click_threshold_ms": "limit_double_click_ms",
+    "fixture_actuation_too_short_ms": "limit_actuation_short_ms",
+    "low_hold_warning_ms": "limit_low_hold_ms",
+    "interval_cv_limit_pct": "limit_interval_cv_pct",
+}
+
+
+class QtCustomLimitsError(ValueError):
+    """Invalid Custom Limits input. code is 'numeric' or 'order'."""
+
+    def __init__(self, code: str, message: str = ""):
+        super().__init__(message or code)
+        self.code = code
+
+
+def qt_custom_limit_defaults() -> dict[str, float]:
+    """Copy of RULE_PRESETS['Strict'] numeric keys. Migration default only."""
+    src = dict(RULE_PRESETS.get("Strict") or {})
+    return {key: float(src[key]) for key in QT_CUSTOM_LIMIT_KEYS}
+
+
+def _parse_positive_custom_limit(raw: Any) -> float:
+    if raw is None or isinstance(raw, bool):
+        raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.")
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.")
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.") from exc
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.") from exc
+    if not math.isfinite(value) or value <= 0.0:
+        raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.")
+    return value
+
+
+def parse_qt_custom_limits(raw_values: Any) -> dict[str, float]:
+    """Parse tester-configured Custom Limits. Does not snap or default invalid input."""
+    if not isinstance(raw_values, dict):
+        raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.")
+    out: dict[str, float] = {}
+    for key in QT_CUSTOM_LIMIT_KEYS:
+        if key not in raw_values:
+            raise QtCustomLimitsError("numeric", "Custom Limits must be finite positive numbers.")
+        out[key] = _parse_positive_custom_limit(raw_values[key])
+    if not (out["chatter_threshold_ms"] < out["duplicate_click_threshold_ms"]):
+        raise QtCustomLimitsError(
+            "order",
+            "Chatter must be below double-click, and actuation-too-short must be below low-hold warning.",
+        )
+    if not (out["fixture_actuation_too_short_ms"] < out["low_hold_warning_ms"]):
+        raise QtCustomLimitsError(
+            "order",
+            "Chatter must be below double-click, and actuation-too-short must be below low-hold warning.",
+        )
+    return out
+
+
+def stamp_qt_custom_limit_metadata(
+    settings: dict[str, Any],
+    *,
+    manual: bool,
+) -> dict[str, Any]:
+    """Neutral Custom Limits metadata after legacy normalize_auto_settings."""
+    out = dict(settings)
+    out["judgement_mode"] = "Custom"
+    if not manual:
+        out["test_profile"] = "Fixture Custom"
+    return out
+
+
 _QT_ALERT_TAGS = (
     "FIXTURE_HZ_MISMATCH",
     "HIGH_PROBABILITY_DOUBLE_CLICK",
@@ -360,13 +447,33 @@ class MainWindow(QMainWindow):
         self.auto_stop_sec_combo.setCurrentText("60")
         side_l.addWidget(self.auto_stop_sec_combo)
 
-        self.lbl_rules = QLabel("Rules")
-        self._field_labels.append(self.lbl_rules)
-        side_l.addWidget(self.lbl_rules)
-        self.rules_combo = QComboBox()
-        self.rules_combo.addItems(["Loose", "Medium", "Strict"])
-        self.rules_combo.setCurrentText("Strict")
-        side_l.addWidget(self.rules_combo)
+        self.lbl_custom_limits = self._section("CUSTOM LIMITS")
+        side_l.addWidget(self.lbl_custom_limits)
+        limits_grid = QGridLayout()
+        limits_grid.setContentsMargins(0, 0, 0, 0)
+        limits_grid.setHorizontalSpacing(6)
+        limits_grid.setVerticalSpacing(4)
+        self._limit_edits: dict[str, QLineEdit] = {}
+        self._limit_labels: dict[str, QLabel] = {}
+        defaults = qt_custom_limit_defaults()
+        for row, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
+            lab = QLabel({
+                "chatter_threshold_ms": "Chatter (ms)",
+                "duplicate_click_threshold_ms": "Double-click (ms)",
+                "fixture_actuation_too_short_ms": "Actuation short (ms)",
+                "low_hold_warning_ms": "Low hold (ms)",
+                "interval_cv_limit_pct": "Interval CV (%)",
+            }[key])
+            lab.setWordWrap(True)
+            lab.setObjectName("StatLabel")
+            edit = QLineEdit()
+            edit.setText(f"{defaults[key]:g}")
+            edit.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self._limit_labels[key] = lab
+            self._limit_edits[key] = edit
+            limits_grid.addWidget(lab, row, 0)
+            limits_grid.addWidget(edit, row, 1)
+        side_l.addLayout(limits_grid)
 
         side_l.addSpacing(8)
         self.lbl_controls = self._section("CONTROLS")
@@ -574,17 +681,9 @@ class MainWindow(QMainWindow):
         self.hz_label.setText(self._tr("reference_rate_hz"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
-        self.lbl_rules.setText(self._tr("rules"))
-        rule_items = [self._tr("loose"), self._tr("medium"), self._tr("strict")]
-        current_rule = self.rules_combo.currentText()
-        rule_map = {"Loose": 0, "Medium": 1, "Strict": 2}
-        self.rules_combo.blockSignals(True)
-        self.rules_combo.clear()
-        self.rules_combo.addItems(["Loose", "Medium", "Strict"])
-        for i, label in enumerate(rule_items):
-            self.rules_combo.setItemText(i, label)
-        self.rules_combo.setCurrentIndex(rule_map.get(current_rule, 2))
-        self.rules_combo.blockSignals(False)
+        self.lbl_custom_limits.setText(self._tr("custom_limits"))
+        for key, lab in self._limit_labels.items():
+            lab.setText(self._tr(_QT_CUSTOM_LIMIT_LABEL_KEYS[key]))
         self.btn_stop.setText(self._tr("stop"))
         self.btn_new.setText(self._tr("new_run"))
         self.btn_finish.setText(qt_button_label(self._tr("finish_button")))
@@ -610,9 +709,8 @@ class MainWindow(QMainWindow):
     def _is_manual(self) -> bool:
         return self.radio_manual.isChecked()
 
-    def _rule_preset_key(self) -> str:
-        idx = self.rules_combo.currentIndex()
-        return ("Loose", "Medium", "Strict")[max(0, min(2, idx))]
+    def _custom_limit_raw_values(self) -> dict[str, str]:
+        return {key: self._limit_edits[key].text() for key in QT_CUSTOM_LIMIT_KEYS}
 
     def _apply_mode_fields(self):
         manual = self._is_manual()
@@ -669,8 +767,7 @@ class MainWindow(QMainWindow):
             hz = 0.0
         else:
             hz = parse_reference_rate_hz(self.hz_combo.currentText())
-        rule_key = self._rule_preset_key()
-        rule = dict(RULE_PRESETS.get(rule_key) or RULE_PRESETS["Strict"])
+        limits = parse_qt_custom_limits(self._custom_limit_raw_values())
         base = {
             "manual_mode": manual,
             "profile_name": "Manual_Left_Stable" if manual else "Fixture_Custom",
@@ -680,8 +777,8 @@ class MainWindow(QMainWindow):
             "fixture_reference_hz": hz,
             "capture_mode": "Windows Raw Input / 裝置RawInput",
             "language": self._report_lang(),
-            "judgement_mode": rule_key,
-            **rule,
+            "judgement_mode": "Custom",
+            **limits,
         }
         try:
             auto_sec = self._auto_stop_seconds()
@@ -691,10 +788,11 @@ class MainWindow(QMainWindow):
             # Legacy reports still read duration_sec; do not derive expected_clicks here.
             base["duration_sec"] = auto_sec
         if not manual:
-            base["test_profile"] = f"Fixture {rule_key}"
+            base["test_profile"] = "Fixture Custom"
         normalized = normalize_auto_settings({"settings": base})
         contained = contain_qt_runtime_click_expectation(normalized, auto_sec)
-        return stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
+        stamped = stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
+        return stamp_qt_custom_limit_metadata(stamped, manual=manual)
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
@@ -1075,7 +1173,7 @@ class MainWindow(QMainWindow):
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
             self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
-            self.device_edit, self.rules_combo,
+            self.device_edit, *self._limit_edits.values(),
         ):
             w.setEnabled(editable)
 
@@ -1154,6 +1252,13 @@ class MainWindow(QMainWindow):
                 self.alert_label.setText(self._tr("reference_rate_invalid"))
                 self._arming_scheduled = False
                 return
+        try:
+            parse_qt_custom_limits(self._custom_limit_raw_values())
+        except QtCustomLimitsError as exc:
+            key = "custom_limits_order_invalid" if exc.code == "order" else "custom_limits_invalid"
+            self.alert_label.setText(self._tr(key))
+            self._arming_scheduled = False
+            return
         s = self.settings()
         target = str(s.get("focus_button") or "Left")
         if button != target:
