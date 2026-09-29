@@ -260,6 +260,53 @@ def stamp_qt_explicit_limits(
     return out
 
 
+FIXTURE_TIMING_TOLERANCE_KEY = "fixture_timing_tolerance_ms"
+
+
+def parse_fixture_timing_tolerance_ms(raw: Any) -> float:
+    """Parse the tester-configured Fixture Timing Tolerance (± ms).
+
+    Accepts 0 and any finite positive number. No default, clamp, rounding,
+    maximum, or frequency-derived value. Distinct from legacy
+    ``fixture_match_tolerance_ms``.
+    """
+    message = "Fixture Timing Tolerance must be a finite number >= 0"
+    if raw is None or isinstance(raw, bool):
+        raise ValueError(message)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise ValueError(message)
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise ValueError(message) from exc
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(message)
+    return value
+
+
+def stamp_qt_fixture_timing_tolerance(
+    settings: dict[str, Any],
+    *,
+    manual: bool,
+    tolerance_ms: float | None,
+) -> dict[str, Any]:
+    """Stamp the V2 Fixture Timing Tolerance after legacy normalize.
+
+    None means not applicable (Manual) or not configured; 0.0 is a real
+    configured tolerance and is never used as a placeholder.
+    """
+    out = dict(settings)
+    out[FIXTURE_TIMING_TOLERANCE_KEY] = None if manual or tolerance_ms is None else float(tolerance_ms)
+    return out
+
+
 _QT_ALERT_TAGS = (
     "FIXTURE_HZ_MISMATCH",
     "HIGH_PROBABILITY_DOUBLE_CLICK",
@@ -471,6 +518,14 @@ class MainWindow(QMainWindow):
         self.hz_combo.addItems(["5", "10", "20", "40"])
         self.hz_combo.setCurrentText("10")
         side_l.addWidget(self.hz_combo)
+
+        self.timing_tol_label = QLabel("Fixture Timing Tolerance (± ms)")
+        self.timing_tol_label.setWordWrap(True)
+        self._field_labels.append(self.timing_tol_label)
+        side_l.addWidget(self.timing_tol_label)
+        self.timing_tol_edit = QLineEdit()
+        self.timing_tol_edit.setPlaceholderText("e.g. 2")
+        side_l.addWidget(self.timing_tol_edit)
 
         self.auto_stop_label = QLabel("Auto Stop")
         self._field_labels.append(self.auto_stop_label)
@@ -733,6 +788,8 @@ class MainWindow(QMainWindow):
         self.device_edit.setPlaceholderText(self._tr("device_placeholder"))
         self.lbl_button.setText(self._tr("button"))
         self.hz_label.setText(self._tr("reference_rate_hz"))
+        self.timing_tol_label.setText(self._tr("fixture_timing_tolerance_ms"))
+        self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
         self.lbl_custom_limits.setText(self._tr("custom_limits"))
@@ -770,6 +827,8 @@ class MainWindow(QMainWindow):
         manual = self._is_manual()
         self.hz_label.setVisible(not manual)
         self.hz_combo.setVisible(not manual)
+        self.timing_tol_label.setVisible(not manual)
+        self.timing_tol_edit.setVisible(not manual)
         self.auto_stop_label.setVisible(not manual)
         self.auto_stop_off.setVisible(not manual)
         self.auto_stop_on.setVisible(not manual)
@@ -847,7 +906,14 @@ class MainWindow(QMainWindow):
         contained = contain_qt_runtime_click_expectation(normalized, auto_sec)
         stamped = stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
         stamped = stamp_qt_custom_limit_metadata(stamped, manual=manual)
-        return stamp_qt_explicit_limits(stamped, limits)
+        stamped = stamp_qt_explicit_limits(stamped, limits)
+        tolerance_ms: float | None = None
+        if not manual:
+            try:
+                tolerance_ms = parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
+            except ValueError:
+                tolerance_ms = None
+        return stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=tolerance_ms)
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
@@ -1227,7 +1293,7 @@ class MainWindow(QMainWindow):
         editable = setup_controls_editable(running=self.running, completed=self.completed)
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
-            self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
+            self.timing_tol_edit, self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
             self.device_edit, *self._limit_edits.values(),
         ):
             w.setEnabled(editable)
@@ -1305,6 +1371,12 @@ class MainWindow(QMainWindow):
                 parse_reference_rate_hz(self.hz_combo.currentText())
             except ValueError:
                 self.alert_label.setText(self._tr("reference_rate_invalid"))
+                self._arming_scheduled = False
+                return
+            try:
+                parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
+            except ValueError:
+                self.alert_label.setText(self._tr("fixture_timing_tolerance_invalid"))
                 self._arming_scheduled = False
                 return
         try:
