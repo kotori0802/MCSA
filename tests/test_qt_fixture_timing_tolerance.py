@@ -114,13 +114,6 @@ class I18nTests(unittest.TestCase):
         self.assertIn("±", STRINGS["en"]["fixture_timing_tolerance_ms"])
 
 
-class NoHostEvidenceWiringTests(unittest.TestCase):
-    def test_qt_shell_does_not_reference_host_evidence(self):
-        source = Path(qt_app.__file__).read_text(encoding="utf-8")
-        self.assertNotIn("host_evidence", source)
-        self.assertNotIn("build_fixture_host_evidence", source)
-
-
 def _make_qapp():
     try:
         from PySide6.QtWidgets import QApplication
@@ -279,12 +272,6 @@ class MainWindowToleranceTests(unittest.TestCase):
         s = self.win.settings()
         self.assertIn(s.get("fixture_match_tolerance_ms", 0.0), (0.0, None))
         self.assertEqual(s[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
-
-    def test_no_host_evidence_snapshot_attribute(self):
-        self._fixture("2.5")
-        self._begin()
-        self.win.stop_run()
-        self.assertFalse(hasattr(self.win, "host_evidence_snapshot"))
 
 
 if __name__ == "__main__":

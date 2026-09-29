@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from collections import defaultdict, deque
@@ -49,11 +50,14 @@ from ..app import (
 )
 from ..cadence import cadence_ms, delta_cards, ranking_metrics
 from ..core import now_iso
+from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
 from ..i18n import LANG_LABELS, SUPPORTED_LANGS, t
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import IntervalChart, ScatterChart
 from .styles import get_palette, get_style
+
+_log = logging.getLogger(__name__)
 
 
 def parse_auto_stop_seconds(enabled: bool, raw: Any) -> float | None:
@@ -417,6 +421,7 @@ class MainWindow(QMainWindow):
         self.first_release_time = None
         self.last_release_time = None
         self.locked: dict[str, Any] | None = None
+        self.host_evidence_snapshot: dict[str, Any] | None = None
         self._arming_scheduled = False
         self._ignore_arm_until = 0.0
         self._locked_button = "Left"
@@ -1203,6 +1208,7 @@ class MainWindow(QMainWindow):
         self.first_release_time = self.last_release_time = None
         self.start_time = self.end_time = self.stop_time = None
         self.locked = None
+        self.host_evidence_snapshot = None
         self.run_id = _now_run_id()
         self.alert_label.setText("")
         self.scatter.set_points([])
@@ -1220,6 +1226,7 @@ class MainWindow(QMainWindow):
         self.listening = False
         self.completed = True
         self.stop_adapters()
+        self._build_host_evidence_snapshot_for_completed_run()
         self.val_phase.setText(self._tr("phase_review"))
         self.hint.hide()
         self.review_text.show()
@@ -1227,6 +1234,42 @@ class MainWindow(QMainWindow):
         if not self.status_label.text().startswith(("PASS", "WARN", "FAIL")):
             self.status_label.setText(self._tr("review_hint"))
         self._update_controls()
+
+    def _build_host_evidence_snapshot_for_completed_run(self) -> None:
+        """Build the neutral Host Evidence snapshot once, from run-locked settings.
+
+        Data only: never feeds verdict, issue tags, UI, or reports. Requires a
+        configured duration (Auto Stop ON); Auto Stop OFF and Manual stay None.
+        All accepted Presses are passed, including post-deadline ones;
+        ``host_evidence`` separates in-window from outside observations.
+        """
+        self.host_evidence_snapshot = None
+        locked = self.locked
+        if locked is None or bool(locked.get("manual_mode")):
+            return
+        duration_s = locked.get("duration_sec")
+        tolerance_ms = locked.get(FIXTURE_TIMING_TOLERANCE_KEY)
+        if not isinstance(duration_s, (int, float)) or isinstance(duration_s, bool) or duration_s <= 0:
+            return
+        if tolerance_ms is None or not self.events:
+            return
+        observed: list[Any] = []
+        for event in self.events:
+            value = event.get("press_elapsed_ms")
+            if value is None:
+                _log.warning("Host evidence snapshot not built: accepted event without press_elapsed_ms")
+                return
+            observed.append(value)
+        try:
+            self.host_evidence_snapshot = build_fixture_host_evidence(
+                duration_s,
+                locked.get("fixture_reference_hz"),
+                tolerance_ms,
+                observed,
+            )
+        except (HostEvidenceError, ValueError) as exc:
+            _log.warning("Host evidence snapshot not built: %s", exc)
+            self.host_evidence_snapshot = None
 
     def finish_report(self):
         if self.running:
@@ -1398,6 +1441,7 @@ class MainWindow(QMainWindow):
         self.first_press_time = self.last_press_time = None
         self.first_release_time = self.last_release_time = None
         self.locked = dict(s)
+        self.host_evidence_snapshot = None
         self._locked_button = target
         self.start_time = press
         self.stop_time = None
