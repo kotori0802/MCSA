@@ -51,6 +51,7 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
 
     def _new_window(self):
         win = qt_app.MainWindow(report_root=Path(self._tmp.name))
+        win._listen_start_timer.stop()
         win.ui_timer.stop()
         win.ensure_raw_input = lambda: None
         win._cursor_in_test_area = lambda: True
@@ -87,10 +88,12 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
             win.stop_run()
 
     def _visible_outputs(self, win):
+        legacy_review = win.review_text.toPlainText().split("\n\n", 1)[0]
         return (
             win.status_label.text(),
             win.alert_label.text(),
-            win.review_text.toPlainText(),
+            legacy_review,
+            win.val_verdict.text(),
             win.val_clicks.text(),
         )
 
@@ -308,13 +311,12 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
         self.assertEqual(self._visible_outputs(self.win), with_snapshot)
         self.assertEqual(qt_app.qt_visible_verdict(tags, m, settings), verdict_before)
 
-    def test_no_host_evidence_ui(self):
+    def test_no_host_evidence_labels_or_cards(self):
         from PySide6.QtWidgets import QLabel
 
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         texts = " ".join(lab.text().lower() for lab in self.win.findChildren(QLabel))
-        texts += " " + self.win.review_text.toPlainText().lower()
         for token in ("host evidence", "expected slot", "count delta", "occupancy", "ambiguous", "outside window"):
             self.assertNotIn(token, texts)
 

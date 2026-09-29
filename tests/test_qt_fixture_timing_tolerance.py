@@ -136,6 +136,7 @@ class MainWindowToleranceTests(unittest.TestCase):
 
     def setUp(self):
         self.win = qt_app.MainWindow(report_root=Path(self._tmp.name))
+        self.win._listen_start_timer.stop()
         self.win.ui_timer.stop()
         self.win.ensure_raw_input = lambda: None
         self.win._cursor_in_test_area = lambda: True

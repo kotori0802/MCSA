@@ -73,10 +73,55 @@ QWidget {
 QMainWindow, QDialog {
     background: #f5f5f7;
 }
-QFrame#Card, QFrame#TestArea, QFrame#SideCard {
+QFrame#Card, QFrame#TestArea, QFrame#SideCard, QFrame#NavRail {
     background: #ffffff;
     border: 1px solid #e5e5ea;
     border-radius: 16px;
+}
+QFrame#NavRail {
+    border-radius: 18px;
+}
+QWidget#Workspace {
+    background: transparent;
+}
+QScrollArea#PageScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#PageScroll > QWidget > QWidget {
+    background: transparent;
+}
+QLabel#PageTitle {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1d1d1f;
+    background: transparent;
+}
+QLabel#PageSubtitle {
+    font-size: 13px;
+    color: #6e6e73;
+    background: transparent;
+}
+QPushButton#NavButton {
+    text-align: left;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: transparent;
+    font-weight: 600;
+}
+QPushButton#NavButton:hover {
+    background: #f2f2f7;
+}
+QPushButton#NavButton:checked {
+    background: #007aff;
+    color: white;
+}
+QSplitter::handle:vertical {
+    background: #e5e5ea;
+    height: 6px;
+    margin: 4px 0;
+    border-radius: 3px;
 }
 QFrame#TestArea {
     border: 2px dashed #007aff;
@@ -213,10 +258,56 @@ QWidget {
 QMainWindow, QDialog {
     background: #000000;
 }
-QFrame#Card, QFrame#TestArea, QFrame#SideCard {
+QFrame#Card, QFrame#TestArea, QFrame#SideCard, QFrame#NavRail {
     background: #1c1c1e;
     border: 1px solid #3a3a3c;
     border-radius: 16px;
+}
+QFrame#NavRail {
+    border-radius: 18px;
+}
+QWidget#Workspace {
+    background: transparent;
+}
+QScrollArea#PageScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#PageScroll > QWidget > QWidget {
+    background: transparent;
+}
+QLabel#PageTitle {
+    font-size: 28px;
+    font-weight: 700;
+    color: #f5f5f7;
+    background: transparent;
+}
+QLabel#PageSubtitle {
+    font-size: 13px;
+    color: #98989d;
+    background: transparent;
+}
+QPushButton#NavButton {
+    text-align: left;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: transparent;
+    font-weight: 600;
+    color: #f5f5f7;
+}
+QPushButton#NavButton:hover {
+    background: #2c2c2e;
+}
+QPushButton#NavButton:checked {
+    background: #0a84ff;
+    color: white;
+}
+QSplitter::handle:vertical {
+    background: #3a3a3c;
+    height: 6px;
+    margin: 4px 0;
+    border-radius: 3px;
 }
 QFrame#TestArea {
     border: 2px dashed #0a84ff;

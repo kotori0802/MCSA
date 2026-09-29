@@ -28,6 +28,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QButtonGroup,
+    QScrollArea,
+    QSplitter,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -311,6 +314,82 @@ def stamp_qt_fixture_timing_tolerance(
     return out
 
 
+_HOST_EVIDENCE_NONE_TEXT = "—"
+
+
+def _fmt_signed_ms(value: Any) -> str:
+    if value is None:
+        return _HOST_EVIDENCE_NONE_TEXT
+    number = float(value)
+    return "0.000" if number == 0.0 else f"{number:+.3f}"
+
+
+def _fmt_unsigned_ms(value: Any) -> str:
+    if value is None:
+        return _HOST_EVIDENCE_NONE_TEXT
+    return f"{float(value):.3f}"
+
+
+def _fmt_signed_count(value: int) -> str:
+    return "0" if value == 0 else f"{value:+d}"
+
+
+def format_host_evidence_review_lines(snapshot: dict[str, Any] | None, tr) -> list[str]:
+    """Display lines for a frozen Host Evidence snapshot. Formatting only.
+
+    ``tr(key, **kwargs)`` returns translated text. No snapshot → no lines, so
+    Manual / Auto Stop OFF runs never show schedule or count placeholders.
+    """
+    if not snapshot:
+        return []
+    config = snapshot["configuration"]
+    counts = snapshot["counts"]
+    matching = snapshot["matching"]
+    delta = snapshot["timing"]["matched_delta_stats"]
+    abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
+    lines = [
+        tr("he_title"),
+        tr(
+            "he_config",
+            hz=f"{float(config['fixture_frequency_hz']):g}",
+            duration=f"{float(config['capture_duration_s']):.3f}",
+            tol=f"{float(config['timing_tolerance_ms']):.3f}",
+            ref=f"{float(config['reference_interval_ms']):.3f}",
+        ),
+        tr(
+            "he_counts",
+            expected=counts["expected_slot_count"],
+            in_window=counts["in_window_host_press_count"],
+            delta=_fmt_signed_count(int(counts["host_count_delta_vs_expected_slots"])),
+            raw=counts["raw_host_press_count"],
+        ),
+        tr(
+            "he_windows",
+            empty=matching["empty_expected_slot_count"],
+            single=matching["single_occupancy_slot_count"],
+            multi=matching["multi_occupancy_slot_count"],
+        ),
+        tr(
+            "he_observations",
+            matched=matching["matched_host_observation_count"],
+            unmatched=matching["unmatched_host_observation_count"],
+            ambiguous=matching["ambiguous_host_observation_count"],
+            outside=matching["outside_capture_window_observation_count"],
+        ),
+        tr(
+            "he_timing",
+            avg=_fmt_signed_ms(delta["average"]),
+            min=_fmt_signed_ms(delta["minimum"]),
+            max=_fmt_signed_ms(delta["maximum"]),
+            sd=_fmt_unsigned_ms(delta["stdev"]),
+            abs_avg=_fmt_unsigned_ms(abs_delta["average"]),
+        ),
+    ]
+    if config.get("matching_windows_can_overlap"):
+        lines.append(tr("he_overlap"))
+    return lines
+
+
 _QT_ALERT_TAGS = (
     "FIXTURE_HZ_MISMATCH",
     "HIGH_PROBABILITY_DOUBLE_CLICK",
@@ -397,6 +476,7 @@ class MainWindow(QMainWindow):
         self.lang = lang if lang in SUPPORTED_LANGS else "en"
         self.theme = theme if theme in ("light", "dark") else "light"
         self.setWindowTitle(t(self.lang, "app_title"))
+        self.setMinimumSize(1024, 640)
         self.resize(1280, 840)
         self.report_root = Path(report_root)
         self.report_root.mkdir(parents=True, exist_ok=True)
@@ -449,7 +529,10 @@ class MainWindow(QMainWindow):
         self.ui_timer.setInterval(100)
         self.ui_timer.timeout.connect(self._tick)
         self.ui_timer.start()
-        QTimer.singleShot(150, self.enter_listen)
+        self._listen_start_timer = QTimer(self)
+        self._listen_start_timer.setSingleShot(True)
+        self._listen_start_timer.timeout.connect(self.enter_listen)
+        self._listen_start_timer.start(150)
 
     def _tr(self, key: str, **kwargs) -> str:
         return t(self.lang, key, **kwargs)
@@ -475,18 +558,162 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         outer = QHBoxLayout(root)
-        outer.setContentsMargins(18, 18, 18, 18)
-        outer.setSpacing(14)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(16)
+        outer.addWidget(self._build_nav_rail())
 
-        side = QFrame()
-        side.setObjectName("SideCard")
-        side.setFixedWidth(280)
-        side_l = QVBoxLayout(side)
-        side_l.setContentsMargins(16, 16, 16, 16)
-        side_l.setSpacing(10)
+        workspace = QWidget()
+        workspace.setObjectName("Workspace")
+        work_l = QVBoxLayout(workspace)
+        work_l.setContentsMargins(4, 4, 8, 4)
+        work_l.setSpacing(12)
+        work_l.addLayout(self._build_workspace_header())
 
-        self.lbl_setup = self._section("SETUP")
-        side_l.addWidget(self.lbl_setup)
+        self._workflow_pages = ("setup", "capture", "results", "preferences")
+        self._current_page = "setup"
+        self.page_stack = QStackedWidget()
+        self.page_stack.setObjectName("WorkflowStack")
+        self.page_setup = self._build_setup_page()
+        self.page_capture = self._build_capture_page()
+        self.page_results = self._build_results_page()
+        self.page_preferences = self._build_preferences_page()
+        for page in (self.page_setup, self.page_capture, self.page_results, self.page_preferences):
+            self.page_stack.addWidget(page)
+        work_l.addWidget(self.page_stack, 1)
+        outer.addWidget(workspace, 1)
+        self._show_workflow_page("setup")
+
+    def _build_nav_rail(self) -> QFrame:
+        rail = QFrame()
+        rail.setObjectName("NavRail")
+        rail.setFixedWidth(188)
+        self.nav_rail = rail
+        layout = QVBoxLayout(rail)
+        layout.setContentsMargins(14, 18, 14, 14)
+        layout.setSpacing(8)
+
+        self.title_label = QLabel(TOOL_NAME)
+        self.title_label.setObjectName("Title")
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
+        layout.addSpacing(12)
+
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+        self._nav_buttons: dict[str, QPushButton] = {}
+        for name, text in (
+            ("setup", "Setup"),
+            ("capture", "Capture"),
+            ("results", "Results"),
+            ("preferences", "Preferences"),
+        ):
+            btn = QPushButton(text)
+            btn.setObjectName("NavButton")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, page=name: self._show_workflow_page(page))
+            self.nav_group.addButton(btn)
+            self._nav_buttons[name] = btn
+            layout.addWidget(btn)
+        self.nav_setup = self._nav_buttons["setup"]
+        self.nav_capture = self._nav_buttons["capture"]
+        self.nav_results = self._nav_buttons["results"]
+        self.nav_preferences = self._nav_buttons["preferences"]
+        self.nav_setup.setChecked(True)
+        layout.addStretch(1)
+
+        self.btn_help = QPushButton("Quick Start")
+        self.btn_help.setObjectName("Secondary")
+        self.btn_help.clicked.connect(self.show_guide)
+        layout.addWidget(self.btn_help)
+        return rail
+
+    def _build_workspace_header(self) -> QHBoxLayout:
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        self.page_title = QLabel("Setup")
+        self.page_title.setObjectName("PageTitle")
+        self.page_subtitle = QLabel("")
+        self.page_subtitle.setObjectName("PageSubtitle")
+        self.page_subtitle.setWordWrap(True)
+        titles.addWidget(self.page_title)
+        titles.addWidget(self.page_subtitle)
+        header.addLayout(titles, 1)
+
+        self.lbl_theme = QLabel("Theme")
+        self._field_labels.append(self.lbl_theme)
+        header.addWidget(self.lbl_theme)
+        self.theme_combo = QComboBox()
+        self.theme_combo.setMaximumWidth(120)
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.setCurrentIndex(0 if self.theme == "light" else 1)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        header.addWidget(self.theme_combo)
+
+        self.lbl_lang = QLabel("Language")
+        self._field_labels.append(self.lbl_lang)
+        header.addWidget(self.lbl_lang)
+        self.lang_combo = QComboBox()
+        self.lang_combo.setMaximumWidth(150)
+        for code in SUPPORTED_LANGS:
+            self.lang_combo.addItem(LANG_LABELS.get(code, code), code)
+        idx = SUPPORTED_LANGS.index(self.lang) if self.lang in SUPPORTED_LANGS else 0
+        self.lang_combo.setCurrentIndex(idx)
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
+        header.addWidget(self.lang_combo)
+        return header
+
+    def _constrain_setup_field(self, widget: QWidget, width: int = 280) -> None:
+        widget.setMaximumWidth(width)
+        widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def _build_setup_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("SetupPage")
+        page_l = QVBoxLayout(page)
+        page_l.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        inner.setMaximumWidth(1120)
+        inner_l = QVBoxLayout(inner)
+        inner_l.setContentsMargins(0, 0, 0, 0)
+        inner_l.setSpacing(20)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(16)
+
+        device_card = self._card()
+        device_l = QVBoxLayout(device_card)
+        device_l.setContentsMargins(20, 18, 20, 18)
+        device_l.setSpacing(8)
+        self.lbl_setup = self._section("Device / DUT")
+        device_l.addWidget(self.lbl_setup)
+        self.lbl_device = QLabel("Device")
+        self._field_labels.append(self.lbl_device)
+        device_l.addWidget(self.lbl_device)
+        self.device_edit = QLineEdit(self.target)
+        self.device_edit.setPlaceholderText("Device name (optional)")
+        self._constrain_setup_field(self.device_edit)
+        device_l.addWidget(self.device_edit)
+        self.lbl_button = QLabel("Button")
+        self._field_labels.append(self.lbl_button)
+        device_l.addWidget(self.lbl_button)
+        self.button_combo = QComboBox()
+        self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
+        self._constrain_setup_field(self.button_combo)
+        device_l.addWidget(self.button_combo)
+        device_l.addStretch(1)
+        cards.addWidget(device_card, 1)
+
+        config_card = self._card()
+        config_l = QVBoxLayout(config_card)
+        config_l.setContentsMargins(20, 18, 20, 18)
+        config_l.setSpacing(8)
+        self.lbl_setup_config = self._section("Test Configuration")
+        config_l.addWidget(self.lbl_setup_config)
         mode_row = QHBoxLayout()
         self.radio_manual = QRadioButton("Manual")
         self.radio_fixture = QRadioButton("Fixture")
@@ -496,45 +723,35 @@ class MainWindow(QMainWindow):
         self.mode_group.addButton(self.radio_fixture)
         mode_row.addWidget(self.radio_manual)
         mode_row.addWidget(self.radio_fixture)
-        side_l.addLayout(mode_row)
+        mode_row.addStretch(1)
+        config_l.addLayout(mode_row)
         self.radio_manual.toggled.connect(self._apply_mode_fields)
-
-        self.lbl_device = QLabel("Device")
-        self._field_labels.append(self.lbl_device)
-        side_l.addWidget(self.lbl_device)
-        self.device_edit = QLineEdit(self.target)
-        self.device_edit.setPlaceholderText("Device name (optional)")
-        side_l.addWidget(self.device_edit)
-
-        self.lbl_button = QLabel("Button")
-        self._field_labels.append(self.lbl_button)
-        side_l.addWidget(self.lbl_button)
-        self.button_combo = QComboBox()
-        self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
-        side_l.addWidget(self.button_combo)
 
         self.hz_label = QLabel("Reference Rate (Hz)")
         self._field_labels.append(self.hz_label)
-        side_l.addWidget(self.hz_label)
+        config_l.addWidget(self.hz_label)
         self.hz_combo = QComboBox()
         self.hz_combo.setEditable(True)
         self.hz_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.hz_combo.setCompleter(None)
         self.hz_combo.addItems(["5", "10", "20", "40"])
         self.hz_combo.setCurrentText("10")
-        side_l.addWidget(self.hz_combo)
+        self._constrain_setup_field(self.hz_combo)
+        config_l.addWidget(self.hz_combo)
+        self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         self.timing_tol_label = QLabel("Fixture Timing Tolerance (± ms)")
         self.timing_tol_label.setWordWrap(True)
         self._field_labels.append(self.timing_tol_label)
-        side_l.addWidget(self.timing_tol_label)
+        config_l.addWidget(self.timing_tol_label)
         self.timing_tol_edit = QLineEdit()
         self.timing_tol_edit.setPlaceholderText("e.g. 2")
-        side_l.addWidget(self.timing_tol_edit)
+        self._constrain_setup_field(self.timing_tol_edit)
+        config_l.addWidget(self.timing_tol_edit)
 
         self.auto_stop_label = QLabel("Auto Stop")
         self._field_labels.append(self.auto_stop_label)
-        side_l.addWidget(self.auto_stop_label)
+        config_l.addWidget(self.auto_stop_label)
         auto_stop_row = QHBoxLayout()
         auto_stop_row.setSpacing(6)
         self.auto_stop_off = QPushButton("OFF")
@@ -551,26 +768,35 @@ class MainWindow(QMainWindow):
         self.auto_stop_group.addButton(self.auto_stop_off)
         self.auto_stop_group.addButton(self.auto_stop_on)
         self.auto_stop_on.toggled.connect(self._sync_auto_stop_widgets)
-        side_l.addLayout(auto_stop_row)
+        auto_stop_row.addStretch(1)
+        config_l.addLayout(auto_stop_row)
         self.auto_stop_sec_label = QLabel("Auto Stop After (s)")
         self._field_labels.append(self.auto_stop_sec_label)
-        side_l.addWidget(self.auto_stop_sec_label)
+        config_l.addWidget(self.auto_stop_sec_label)
         self.auto_stop_sec_combo = QComboBox()
         self.auto_stop_sec_combo.setEditable(True)
         self.auto_stop_sec_combo.addItems(["30", "60", "120", "300"])
         self.auto_stop_sec_combo.setCurrentText("60")
-        side_l.addWidget(self.auto_stop_sec_combo)
+        self._constrain_setup_field(self.auto_stop_sec_combo)
+        config_l.addWidget(self.auto_stop_sec_combo)
+        config_l.addStretch(1)
+        cards.addWidget(config_card, 1)
+        inner_l.addLayout(cards)
 
+        limits_card = self._card()
+        limits_l = QVBoxLayout(limits_card)
+        limits_l.setContentsMargins(20, 18, 20, 18)
+        limits_l.setSpacing(8)
         self.lbl_custom_limits = self._section("CUSTOM LIMITS")
-        side_l.addWidget(self.lbl_custom_limits)
+        limits_l.addWidget(self.lbl_custom_limits)
         limits_grid = QGridLayout()
         limits_grid.setContentsMargins(0, 0, 0, 0)
-        limits_grid.setHorizontalSpacing(6)
-        limits_grid.setVerticalSpacing(4)
+        limits_grid.setHorizontalSpacing(16)
+        limits_grid.setVerticalSpacing(8)
         self._limit_edits: dict[str, QLineEdit] = {}
         self._limit_labels: dict[str, QLabel] = {}
         defaults = qt_custom_limit_defaults()
-        for row, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
+        for index, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
             lab = QLabel({
                 "chatter_threshold_ms": "Chatter (ms)",
                 "duplicate_click_threshold_ms": "Double-click (ms)",
@@ -583,15 +809,50 @@ class MainWindow(QMainWindow):
             edit = QLineEdit()
             edit.setText(f"{defaults[key]:g}")
             edit.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self._constrain_setup_field(edit, 200)
             self._limit_labels[key] = lab
             self._limit_edits[key] = edit
-            limits_grid.addWidget(lab, row, 0)
-            limits_grid.addWidget(edit, row, 1)
-        side_l.addLayout(limits_grid)
+            row, col = divmod(index, 2)
+            cell = QVBoxLayout()
+            cell.setSpacing(4)
+            cell.addWidget(lab)
+            cell.addWidget(edit)
+            cell_w = QWidget()
+            cell_w.setLayout(cell)
+            limits_grid.addWidget(cell_w, row, col)
+        limits_l.addLayout(limits_grid)
+        inner_l.addWidget(limits_card)
+        inner_l.addStretch(1)
 
-        side_l.addSpacing(8)
+        wrap = QWidget()
+        wrap_l = QHBoxLayout(wrap)
+        wrap_l.setContentsMargins(0, 0, 0, 0)
+        wrap_l.addWidget(inner)
+        wrap_l.addStretch(1)
+
+        self.setup_scroll = QScrollArea()
+        self.setup_scroll.setObjectName("PageScroll")
+        self.setup_scroll.setWidgetResizable(True)
+        self.setup_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setup_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.setup_scroll.setWidget(wrap)
+        page_l.addWidget(self.setup_scroll)
+        return page
+
+    def _build_capture_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("CapturePage")
+        page_l = QVBoxLayout(page)
+        page_l.setContentsMargins(0, 0, 0, 0)
+        page_l.setSpacing(12)
+
+        actions = self._card()
+        actions_l = QVBoxLayout(actions)
+        actions_l.setContentsMargins(16, 12, 16, 12)
+        actions_l.setSpacing(8)
         self.lbl_controls = self._section("CONTROLS")
-        side_l.addWidget(self.lbl_controls)
+        actions_l.addWidget(self.lbl_controls)
         self.btn_stop = QPushButton("Stop (F5 / Esc)")
         self.btn_stop.setObjectName("Danger")
         self.btn_stop.clicked.connect(self.stop_run)
@@ -608,45 +869,18 @@ class MainWindow(QMainWindow):
         self.btn_clear_overlay = QPushButton("Clear Overlay")
         self.btn_clear_overlay.setObjectName("Secondary")
         self.btn_clear_overlay.clicked.connect(self.clear_overlay)
-        self.btn_help = QPushButton("Quick Start")
-        self.btn_help.clicked.connect(self.show_guide)
-        for b in (
-            self.btn_stop, self.btn_new, self.btn_finish, self.btn_save,
-            self.btn_overlay, self.btn_clear_overlay, self.btn_help,
-        ):
-            side_l.addWidget(b)
-        side_l.addStretch(1)
-        outer.addWidget(side)
-
-        right = QVBoxLayout()
-        right.setSpacing(12)
-        header = QHBoxLayout()
-        self.title_label = QLabel(TOOL_NAME)
-        self.title_label.setObjectName("Title")
-        header.addWidget(self.title_label)
-        header.addStretch(1)
-
-        self.lbl_theme = QLabel("Theme")
-        self._field_labels.append(self.lbl_theme)
-        header.addWidget(self.lbl_theme)
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItem("Light", "light")
-        self.theme_combo.addItem("Dark", "dark")
-        self.theme_combo.setCurrentIndex(0 if self.theme == "light" else 1)
-        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        header.addWidget(self.theme_combo)
-
-        self.lbl_lang = QLabel("Language")
-        self._field_labels.append(self.lbl_lang)
-        header.addWidget(self.lbl_lang)
-        self.lang_combo = QComboBox()
-        for code in SUPPORTED_LANGS:
-            self.lang_combo.addItem(LANG_LABELS.get(code, code), code)
-        idx = SUPPORTED_LANGS.index(self.lang) if self.lang in SUPPORTED_LANGS else 0
-        self.lang_combo.setCurrentIndex(idx)
-        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
-        header.addWidget(self.lang_combo)
-        right.addLayout(header)
+        row1 = QHBoxLayout()
+        row2 = QHBoxLayout()
+        for btn in (self.btn_stop, self.btn_new, self.btn_finish):
+            row1.addWidget(btn)
+        row1.addStretch(1)
+        for btn in (self.btn_save, self.btn_overlay, self.btn_clear_overlay):
+            row2.addWidget(btn)
+        row2.addStretch(1)
+        actions_l.addLayout(row1)
+        actions_l.addLayout(row2)
+        self.capture_actions = actions
+        page_l.addWidget(actions)
 
         live = self._card()
         live_l = QVBoxLayout(live)
@@ -654,7 +888,6 @@ class MainWindow(QMainWindow):
         self.mode_label = QLabel("Manual · Observation")
         self.mode_label.setObjectName("Subtitle")
         live_l.addWidget(self.mode_label)
-        self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         stats = QGridLayout()
         stats.setHorizontalSpacing(14)
@@ -688,11 +921,8 @@ class MainWindow(QMainWindow):
         live_l.addWidget(self.status_label)
         live_l.addWidget(self.alert_label)
         live_l.addWidget(self.overlay_delta_label)
-        right.addWidget(live)
+        page_l.addWidget(live)
 
-        charts_card = self._card()
-        charts_l = QVBoxLayout(charts_card)
-        charts_l.setContentsMargins(12, 12, 12, 12)
         self.test_area = QFrame()
         self.test_area.setObjectName("TestArea")
         self.test_area.setProperty("active", False)
@@ -707,14 +937,85 @@ class MainWindow(QMainWindow):
         self.interval_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ta_l.addWidget(self.scatter, 3)
         ta_l.addWidget(self.interval_chart, 2)
-        charts_l.addWidget(self.test_area)
+
         self.review_text = QTextEdit()
         self.review_text.setReadOnly(True)
-        self.review_text.setMaximumHeight(120)
+        self.review_text.setMinimumHeight(120)
         self.review_text.hide()
-        charts_l.addWidget(self.review_text)
-        right.addWidget(charts_card, 1)
-        outer.addLayout(right, 1)
+
+        self.capture_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.capture_splitter.setObjectName("CaptureSplitter")
+        self.capture_splitter.setChildrenCollapsible(True)
+        self.capture_splitter.addWidget(self.test_area)
+        self.capture_splitter.addWidget(self.review_text)
+        self.capture_splitter.setStretchFactor(0, 3)
+        self.capture_splitter.setStretchFactor(1, 1)
+        self.capture_splitter.setSizes([1, 0])
+        page_l.addWidget(self.capture_splitter, 1)
+        return page
+
+    def _build_results_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("ResultsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 8, 8, 8)
+        card = self._card()
+        card_l = QVBoxLayout(card)
+        card_l.setContentsMargins(24, 24, 24, 24)
+        self.results_placeholder = QLabel("")
+        self.results_placeholder.setObjectName("Muted")
+        self.results_placeholder.setWordWrap(True)
+        card_l.addWidget(self.results_placeholder)
+        card_l.addStretch(1)
+        layout.addWidget(card)
+        return page
+
+    def _build_preferences_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("PreferencesPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 8, 8, 8)
+        card = self._card()
+        card_l = QVBoxLayout(card)
+        card_l.setContentsMargins(24, 24, 24, 24)
+        self.preferences_placeholder = QLabel("")
+        self.preferences_placeholder.setObjectName("Muted")
+        self.preferences_placeholder.setWordWrap(True)
+        card_l.addWidget(self.preferences_placeholder)
+        card_l.addStretch(1)
+        layout.addWidget(card)
+        return page
+
+    def _show_workflow_page(self, name: str) -> None:
+        """Switch stacked page. Presentation only: no run or evidence rebuild."""
+        if name not in self._workflow_pages:
+            return
+        self._current_page = name
+        self.page_stack.setCurrentIndex(self._workflow_pages.index(name))
+        btn = self._nav_buttons[name]
+        if not btn.isChecked():
+            btn.blockSignals(True)
+            btn.setChecked(True)
+            btn.blockSignals(False)
+        titles = {
+            "setup": ("nav_setup", "page_setup_subtitle"),
+            "capture": ("nav_capture", "page_capture_subtitle"),
+            "results": ("nav_results", "page_results_subtitle"),
+            "preferences": ("nav_preferences", "page_preferences_subtitle"),
+        }
+        title_key, subtitle_key = titles[name]
+        self.page_title.setText(self._tr(title_key))
+        self.page_subtitle.setText(self._tr(subtitle_key))
+
+    def _set_review_panel_visible(self, visible: bool) -> None:
+        if visible:
+            self.review_text.show()
+            total = max(self.capture_splitter.height(), 400)
+            review = max(int(total * 0.34), 180)
+            self.capture_splitter.setSizes([max(total - review, 200), review])
+        else:
+            self.review_text.hide()
+            self.capture_splitter.setSizes([1, 0])
 
     def _section(self, text: str) -> QLabel:
         lab = QLabel(text)
@@ -785,8 +1086,15 @@ class MainWindow(QMainWindow):
     def _retranslate_ui(self):
         self.setWindowTitle(self._tr("app_title"))
         self.title_label.setText(self._tr("app_title"))
-        self.lbl_setup.setText(self._tr("setup"))
+        self.nav_setup.setText(self._tr("nav_setup"))
+        self.nav_capture.setText(self._tr("nav_capture"))
+        self.nav_results.setText(self._tr("nav_results"))
+        self.nav_preferences.setText(self._tr("nav_preferences"))
+        self.lbl_setup.setText(self._tr("setup_device_section"))
+        self.lbl_setup_config.setText(self._tr("setup_config_section"))
         self.lbl_controls.setText(self._tr("controls"))
+        self.results_placeholder.setText(self._tr("page_results_placeholder"))
+        self.preferences_placeholder.setText(self._tr("page_preferences_placeholder"))
         self.radio_manual.setText(self._tr("manual"))
         self.radio_fixture.setText(self._tr("fixture"))
         self.lbl_device.setText(self._tr("device"))
@@ -816,6 +1124,7 @@ class MainWindow(QMainWindow):
             lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
+        self._show_workflow_page(self._current_page)
         if self._is_manual():
             self.mode_label.setText(self._tr("mode_manual"))
         else:
@@ -1147,10 +1456,12 @@ class MainWindow(QMainWindow):
         self.val_dut.setText("--")
         self.val_setup.setText("--")
         self.review_text.clear()
-        self.review_text.hide()
+        self._set_review_panel_visible(False)
         self.alert_label.setText("")
 
     def enter_listen(self):
+        if getattr(self, "_listen_start_timer", None) is not None:
+            self._listen_start_timer.stop()
         self.listening = True
         self.running = False
         self.completed = False
@@ -1229,7 +1540,7 @@ class MainWindow(QMainWindow):
         self._build_host_evidence_snapshot_for_completed_run()
         self.val_phase.setText(self._tr("phase_review"))
         self.hint.hide()
-        self.review_text.show()
+        self._set_review_panel_visible(True)
         self._refresh_metrics(final=True)
         if not self.status_label.text().startswith(("PASS", "WARN", "FAIL")):
             self.status_label.setText(self._tr("review_hint"))
@@ -1238,7 +1549,8 @@ class MainWindow(QMainWindow):
     def _build_host_evidence_snapshot_for_completed_run(self) -> None:
         """Build the neutral Host Evidence snapshot once, from run-locked settings.
 
-        Data only: never feeds verdict, issue tags, UI, or reports. Requires a
+        Data only: never feeds verdict, issue tags, or reports. The frozen
+        snapshot may be consumed by REVIEW presentation. Requires a
         configured duration (Auto Stop ON); Auto Stop OFF and Manual stay None.
         All accepted Presses are passed, including post-deadline ones;
         ``host_evidence`` separates in-window from outside observations.
@@ -1341,12 +1653,25 @@ class MainWindow(QMainWindow):
         ):
             w.setEnabled(editable)
 
+    def _cursor_global_pos(self):
+        return self.cursor().pos()
+
+    def _test_area_is_active(self) -> bool:
+        # Hidden stacked pages keep their last geometry, so a stale Test Area rect must not hit-test.
+        return (
+            self.page_stack.currentWidget() is self.page_capture
+            and self.test_area.isVisibleTo(self)
+        )
+
     def _cursor_in_test_area(self) -> bool:
+        if not self._test_area_is_active():
+            return False
         try:
-            gp = self.test_area.mapFromGlobal(self.cursor().pos())
+            gp = self.test_area.mapFromGlobal(self._cursor_global_pos())
             return self.test_area.rect().contains(gp)
-        except Exception:
-            return True
+        except Exception as exc:
+            _log.warning("Test Area hit-test failed; treating cursor as outside: %s", exc)
+            return False
 
     # ── Raw input ───────────────────────────────────────────────────
     def _on_raw_event_ui(self, event: dict[str, Any]):
@@ -1379,19 +1704,48 @@ class MainWindow(QMainWindow):
             if self.running:
                 if self._is_manual() and not self._cursor_in_test_area():
                     return
-                if (not self._is_manual()) and self._cursor_in_test_area() is False and self._is_over_side():
+                if (
+                    (not self._is_manual())
+                    and self._cursor_in_test_area() is False
+                    and self._cursor_over_capture_exclusion_ui()
+                ):
                     return
                 self.record_click(button, press, t_perf, event)
             elif self.listening and not self._arming_scheduled:
                 self._arming_scheduled = True
                 self._begin_session_from_first_click(button, press, t_perf, event)
 
-    def _is_over_side(self) -> bool:
+    def _capture_exclusion_widgets(self) -> list[QWidget]:
+        # Interactive chrome only; page backgrounds stay location-independent for Fixture capture.
+        return [
+            self.nav_rail,
+            self.capture_actions,
+            self.theme_combo,
+            self.lang_combo,
+            self.radio_manual,
+            self.radio_fixture,
+            self.device_edit,
+            self.button_combo,
+            self.hz_combo,
+            self.timing_tol_edit,
+            self.auto_stop_off,
+            self.auto_stop_on,
+            self.auto_stop_sec_combo,
+            *self._limit_edits.values(),
+            self.setup_scroll.verticalScrollBar(),
+        ]
+
+    def _cursor_over_capture_exclusion_ui(self) -> bool:
         try:
-            local = self.mapFromGlobal(self.cursor().pos())
-            return local.x() < 300
+            pos = self._cursor_global_pos()
+            for widget in self._capture_exclusion_widgets():
+                if not widget.isVisibleTo(self):
+                    continue
+                if widget.rect().contains(widget.mapFromGlobal(pos)):
+                    return True
         except Exception:
             return False
+        return False
 
     def _begin_session_from_first_click(self, button, press, release, event):
         if self.running or self.completed:
@@ -1548,6 +1902,9 @@ class MainWindow(QMainWindow):
                     tags=", ".join(visible_tags) if visible_tags else self._tr("review_tags_none"),
                 ),
             ]
+            evidence_lines = format_host_evidence_review_lines(self.host_evidence_snapshot, self._tr)
+            if evidence_lines:
+                lines += ["", *evidence_lines]
             self.review_text.setPlainText("\n".join(lines))
 
         self._update_overlay_deltas(m)
@@ -1575,6 +1932,10 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        if getattr(self, "_listen_start_timer", None) is not None:
+            self._listen_start_timer.stop()
+        if getattr(self, "ui_timer", None) is not None:
+            self.ui_timer.stop()
         self.stop_adapters()
         super().closeEvent(event)
 
