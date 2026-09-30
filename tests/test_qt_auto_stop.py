@@ -108,6 +108,7 @@ class QtUiPolishHelpersTests(unittest.TestCase):
         self.assertFalse(setup_controls_editable(running=True, completed=False))
         self.assertFalse(setup_controls_editable(running=False, completed=True))
         self.assertFalse(setup_controls_editable(running=True, completed=True))
+        self.assertFalse(setup_controls_editable(running=False, completed=False, profile_locked=True))
 
 
 if __name__ == "__main__":

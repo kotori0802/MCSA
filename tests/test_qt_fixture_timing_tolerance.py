@@ -154,8 +154,15 @@ class MainWindowToleranceTests(unittest.TestCase):
         if auto_stop:
             self.win.auto_stop_sec_combo.setCurrentText("1")
 
+    def _lock_and_arm(self):
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self.win._cursor_over_capture_exclusion_ui = lambda: False
+
     def _begin(self):
-        self.win._begin_session_from_first_click("Left", 100.0, 100.01, {})
+        self._lock_and_arm()
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
 
     def test_initial_state_is_blank(self):
         self.assertEqual(self.win.timing_tol_edit.text(), "")
@@ -173,9 +180,10 @@ class MainWindowToleranceTests(unittest.TestCase):
 
     def test_blank_fixture_blocks_session_start(self):
         self._fixture("")
-        self._begin()
+        self.assertFalse(self.win.lock_profile())
         self.assertFalse(self.win.running)
         self.assertIsNone(self.win.locked)
+        self.assertIsNone(self.win.profile_locked_settings)
         self.assertEqual(self.win.events, [])
         self.assertEqual(self.win.alert_label.text(), self.win._tr("fixture_timing_tolerance_invalid"))
 
@@ -183,9 +191,10 @@ class MainWindowToleranceTests(unittest.TestCase):
         for text in ("-1", "abc", "nan", "inf", "-inf"):
             with self.subTest(text=text):
                 self._fixture(text)
-                self._begin()
+                self.assertFalse(self.win.lock_profile())
                 self.assertFalse(self.win.running)
                 self.assertIsNone(self.win.locked)
+                self.assertIsNone(self.win.profile_locked_settings)
 
     def test_valid_fixture_locks_value(self):
         self._fixture("2.5")
@@ -208,7 +217,7 @@ class MainWindowToleranceTests(unittest.TestCase):
 
     def test_auto_stop_off_still_requires_and_preserves(self):
         self._fixture("", auto_stop=False)
-        self._begin()
+        self.assertFalse(self.win.lock_profile())
         self.assertFalse(self.win.running)
         self._fixture("2.5", auto_stop=False)
         self._begin()
@@ -251,20 +260,25 @@ class MainWindowToleranceTests(unittest.TestCase):
         self._fixture("2.5")
         self.win._update_controls()
         self.assertTrue(self.win.timing_tol_edit.isEnabled())
-        self._begin()
+        self.assertTrue(self.win.lock_profile())
+        self.assertFalse(self.win.timing_tol_edit.isEnabled())
+        self.assertTrue(self.win.arm_capture())
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertFalse(self.win.timing_tol_edit.isEnabled())
         self.assertEqual(self.win.timing_tol_edit.isEnabled(), self.win.hz_combo.isEnabled())
         self.win.stop_run()
         self.assertFalse(self.win.timing_tol_edit.isEnabled())
         self.assertEqual(self.win.timing_tol_edit.isEnabled(), self.win.hz_combo.isEnabled())
 
-    def test_new_run_clears_lock_and_keeps_setup_text(self):
+    def test_new_run_clears_run_lock_and_keeps_profile(self):
         self._fixture("2.5")
         self._begin()
         self.win.stop_run()
         self.win.new_run()
         self.assertIsNone(self.win.locked)
-        self.assertTrue(self.win.timing_tol_edit.isEnabled())
+        self.assertIsNotNone(self.win.profile_locked_settings)
+        self.assertFalse(self.win.timing_tol_edit.isEnabled())
         self.assertEqual(self.win.timing_tol_edit.text(), "2.5")
         self.assertEqual(self.win.hz_combo.currentText(), "10")
 

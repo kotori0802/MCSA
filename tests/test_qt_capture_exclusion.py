@@ -70,13 +70,20 @@ class CaptureExclusionTests(unittest.TestCase):
         self.win.timing_tol_edit.setText("2")
         self.win.auto_stop_off.setChecked(True)
 
+    def _lock_and_arm(self):
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self._t = float(self.win._arm_boundary_perf) + 0.001
+
     def _start_run(self):
         self._in_test_area = True
-        self.win.listening = True
-        self.win.completed = False
-        self.win._begin_session_from_first_click("Left", _T0, _T0 + 0.01, {})
+        self._lock_and_arm()
+        self.win._cursor_over_capture_exclusion_ui = lambda: False
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertTrue(self.win.running)
         self._qapp.processEvents()
+        self.win._cursor_over_capture_exclusion_ui = lambda: qt_app.MainWindow._cursor_over_capture_exclusion_ui(self.win)
 
     def _point_at(self, widget):
         self._qapp.processEvents()
@@ -173,9 +180,11 @@ class CaptureExclusionTests(unittest.TestCase):
 
     def test_hidden_page_controls_do_not_exclude(self):
         self._setup_fixture()
-        self.win.nav_setup.click()
         self._start_run()
+        self.win.nav_setup.click()
+        self._qapp.processEvents()
         self.assertFalse(self.win.btn_stop.isVisibleTo(self.win))
+        self.assertFalse(self.win.capture_actions.isVisibleTo(self.win))
         self._cursor = self.win.btn_stop.mapToGlobal(self.win.btn_stop.rect().center())
         self._in_test_area = False
         self.assertFalse(self.win.capture_actions.isVisibleTo(self.win))
@@ -200,6 +209,54 @@ class CaptureExclusionTests(unittest.TestCase):
         self._in_test_area = False
         self._raw_click(button="Right")
         self.assertEqual(len(self.win.events), 1)
+
+    def _break_cursor_position(self):
+        def _raise():
+            raise RuntimeError("forced cursor failure")
+        self.win._cursor_global_pos = _raise
+
+    def _break_exclusion_map(self):
+        def _raise(*_args, **_kwargs):
+            raise RuntimeError("forced mapFromGlobal failure")
+        self.win.nav_rail.mapFromGlobal = _raise
+
+    def test_exclusion_cursor_position_failure_fails_closed(self):
+        self._setup_fixture()
+        self._break_cursor_position()
+        with self.assertLogs(qt_app._log, level="WARNING"):
+            self.assertTrue(self.win._cursor_over_capture_exclusion_ui())
+
+    def test_exclusion_map_from_global_failure_fails_closed(self):
+        self._setup_fixture()
+        self.assertTrue(self.win.nav_rail.isVisibleTo(self.win))
+        self._break_exclusion_map()
+        with self.assertLogs(qt_app._log, level="WARNING"):
+            self.assertTrue(self.win._cursor_over_capture_exclusion_ui())
+
+    def test_fixture_running_event_under_exclusion_failure_not_recorded(self):
+        self._setup_fixture()
+        self.win.nav_capture.click()
+        self._start_run()
+        self._in_test_area = False
+        self._break_exclusion_map()
+        with self.assertLogs(qt_app._log, level="WARNING"):
+            self._raw_click()
+        self.assertEqual(len(self.win.events), 1)
+        self.assertTrue(self.win.running)
+
+    def test_fixture_armed_first_event_under_exclusion_failure_does_not_start(self):
+        self._setup_fixture()
+        self.win.nav_capture.click()
+        self._lock_and_arm()
+        self._in_test_area = False
+        self._break_cursor_position()
+        with self.assertLogs(qt_app._log, level="WARNING"):
+            self._raw_click()
+        self.assertFalse(self.win.running)
+        self.assertIsNone(self.win.start_time)
+        self.assertEqual(self.win.events, [])
+        self.assertTrue(self.win.capture_armed)
+        self.assertFalse(self.win._arming_scheduled)
 
     def test_host_evidence_uses_only_accepted_events(self):
         self.win.radio_fixture.setChecked(True)
@@ -250,7 +307,6 @@ class HiddenTestAreaGeometryTests(unittest.TestCase):
         self.win._listen_start_timer.stop()
         self.win.listening = True
         self.win.completed = False
-        self.win._ignore_arm_until = 0.0
         self._cursor = QPoint(0, 0)
         self.win._cursor_global_pos = lambda: self._cursor
         self._t = _T0
@@ -285,7 +341,13 @@ class HiddenTestAreaGeometryTests(unittest.TestCase):
             self.win.auto_stop_on.setChecked(True)
             self.win.auto_stop_sec_combo.setCurrentText(auto_sec)
 
+    def _lock_and_arm(self):
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self._t = float(self.win._arm_boundary_perf) + 0.001
+
     def _start_run_via_real_test_area(self):
+        self._lock_and_arm()
         self._show("capture")
         self._cursor = self.area_center
         self.assertTrue(self.win._cursor_in_test_area())
@@ -409,7 +471,10 @@ class HiddenTestAreaGeometryTests(unittest.TestCase):
             self.assertFalse(self.win._cursor_in_test_area())
 
     def test_listen_click_under_hit_test_failure_does_not_start_run(self):
-        self._setup_fixture()
+        self.win.radio_manual.setChecked(True)
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self._t = float(self.win._arm_boundary_perf) + 0.001
         self._show("capture")
         self._cursor = self.area_center
         self._break_hit_test()

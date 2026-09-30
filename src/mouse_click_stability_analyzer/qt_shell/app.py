@@ -1,6 +1,7 @@
 """PySide6 MainWindow — Apple-inspired shell over existing MCSA core."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -61,6 +62,20 @@ from .charts import IntervalChart, ScatterChart
 from .styles import get_palette, get_style
 
 _log = logging.getLogger(__name__)
+
+
+def _finite_raw_time_perf(event: dict[str, Any]) -> float | None:
+    """Return the Raw Input perf stamp only if present, numeric, and finite."""
+    raw = event.get("time_perf")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
 
 
 def parse_auto_stop_seconds(enabled: bool, raw: Any) -> float | None:
@@ -152,9 +167,17 @@ def qt_button_label(text: Any) -> str:
     return str(text).replace("&", "&&")
 
 
-def setup_controls_editable(*, running: bool, completed: bool) -> bool:
-    """Setup is editable only before a run starts (LISTEN / fresh)."""
-    return (not running) and (not completed)
+def setup_controls_editable(*, running: bool, completed: bool, profile_locked: bool = False) -> bool:
+    """Setup is editable only in Draft: not locked, not running, not completed."""
+    return (not running) and (not completed) and (not profile_locked)
+
+
+class ProfileValidationError(ValueError):
+    """Setup profile failed validation. ``key`` is an i18n message key."""
+
+    def __init__(self, key: str):
+        super().__init__(key)
+        self.key = key
 
 
 QT_CUSTOM_LIMIT_KEYS: tuple[str, ...] = (
@@ -501,9 +524,15 @@ class MainWindow(QMainWindow):
         self.first_release_time = None
         self.last_release_time = None
         self.locked: dict[str, Any] | None = None
+        self.profile_locked_settings: dict[str, Any] | None = None
+        self.profile_locked_target: str = ""
+        self._profile_validation_error_key: str | None = None
+        self.capture_armed = False
         self.host_evidence_snapshot: dict[str, Any] | None = None
         self._arming_scheduled = False
         self._ignore_arm_until = 0.0
+        # Same Windows QPC domain as Raw Input event["time_perf"] (child stamps; parent Auto Stop already compares).
+        self._arm_boundary_perf: float | None = None
         self._locked_button = "Left"
         self._last_metric_ts = 0.0
         self.bridge = CaptureBridge()
@@ -822,6 +851,15 @@ class MainWindow(QMainWindow):
             limits_grid.addWidget(cell_w, row, col)
         limits_l.addLayout(limits_grid)
         inner_l.addWidget(limits_card)
+        self.lbl_profile_status = QLabel("")
+        self.lbl_profile_status.setObjectName("Muted")
+        self.lbl_profile_status.setWordWrap(True)
+        inner_l.addWidget(self.lbl_profile_status)
+        self.btn_lock_profile = QPushButton("Lock Profile & Continue")
+        self.btn_lock_profile.setObjectName("Primary")
+        self.btn_lock_profile.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_lock_profile.clicked.connect(self.lock_profile)
+        inner_l.addWidget(self.btn_lock_profile)
         inner_l.addStretch(1)
 
         wrap = QWidget()
@@ -869,12 +907,18 @@ class MainWindow(QMainWindow):
         self.btn_clear_overlay = QPushButton("Clear Overlay")
         self.btn_clear_overlay.setObjectName("Secondary")
         self.btn_clear_overlay.clicked.connect(self.clear_overlay)
+        self.btn_arm = QPushButton("Arm Capture")
+        self.btn_arm.setObjectName("Primary")
+        self.btn_arm.clicked.connect(self._on_arm_clicked)
+        self.btn_edit_profile = QPushButton("Edit Profile")
+        self.btn_edit_profile.setObjectName("Secondary")
+        self.btn_edit_profile.clicked.connect(self.edit_profile)
         row1 = QHBoxLayout()
         row2 = QHBoxLayout()
-        for btn in (self.btn_stop, self.btn_new, self.btn_finish):
+        for btn in (self.btn_stop, self.btn_new, self.btn_finish, self.btn_arm):
             row1.addWidget(btn)
         row1.addStretch(1)
-        for btn in (self.btn_save, self.btn_overlay, self.btn_clear_overlay):
+        for btn in (self.btn_save, self.btn_overlay, self.btn_clear_overlay, self.btn_edit_profile):
             row2.addWidget(btn)
         row2.addStretch(1)
         actions_l.addLayout(row1)
@@ -1114,6 +1158,8 @@ class MainWindow(QMainWindow):
         self.btn_save.setText(self._tr("save_report_as"))
         self.btn_overlay.setText(self._tr("compare_overlay"))
         self.btn_clear_overlay.setText(self._tr("clear_overlay"))
+        self.btn_lock_profile.setText(self._tr("lock_profile_continue"))
+        self.btn_edit_profile.setText(self._tr("edit_profile"))
         self.btn_help.setText(self._tr("quick_start"))
         self.lbl_theme.setText(self._tr("theme"))
         self.theme_combo.setItemText(0, self._tr("theme_light"))
@@ -1125,20 +1171,23 @@ class MainWindow(QMainWindow):
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
         self._show_workflow_page(self._current_page)
-        if self._is_manual():
-            self.mode_label.setText(self._tr("mode_manual"))
-        else:
-            self._refresh_fixture_mode_label()
+        self._refresh_lifecycle_presentation()
 
     # ── Settings / mode ─────────────────────────────────────────────
-    def _is_manual(self) -> bool:
+    def _ui_is_manual(self) -> bool:
         return self.radio_manual.isChecked()
+
+    def _is_manual(self) -> bool:
+        snapshot = self.locked if self.locked is not None else self.profile_locked_settings
+        if snapshot is not None:
+            return bool(snapshot.get("manual_mode"))
+        return self._ui_is_manual()
 
     def _custom_limit_raw_values(self) -> dict[str, str]:
         return {key: self._limit_edits[key].text() for key in QT_CUSTOM_LIMIT_KEYS}
 
     def _apply_mode_fields(self):
-        manual = self._is_manual()
+        manual = self._ui_is_manual()
         self.hz_label.setVisible(not manual)
         self.hz_combo.setVisible(not manual)
         self.timing_tol_label.setVisible(not manual)
@@ -1147,17 +1196,15 @@ class MainWindow(QMainWindow):
         self.auto_stop_off.setVisible(not manual)
         self.auto_stop_on.setVisible(not manual)
         self._sync_auto_stop_widgets()
-        if manual:
+        if self._ui_is_manual():
             self.mode_label.setText(self._tr("mode_manual"))
-            if not self.running and not self.completed:
-                self.status_label.setText(self._tr("listen_hint"))
         else:
             self._refresh_fixture_mode_label()
-            if not self.running and not self.completed:
-                self.status_label.setText(self._tr("fixture_warn"))
+        if not self.running and not self.completed:
+            self._refresh_lifecycle_presentation()
 
     def _refresh_fixture_mode_label(self, _text: str = ""):
-        if self._is_manual():
+        if self._ui_is_manual():
             return
         raw = self.hz_combo.currentText()
         try:
@@ -1167,7 +1214,7 @@ class MainWindow(QMainWindow):
         self.mode_label.setText(self._tr("mode_fixture", hz=hz_text))
 
     def _sync_auto_stop_widgets(self):
-        fixture = not self._is_manual()
+        fixture = not self._ui_is_manual()
         on = self.auto_stop_on.isChecked()
         self.auto_stop_label.setVisible(fixture)
         self.auto_stop_off.setVisible(fixture)
@@ -1182,13 +1229,145 @@ class MainWindow(QMainWindow):
             btn.update()
 
     def _auto_stop_seconds(self) -> float | None:
-        enabled = (not self._is_manual()) and self.auto_stop_on.isChecked()
+        enabled = (not self._ui_is_manual()) and self.auto_stop_on.isChecked()
         return parse_auto_stop_seconds(enabled, self.auto_stop_sec_combo.currentText())
 
-    def settings(self) -> dict[str, Any]:
-        manual = self._is_manual()
+    def _validated_profile_settings_from_ui(self) -> dict[str, Any]:
+        """Parse current Setup widgets into an immutable-ready settings dict.
+
+        Raises ProfileValidationError with an i18n key on invalid input.
+        """
+        try:
+            self._auto_stop_seconds()
+        except ValueError as exc:
+            raise ProfileValidationError("auto_stop_invalid") from exc
+        if not self._ui_is_manual():
+            try:
+                parse_reference_rate_hz(self.hz_combo.currentText())
+            except ValueError as exc:
+                raise ProfileValidationError("reference_rate_invalid") from exc
+            try:
+                parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
+            except ValueError as exc:
+                raise ProfileValidationError("fixture_timing_tolerance_invalid") from exc
+        try:
+            parse_qt_custom_limits(self._custom_limit_raw_values())
+        except QtCustomLimitsError as exc:
+            key = "custom_limits_order_invalid" if exc.code == "order" else "custom_limits_invalid"
+            raise ProfileValidationError(key) from exc
+        return copy.deepcopy(self.settings())
+
+    def _lifecycle_state(self) -> str:
+        """Authoritative UI/lifecycle label. Not stored separately from flags/snapshots."""
+        if self.running:
+            return "running"
+        if self.completed:
+            return "completed"
+        if self.profile_locked_settings is None:
+            return "draft"
+        if self.capture_armed:
+            return "armed"
+        return "ready"
+
+    def _refresh_lifecycle_presentation(self):
+        state = self._lifecycle_state()
+        if state == "draft":
+            self.val_phase.setText(self._tr("phase_draft"))
+            self.status_label.setText(self._tr("status_draft"))
+            error_key = self._profile_validation_error_key
+            self.lbl_profile_status.setText(self._tr(error_key) if error_key else self._tr("profile_status_draft"))
+            self.hint.setText(self._tr("test_area_hint_draft"))
+        elif state == "ready":
+            self.val_phase.setText(self._tr("phase_ready"))
+            self.status_label.setText(self._tr("status_ready"))
+            self.lbl_profile_status.setText(self._tr("profile_status_locked"))
+            self.hint.setText(self._tr("test_area_hint_ready"))
+        elif state == "armed":
+            self.val_phase.setText(self._tr("phase_armed"))
+            self.status_label.setText(self._tr("status_armed"))
+            self.lbl_profile_status.setText(self._tr("profile_status_locked"))
+            self.hint.setText(self._tr("test_area_hint_armed"))
+        elif state == "running":
+            self.val_phase.setText(self._tr("phase_running"))
+            self.lbl_profile_status.setText(self._tr("profile_status_locked"))
+        elif state == "completed":
+            self.val_phase.setText(self._tr("phase_review"))
+            self.lbl_profile_status.setText(self._tr("profile_status_locked"))
+        if self._ui_is_manual():
+            self.mode_label.setText(self._tr("mode_manual"))
+        else:
+            self._refresh_fixture_mode_label()
+
+    def lock_profile(self) -> bool:
+        if self.running or self.completed:
+            return False
+        try:
+            settings = self._validated_profile_settings_from_ui()
+        except ProfileValidationError as exc:
+            self.alert_label.setText(self._tr(exc.key))
+            self._profile_validation_error_key = exc.key
+            self._refresh_lifecycle_presentation()
+            return False
+        self._profile_validation_error_key = None
         device = self.device_edit.text().strip()
         if device:
+            self.target = device
+        self.profile_locked_settings = settings
+        self.profile_locked_target = self.target
+        self.capture_armed = False
+        self.device_press_queues.clear()
+        self._arming_scheduled = False
+        self._locked_button = str(settings.get("focus_button") or "Left")
+        self.alert_label.setText("")
+        self._show_workflow_page("capture")
+        self.enter_listen()
+        return True
+
+    def _on_arm_clicked(self):
+        if self._lifecycle_state() == "armed":
+            self.disarm_capture()
+        else:
+            self.arm_capture()
+
+    def arm_capture(self) -> bool:
+        if self.profile_locked_settings is None or self.running or self.completed:
+            return False
+        self.device_press_queues.clear()
+        self._arming_scheduled = False
+        self._arm_boundary_perf = time.perf_counter()
+        self.capture_armed = True
+        self._update_controls()
+        return True
+
+    def disarm_capture(self) -> bool:
+        if not self.capture_armed or self.running or self.completed:
+            return False
+        self.capture_armed = False
+        self._arm_boundary_perf = None
+        self.device_press_queues.clear()
+        self._arming_scheduled = False
+        self._update_controls()
+        return True
+
+    def edit_profile(self) -> bool:
+        if self.running or self.completed:
+            return False
+        self.capture_armed = False
+        self._arm_boundary_perf = None
+        self.profile_locked_settings = None
+        self.profile_locked_target = ""
+        self._profile_validation_error_key = None
+        self.device_press_queues.clear()
+        self._arming_scheduled = False
+        self.alert_label.setText("")
+        self._show_workflow_page("setup")
+        self._update_controls()
+        return True
+
+    def settings(self) -> dict[str, Any]:
+        manual = self._ui_is_manual()
+        device = self.device_edit.text().strip()
+        if self.profile_locked_settings is None and self.locked is None and device:
             self.target = device
         if manual:
             hz = 0.0
@@ -1467,7 +1646,8 @@ class MainWindow(QMainWindow):
         self.completed = False
         self.report_written = False
         self._arming_scheduled = False
-        self.val_phase.setText(self._tr("phase_listen"))
+        self.capture_armed = False
+        self._arm_boundary_perf = None
         self._reset_live_values_for_listen()
         self.hint.show()
         self.test_area.setProperty("active", False)
@@ -1475,7 +1655,10 @@ class MainWindow(QMainWindow):
         self.test_area.style().polish(self.test_area)
         self._apply_mode_fields()
         self._update_controls()
-        self._locked_button = self.button_combo.currentText()
+        if self.profile_locked_settings is not None:
+            self._locked_button = str(self.profile_locked_settings.get("focus_button") or "Left")
+        else:
+            self._locked_button = self.button_combo.currentText()
         try:
             self.ensure_raw_input()
         except Exception as exc:
@@ -1520,6 +1703,8 @@ class MainWindow(QMainWindow):
         self.start_time = self.end_time = self.stop_time = None
         self.locked = None
         self.host_evidence_snapshot = None
+        self.capture_armed = False
+        self._arm_boundary_perf = None
         self.run_id = _now_run_id()
         self.alert_label.setText("")
         self.scatter.set_points([])
@@ -1641,17 +1826,27 @@ class MainWindow(QMainWindow):
         self._ignore_arm_until = time.perf_counter() + 0.8
 
     def _update_controls(self):
+        state = self._lifecycle_state()
         self.btn_stop.setEnabled(self.running)
         self.btn_new.setEnabled(not self.running)
         self.btn_finish.setEnabled(self.completed and not self.running)
         self.btn_save.setEnabled(self.report_written)
-        editable = setup_controls_editable(running=self.running, completed=self.completed)
+        self.btn_lock_profile.setEnabled(state == "draft")
+        self.btn_arm.setEnabled(state in ("ready", "armed"))
+        self.btn_arm.setText(self._tr("disarm_capture") if state == "armed" else self._tr("arm_capture"))
+        self.btn_edit_profile.setEnabled(state in ("ready", "armed"))
+        editable = setup_controls_editable(
+            running=self.running,
+            completed=self.completed,
+            profile_locked=self.profile_locked_settings is not None,
+        )
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
             self.timing_tol_edit, self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
             self.device_edit, *self._limit_edits.values(),
         ):
             w.setEnabled(editable)
+        self._refresh_lifecycle_presentation()
 
     def _cursor_global_pos(self):
         return self.cursor().pos()
@@ -1675,14 +1870,22 @@ class MainWindow(QMainWindow):
 
     # ── Raw input ───────────────────────────────────────────────────
     def _on_raw_event_ui(self, event: dict[str, Any]):
-        if not self.running and not (self.listening and not self.completed):
+        if self.running:
+            pass
+        elif self.capture_armed and self.profile_locked_settings is not None and not self.completed:
+            pass
+        else:
             return
         if event.get("capture_source") != "windows_raw_input":
             return
         button = event.get("button")
         event_type = event.get("event_type")
         device_source = event.get("device_source") or "unknown_device"
-        t_perf = float(event.get("time_perf") or time.perf_counter())
+        if self.running:
+            t_perf = float(event.get("time_perf") or time.perf_counter())
+        else:
+            # Armed first-event qualification never substitutes parent delivery time.
+            t_perf = _finite_raw_time_perf(event)
         target = self._locked_button
         if self.running:
             self.raw_events.append({
@@ -1694,6 +1897,10 @@ class MainWindow(QMainWindow):
                 self.alert_label.setText(f"Wrong button: {button}")
             return
         key = (device_source, str(button))
+        if not self.running and (t_perf is None or not self._is_timestamp_after_arm_boundary(t_perf)):
+            # An unqualifiable target event must not leave a half pair a later event could complete.
+            self.device_press_queues.pop(key, None)
+            return
         if event_type == "down":
             self.device_press_queues[key].append(t_perf)
         elif event_type == "up":
@@ -1711,9 +1918,28 @@ class MainWindow(QMainWindow):
                 ):
                     return
                 self.record_click(button, press, t_perf, event)
-            elif self.listening and not self._arming_scheduled:
+            elif self.capture_armed and not self._arming_scheduled:
+                if (
+                    not self._is_timestamp_after_arm_boundary(press)
+                    or not self._is_timestamp_after_arm_boundary(t_perf)
+                ):
+                    return
                 self._arming_scheduled = True
                 self._begin_session_from_first_click(button, press, t_perf, event)
+
+    def _is_timestamp_after_arm_boundary(self, t_perf: float) -> bool:
+        """True only for Raw Input stamps strictly after Arm. At/before cannot become t0."""
+        boundary = self._arm_boundary_perf
+        if boundary is None:
+            return False
+        try:
+            stamp = float(t_perf)
+            limit = float(boundary)
+        except (TypeError, ValueError):
+            return False
+        if not (math.isfinite(stamp) and math.isfinite(limit)):
+            return False
+        return stamp > limit
 
     def _capture_exclusion_widgets(self) -> list[QWidget]:
         # Interactive chrome only; page backgrounds stay location-independent for Fixture capture.
@@ -1731,6 +1957,9 @@ class MainWindow(QMainWindow):
             self.auto_stop_off,
             self.auto_stop_on,
             self.auto_stop_sec_combo,
+            self.btn_lock_profile,
+            self.btn_arm,
+            self.btn_edit_profile,
             *self._limit_edits.values(),
             self.setup_scroll.verticalScrollBar(),
         ]
@@ -1743,47 +1972,39 @@ class MainWindow(QMainWindow):
                     continue
                 if widget.rect().contains(widget.mapFromGlobal(pos)):
                     return True
-        except Exception:
-            return False
+        except Exception as exc:
+            _log.warning("Capture exclusion hit-test failed; treating cursor as over UI: %s", exc)
+            return True
         return False
 
     def _begin_session_from_first_click(self, button, press, release, event):
         if self.running or self.completed:
             self._arming_scheduled = False
             return
+        if self.profile_locked_settings is None or not self.capture_armed:
+            self._arming_scheduled = False
+            return
+        if not (
+            self._is_timestamp_after_arm_boundary(press)
+            and self._is_timestamp_after_arm_boundary(release)
+        ):
+            self._arming_scheduled = False
+            return
         if time.perf_counter() < self._ignore_arm_until:
             self._arming_scheduled = False
             return
-        if not self._cursor_in_test_area():
-            self._arming_scheduled = False
-            return
-        try:
-            auto_sec = self._auto_stop_seconds()
-        except ValueError:
-            self.alert_label.setText(self._tr("auto_stop_invalid"))
-            self._arming_scheduled = False
-            return
-        if not self._is_manual():
-            try:
-                parse_reference_rate_hz(self.hz_combo.currentText())
-            except ValueError:
-                self.alert_label.setText(self._tr("reference_rate_invalid"))
+        if self._is_manual():
+            if not self._cursor_in_test_area():
                 self._arming_scheduled = False
                 return
-            try:
-                parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
-            except ValueError:
-                self.alert_label.setText(self._tr("fixture_timing_tolerance_invalid"))
-                self._arming_scheduled = False
-                return
-        try:
-            parse_qt_custom_limits(self._custom_limit_raw_values())
-        except QtCustomLimitsError as exc:
-            key = "custom_limits_order_invalid" if exc.code == "order" else "custom_limits_invalid"
-            self.alert_label.setText(self._tr(key))
+        elif self._cursor_over_capture_exclusion_ui():
             self._arming_scheduled = False
             return
-        s = self.settings()
+        s = copy.deepcopy(self.profile_locked_settings)
+        duration_sec = s.get("duration_sec")
+        auto_sec = None
+        if isinstance(duration_sec, (int, float)) and not isinstance(duration_sec, bool) and duration_sec > 0:
+            auto_sec = float(duration_sec)
         target = str(s.get("focus_button") or "Left")
         if button != target:
             self.alert_label.setText(f"Wrong button: got {button}, expected {target}")
@@ -1794,7 +2015,8 @@ class MainWindow(QMainWindow):
         self.device_press_queues.clear()
         self.first_press_time = self.last_press_time = None
         self.first_release_time = self.last_release_time = None
-        self.locked = dict(s)
+        self.locked = copy.deepcopy(s)
+        self.target = self.profile_locked_target
         self.host_evidence_snapshot = None
         self._locked_button = target
         self.start_time = press
@@ -1803,6 +2025,8 @@ class MainWindow(QMainWindow):
         self.running = True
         self.listening = False
         self.completed = False
+        self.capture_armed = False
+        self._arm_boundary_perf = None
         self.report_written = False
         self.val_phase.setText(self._tr("phase_running"))
         self.hint.hide()

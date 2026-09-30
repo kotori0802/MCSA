@@ -90,13 +90,18 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.auto_stop_on.setChecked(True)
             self.win.auto_stop_sec_combo.setCurrentText(auto_sec)
 
+    def _lock_and_arm(self):
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self.win._cursor_over_capture_exclusion_ui = lambda: False
+
     def _run(self, offsets, *, stop=True):
-        self.win.listening = True
-        self.win.completed = False
-        self.win._begin_session_from_first_click("Left", _T0, _T0 + 0.01, {})
+        self._lock_and_arm()
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertTrue(self.win.running)
         for off in offsets[1:]:
-            press = _T0 + off / 1000.0
+            press = t0 + off / 1000.0
             self.win.record_click("Left", press, press + 0.01, {})
         if stop:
             self.win.stop_run()
@@ -176,12 +181,14 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.interval_chart,
             self.win.review_text,
             self.win.btn_stop,
+            self.win.btn_arm,
             self.win.btn_new,
             self.win.btn_finish,
             self.win.val_verdict,
             self.win.status_label,
         ):
             self.assertTrue(_under(widget, self.win.page_capture), widget)
+        self.assertTrue(_under(self.win.btn_lock_profile, self.win.page_setup))
 
     def test_help_is_on_nav_footer(self):
         self.assertTrue(_under(self.win.btn_help, self.win.nav_rail))
@@ -207,7 +214,7 @@ class WorkflowShellTests(unittest.TestCase):
         self.win.nav_capture.click()
         self._run([0, 25], stop=False)
         self.win.nav_setup.click()
-        self.assertFalse(qt_app.setup_controls_editable(running=True, completed=False))
+        self.assertFalse(qt_app.setup_controls_editable(running=True, completed=False, profile_locked=True))
         for widget in (
             self.win.device_edit,
             self.win.hz_combo,

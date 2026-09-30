@@ -256,13 +256,18 @@ class ReviewPresentationTests(unittest.TestCase):
             self.win.auto_stop_on.setChecked(True)
             self.win.auto_stop_sec_combo.setCurrentText(auto_sec)
 
+    def _lock_and_arm(self):
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self.win._cursor_over_capture_exclusion_ui = lambda: False
+
     def _run(self, offsets, *, stop=True):
-        self.win.listening = True
-        self.win.completed = False
-        self.win._begin_session_from_first_click("Left", _T0, _T0 + 0.01, {})
+        self._lock_and_arm()
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertTrue(self.win.running)
         for off in offsets[1:]:
-            press = _T0 + off / 1000.0
+            press = t0 + off / 1000.0
             self.win.record_click("Left", press, press + 0.01, {})
         if stop:
             self.win.stop_run()

@@ -74,15 +74,22 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
         win = win or self.win
         win.radio_manual.setChecked(True)
 
+    def _lock_and_arm(self, win=None):
+        win = win or self.win
+        self.assertTrue(win.lock_profile())
+        self.assertTrue(win.arm_capture())
+        win._cursor_over_capture_exclusion_ui = lambda: False
+
     def _run(self, press_offsets_ms, win=None, *, stop=True):
         win = win or self.win
-        win.listening = True
+        self._lock_and_arm(win)
         win.completed = False
+        t0 = float(win._arm_boundary_perf) + 0.001
         first = press_offsets_ms[0]
-        win._begin_session_from_first_click("Left", _T0 + first / 1000.0, _T0 + first / 1000.0 + 0.01, {})
+        win._begin_session_from_first_click("Left", t0 + first / 1000.0, t0 + first / 1000.0 + 0.01, {})
         self.assertTrue(win.running, "session did not start")
         for off in press_offsets_ms[1:]:
-            press = _T0 + off / 1000.0
+            press = t0 + off / 1000.0
             win.record_click("Left", press, press + 0.01, {})
         if stop:
             win.stop_run()
@@ -206,6 +213,8 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
         self._setup_fixture(hz="40", tol="2", auto_sec="0.1")
         with mock.patch.object(qt_app, "build_fixture_host_evidence", wraps=build_fixture_host_evidence) as builder:
             self._run([0, 25, 50, 75, 104], stop=False)
+            # t0 is a real post-Arm QPC stamp; expire Auto Stop without sleeping.
+            self.win.end_time = time.perf_counter() - 1e-6
             self.win._tick()
             self.win._tick()
         self.assertFalse(self.win.running)
@@ -225,10 +234,11 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
     def test_new_session_clears_snapshot_before_capture(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
+        self.win.new_run()
         self.win.host_evidence_snapshot = {"stale": True}
-        self.win.completed = False
-        self.win.listening = True
-        self.win._begin_session_from_first_click("Left", _T0, _T0 + 0.01, {})
+        self.assertTrue(self.win.arm_capture())
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertTrue(self.win.running)
         self.assertIsNone(self.win.host_evidence_snapshot)
 
