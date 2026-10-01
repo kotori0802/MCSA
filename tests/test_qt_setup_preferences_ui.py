@@ -471,13 +471,18 @@ class SetupPreferencesUiTests(unittest.TestCase):
     # 17
     def test_capture_lifecycle_widgets_exist_once_on_capture(self):
         buttons = self.win.findChildren(QPushButton)
-        for widget in (
-            self.win.btn_arm, self.win.btn_stop, self.win.btn_new, self.win.btn_finish,
-            self.win.btn_save, self.win.btn_overlay, self.win.btn_clear_overlay, self.win.btn_edit_profile,
-        ):
+        for widget in (self.win.btn_arm, self.win.btn_stop, self.win.btn_edit_profile):
             with self.subTest(widget=widget.text()):
                 self.assertEqual(buttons.count(widget), 1)
                 self.assertTrue(_under(widget, self.win.page_capture))
+        for widget in (
+            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_overlay, self.win.btn_clear_overlay,
+        ):
+            with self.subTest(widget=widget.text()):
+                self.assertEqual(buttons.count(widget), 1)
+                self.assertTrue(_under(widget, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_export, self.win.page_results))
         for widget in (self.win.test_area, self.win.scatter, self.win.interval_chart, self.win.review_text):
             self.assertTrue(_under(widget, self.win.page_capture))
         self.assertEqual(buttons.count(self.win.btn_lock_profile), 1)
@@ -485,7 +490,8 @@ class SetupPreferencesUiTests(unittest.TestCase):
     # 18
     def test_results_remains_placeholder(self):
         self.win.nav_results.click()
-        self.assertIn("later phase", self.win.results_placeholder.text().lower())
+        self.assertEqual(self.win.results_placeholder.text(), self.win._tr("results_empty"))
+        self.assertTrue(self.win.results_empty_card.isVisibleTo(self.win))
         self.assertFalse(_under(self.win.review_text, self.win.page_results))
 
     def test_rail_identity_keeps_product_name(self):

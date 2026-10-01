@@ -215,26 +215,38 @@ QPushButton#Danger {
     color: white;
     border: none;
 }
-QPushButton#Secondary {
+QPushButton#Secondary, QToolButton#Secondary {
     background: #ffffff;
     border: 1px solid #c7c7cc;
     min-height: 20px;
     padding: 10px 16px;
 }
-QPushButton#Secondary:hover {
+QPushButton#Secondary:hover, QToolButton#Secondary:hover {
     background: #f2f2f7;
     border-color: #8e8e93;
 }
-QPushButton#Secondary:pressed {
+QPushButton#Secondary:pressed, QToolButton#Secondary:pressed {
     background: #e5e5ea;
 }
-QPushButton#Secondary:focus {
+QPushButton#Secondary:focus, QToolButton#Secondary:focus {
     border: 2px solid #007aff;
 }
-QPushButton#Secondary:disabled {
+QPushButton#Secondary:disabled, QToolButton#Secondary:disabled {
     color: #a1a1a6;
     background: #f2f2f7;
     border-color: #d2d2d7;
+}
+QToolButton#Secondary {
+    border-radius: 12px;
+    font-weight: 600;
+    padding: 10px 22px 10px 16px;
+}
+QToolButton#Secondary::menu-indicator {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 12px;
+    height: 8px;
+    image: url("@CHEVRON_ICON@");
 }
 QRadioButton, QCheckBox {
     background: transparent;
@@ -308,6 +320,9 @@ QTextEdit {
     padding: 8px;
     font-family: Consolas, "Cascadia Mono", monospace;
     font-size: 11px;
+}
+QTextEdit#ResultsEvidence {
+    font-size: 12px;
 }
 QListWidget {
     background: #ffffff;
@@ -522,27 +537,39 @@ QPushButton#Danger {
     color: white;
     border: none;
 }
-QPushButton#Secondary {
+QPushButton#Secondary, QToolButton#Secondary {
     background: #2c2c2e;
     border: 1px solid #636366;
     min-height: 20px;
     padding: 10px 16px;
     color: #f5f5f7;
 }
-QPushButton#Secondary:hover {
+QPushButton#Secondary:hover, QToolButton#Secondary:hover {
     background: #3a3a3c;
     border-color: #8e8e93;
 }
-QPushButton#Secondary:pressed {
+QPushButton#Secondary:pressed, QToolButton#Secondary:pressed {
     background: #48484a;
 }
-QPushButton#Secondary:focus {
+QPushButton#Secondary:focus, QToolButton#Secondary:focus {
     border: 2px solid #0a84ff;
 }
-QPushButton#Secondary:disabled {
+QPushButton#Secondary:disabled, QToolButton#Secondary:disabled {
     color: #636366;
     background: #1c1c1e;
     border-color: #3a3a3c;
+}
+QToolButton#Secondary {
+    border-radius: 12px;
+    font-weight: 600;
+    padding: 10px 22px 10px 16px;
+}
+QToolButton#Secondary::menu-indicator {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 12px;
+    height: 8px;
+    image: url("@CHEVRON_ICON@");
 }
 QRadioButton, QCheckBox {
     background: transparent;
@@ -619,6 +646,9 @@ QTextEdit {
     font-family: Consolas, "Cascadia Mono", monospace;
     font-size: 11px;
     color: #f5f5f7;
+}
+QTextEdit#ResultsEvidence {
+    font-size: 12px;
 }
 QListWidget {
     background: #2c2c2e;

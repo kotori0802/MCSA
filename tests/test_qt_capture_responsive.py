@@ -103,8 +103,7 @@ class CaptureResponsiveTests(unittest.TestCase):
 
     def _action_buttons(self):
         return [
-            self.win.btn_stop, self.win.btn_new, self.win.btn_finish, self.win.btn_arm,
-            self.win.btn_save, self.win.btn_overlay, self.win.btn_clear_overlay, self.win.btn_edit_profile,
+            self.win.btn_stop, self.win.btn_arm, self.win.btn_edit_profile,
         ]
 
     def _assert_label_value_separated(self, values) -> None:
@@ -277,18 +276,21 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.win.stop_run()
         self.assertTrue(self.win.completed)
         snap = self.win.host_evidence_snapshot
-        text = self.win.review_text.toPlainText()
-        self.assertTrue(self.win.review_text.isVisibleTo(self.win))
+        self.assertFalse(self.win.review_text.isVisibleTo(self.win))
+        self.assertTrue(self.win.results_workspace.isVisibleTo(self.win))
+        obs = self.win.results_observations_text.text()
+        self.assertGreater(len(obs), 0)
         self._show_capture_at(1280, 720)
         self.assertIs(self.win.host_evidence_snapshot, snap)
-        self.assertEqual(self.win.review_text.toPlainText(), text)
+        self.assertFalse(self.win.review_text.isVisibleTo(self.win))
         self.assertTrue(self.win.completed)
-        self.assertGreaterEqual(self.win.review_text.height(), 140)
-        self.assertGreater(len(self.win.review_text.toPlainText()), 0)
         self.assertGreaterEqual(self.win.test_area.height(), 280)
         self._show_capture_at(1600, 900)
         self.assertIs(self.win.host_evidence_snapshot, snap)
-        self.assertTrue(self.win.review_text.isVisibleTo(self.win))
+        self.win._show_workflow_page("results")
+        self._settle()
+        self.assertEqual(self.win.results_observations_text.text(), obs)
+        self.assertTrue(self.win.results_workspace.isVisibleTo(self.win))
 
     # 11
     def test_startup_window_preset_reflows_capture_without_lifecycle_change(self):

@@ -109,8 +109,7 @@ class CaptureExclusionTests(unittest.TestCase):
         self.win.nav_capture.click()
         self._start_run()
         for widget in (
-            self.win.btn_new, self.win.btn_finish, self.win.btn_save,
-            self.win.btn_overlay, self.win.btn_clear_overlay,
+            self.win.btn_arm, self.win.btn_edit_profile,
         ):
             with self.subTest(widget=widget.text()):
                 self._assert_click_excluded(widget)

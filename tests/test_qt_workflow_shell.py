@@ -182,13 +182,15 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.review_text,
             self.win.btn_stop,
             self.win.btn_arm,
-            self.win.btn_new,
-            self.win.btn_finish,
             self.win.val_verdict,
             self.win.status_label,
         ):
             self.assertTrue(_under(widget, self.win.page_capture), widget)
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.page_setup))
+        self.assertTrue(_under(self.win.btn_new, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_generate_excel, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_generate_html, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_export, self.win.page_results))
 
     def test_help_is_on_nav_footer(self):
         self.assertTrue(_under(self.win.btn_help, self.win.nav_rail))
@@ -200,11 +202,13 @@ class WorkflowShellTests(unittest.TestCase):
             self.assertFalse(_under(combo, self.win.page_setup), combo)
 
     def test_action_buttons_single_connection(self):
-        for btn in (
-            self.win.btn_stop, self.win.btn_new, self.win.btn_finish,
-            self.win.btn_save, self.win.btn_overlay, self.win.btn_clear_overlay,
-        ):
+        for btn in (self.win.btn_stop, self.win.btn_arm, self.win.btn_edit_profile):
             self.assertTrue(_under(btn, self.win.page_capture), btn)
+        for btn in (
+            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_export, self.win.btn_overlay, self.win.btn_clear_overlay,
+        ):
+            self.assertTrue(_under(btn, self.win.page_results), btn)
         self.assertTrue(_under(self.win.btn_help, self.win.nav_rail))
         self.win.btn_stop.click()
         self.assertFalse(self.win.running)
@@ -285,20 +289,22 @@ class WorkflowShellTests(unittest.TestCase):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         self.win.nav_capture.click()
-        self.assertTrue(self.win.review_text.isVisibleTo(self.win))
-        sizes = self.win.capture_splitter.sizes()
-        self.assertGreater(sizes[1], 0)
+        self.assertFalse(self.win.review_text.isVisibleTo(self.win))
+        self.assertTrue(self.win.capture_completed_note.isVisibleTo(self.win))
         self.win.new_run()
         self.assertFalse(self.win.review_text.isVisibleTo(self.win))
+        self.assertFalse(self.win.capture_completed_note.isVisibleTo(self.win))
 
     def test_host_evidence_remains_in_review(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75, 104])
-        self.win.nav_capture.click()
-        text = self.win.review_text.toPlainText()
+        self.assertIs(self.win.page_stack.currentWidget(), self.win.page_results)
+        text = self.win.results_evidence_text.toPlainText()
         self.assertIn("HOST EVIDENCE", text)
         self.assertIn("Expected Slots", text)
         self.assertIn("Outside Capture Window", text)
+        self.win.nav_capture.click()
+        self.assertNotIn("HOST EVIDENCE", self.win.review_text.toPlainText())
 
     def test_new_run_clears_review_and_keeps_shell(self):
         self._setup_fixture()
@@ -306,22 +312,25 @@ class WorkflowShellTests(unittest.TestCase):
         self.win.new_run()
         self.assertIsNone(self.win.host_evidence_snapshot)
         self.assertEqual(self.win.review_text.toPlainText(), "")
+        self.assertEqual(self.win.results_observations_text.text(), "")
         self.assertEqual(self.win.page_stack.count(), 4)
+        self.assertIs(self.win.page_stack.currentWidget(), self.win.page_capture)
         self.win.nav_results.click()
         self.assertIs(self.win.page_stack.currentWidget(), self.win.page_results)
+        self.assertTrue(self.win.results_empty_card.isVisibleTo(self.win))
 
     def test_manual_run_usable_without_host_evidence(self):
         self.win.radio_manual.setChecked(True)
         self._run([0, 25, 50, 75])
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self.assertNotIn("HOST EVIDENCE", self.win.review_text.toPlainText())
+        self.assertNotIn("HOST EVIDENCE", self.win.results_evidence_text.toPlainText())
         self.assertTrue(self.win.completed)
 
     def test_fixture_auto_stop_off_usable_without_host_evidence(self):
         self._setup_fixture(auto_sec=None)
         self._run([0, 25, 50, 75])
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self.assertNotIn("Expected Slots", self.win.review_text.toPlainText())
+        self.assertNotIn("Expected Slots", self.win.results_evidence_text.toPlainText())
 
     def test_no_shell_fields_in_session_or_reports(self):
         self._setup_fixture()
@@ -342,7 +351,9 @@ class WorkflowShellTests(unittest.TestCase):
 
     def test_results_is_placeholder(self):
         self.win.nav_results.click()
-        self.assertIn("later phase", self.win.results_placeholder.text().lower())
+        self.assertEqual(self.win.results_placeholder.text(), self.win._tr("results_empty"))
+        self.assertTrue(self.win.results_empty_card.isVisibleTo(self.win))
+        self.assertFalse(self.win.results_workspace.isVisibleTo(self.win))
 
     def test_minimum_size(self):
         self.assertEqual(self.win.minimumWidth(), 1024)

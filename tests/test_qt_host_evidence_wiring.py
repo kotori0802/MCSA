@@ -95,7 +95,7 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
             win.stop_run()
 
     def _visible_outputs(self, win):
-        legacy_review = win.review_text.toPlainText().split("\n\n", 1)[0]
+        legacy_review = win.results_observations_text.text()
         return (
             win.status_label.text(),
             win.alert_label.text(),
@@ -326,9 +326,21 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
 
         self._setup_fixture()
         self._run([0, 25, 50, 75])
-        texts = " ".join(lab.text().lower() for lab in self.win.findChildren(QLabel))
+        capture_texts = " ".join(lab.text().lower() for lab in self.win.page_capture.findChildren(QLabel))
         for token in ("host evidence", "expected slot", "count delta", "occupancy", "ambiguous", "outside window"):
-            self.assertNotIn(token, texts)
+            self.assertNotIn(token, capture_texts)
+        # Results owns a Host Evidence section title; diagnostic counts stay in the evidence text, not labels.
+        result_labels = " ".join(
+            lab.text().lower()
+            for lab in self.win.page_results.findChildren(QLabel)
+            if lab is not self.win.results_observations_text
+        )
+        for token in ("expected slot", "count delta", "occupancy", "ambiguous", "outside window"):
+            self.assertNotIn(token, result_labels)
+        self.assertEqual(
+            self.win.lbl_results_evidence.text(),
+            self.win._tr("results_host_evidence_section").upper(),
+        )
 
     def test_no_report_or_session_wiring(self):
         self._setup_fixture()

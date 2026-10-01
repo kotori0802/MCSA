@@ -273,7 +273,11 @@ class ReviewPresentationTests(unittest.TestCase):
             self.win.stop_run()
 
     def _review(self):
-        return self.win.review_text.toPlainText()
+        evidence = self.win.results_evidence_text.toPlainText().strip()
+        observations = self.win.results_observations_text.text().strip()
+        if evidence:
+            return f"{observations}\n\n{evidence}" if observations else evidence
+        return observations
 
     def _set_lang(self, lang):
         self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData(lang))
@@ -291,8 +295,10 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertIn("In-window Host Presses 4", text)
         self.assertIn("Host Count Delta 0", text)
         self.assertIn("Outside Capture Window 1", text)
+        self.win._show_workflow_page("results")
+        self.assertTrue(self.win.results_evidence_card.isVisibleTo(self.win))
         self.win._show_workflow_page("capture")
-        self.assertTrue(self.win.review_text.isVisibleTo(self.win))
+        self.assertFalse(self.win.review_text.isVisibleTo(self.win))
 
     def test_legacy_review_lines_preserved_and_first(self):
         self._setup_fixture()
@@ -364,6 +370,7 @@ class ReviewPresentationTests(unittest.TestCase):
         self.win._show_workflow_page("capture")
         self.win.new_run()
         self.assertEqual(self._review(), "")
+        self.assertFalse(self.win.results_workspace.isVisibleTo(self.win))
         self.assertFalse(self.win.review_text.isVisibleTo(self.win))
         self.win._refresh_metrics(final=False)
         self.assertNotIn(self.win._tr("he_title"), self._review())

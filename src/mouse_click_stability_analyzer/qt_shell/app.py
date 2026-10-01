@@ -5,6 +5,7 @@ import copy
 import json
 import logging
 import math
+import shutil
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QRadioButton,
@@ -36,6 +38,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
@@ -59,6 +62,7 @@ from ..cadence import cadence_ms, delta_cards, ranking_metrics
 from ..core import now_iso
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
 from ..i18n import LANG_LABELS, SUPPORTED_LANGS, t
+from ..measurements import actual_run_duration_s
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import IntervalChart, ScatterChart
@@ -1232,19 +1236,6 @@ class MainWindow(QMainWindow):
         self.btn_stop = QPushButton("Stop (F5 / Esc)")
         self.btn_stop.setObjectName("Danger")
         self.btn_stop.clicked.connect(self.stop_run)
-        self.btn_new = QPushButton("New Run")
-        self.btn_new.clicked.connect(self.new_run)
-        self.btn_finish = QPushButton("Finish & Generate Report")
-        self.btn_finish.setObjectName("Primary")
-        self.btn_finish.clicked.connect(self.finish_report)
-        self.btn_save = QPushButton("Save Report As…")
-        self.btn_save.clicked.connect(self.save_report_as)
-        self.btn_overlay = QPushButton("Compare Overlay")
-        self.btn_overlay.setObjectName("Secondary")
-        self.btn_overlay.clicked.connect(self.load_overlay_run)
-        self.btn_clear_overlay = QPushButton("Clear Overlay")
-        self.btn_clear_overlay.setObjectName("Secondary")
-        self.btn_clear_overlay.clicked.connect(self.clear_overlay)
         self.btn_arm = QPushButton("Arm Capture")
         self.btn_arm.setObjectName("Primary")
         self.btn_arm.clicked.connect(self._on_arm_clicked)
@@ -1252,8 +1243,7 @@ class MainWindow(QMainWindow):
         self.btn_edit_profile.setObjectName("Secondary")
         self.btn_edit_profile.clicked.connect(self.edit_profile)
         self.capture_action_bar = WrappingButtonBar([
-            self.btn_stop, self.btn_new, self.btn_finish, self.btn_arm,
-            self.btn_save, self.btn_overlay, self.btn_clear_overlay, self.btn_edit_profile,
+            self.btn_stop, self.btn_arm, self.btn_edit_profile,
         ])
         actions_l.addWidget(self.capture_action_bar)
         self.capture_actions = actions
@@ -1316,6 +1306,11 @@ class MainWindow(QMainWindow):
         live_l.addWidget(self.status_label)
         live_l.addWidget(self.alert_label)
         live_l.addWidget(self.overlay_delta_label)
+        self.capture_completed_note = QLabel("")
+        self.capture_completed_note.setObjectName("Muted")
+        self.capture_completed_note.setWordWrap(True)
+        self.capture_completed_note.hide()
+        live_l.addWidget(self.capture_completed_note)
         inner_l.addWidget(live)
 
         self.test_area = QFrame()
@@ -1368,17 +1363,175 @@ class MainWindow(QMainWindow):
     def _build_results_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("ResultsPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        card = self._card()
-        card_l = QVBoxLayout(card)
-        card_l.setContentsMargins(24, 24, 24, 24)
+        page_l = QVBoxLayout(page)
+        page_l.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        inner.setObjectName("ResultsContent")
+        inner.setMaximumWidth(self.MAX_SETUP_CONTENT_WIDTH)
+        inner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.results_content = inner
+        inner_l = QVBoxLayout(inner)
+        inner_l.setContentsMargins(0, 0, 4, 12)
+        inner_l.setSpacing(16)
+
+        empty_card, empty_l = self._setup_card()
+        self.results_empty_card = empty_card
         self.results_placeholder = QLabel("")
         self.results_placeholder.setObjectName("Muted")
         self.results_placeholder.setWordWrap(True)
-        card_l.addWidget(self.results_placeholder)
-        card_l.addStretch(1)
-        layout.addWidget(card)
+        empty_l.addWidget(self.results_placeholder)
+        inner_l.addWidget(empty_card)
+
+        self.results_workspace = QWidget()
+        self.results_workspace.setObjectName("Workspace")
+        work_l = QVBoxLayout(self.results_workspace)
+        work_l.setContentsMargins(0, 0, 0, 0)
+        work_l.setSpacing(16)
+
+        summary_card, summary_l = self._setup_card()
+        self.results_summary_card = summary_card
+        self.lbl_results_summary = self._card_title()
+        summary_l.addWidget(self.lbl_results_summary)
+        summary_l.addSpacing(8)
+        summary_grid = QGridLayout()
+        summary_grid.setContentsMargins(0, 0, 0, 0)
+        summary_grid.setHorizontalSpacing(28)
+        summary_grid.setVerticalSpacing(12)
+        self._results_summary_cells: list[tuple[QWidget, QLabel, QLabel]] = []
+        for index in range(12):
+            cell = QWidget()
+            cell_l = QVBoxLayout(cell)
+            cell_l.setContentsMargins(0, 0, 0, 0)
+            cell_l.setSpacing(2)
+            key_lab = QLabel("")
+            key_lab.setObjectName("StatLabel")
+            val_lab = QLabel("")
+            val_lab.setObjectName("PreviewValue")
+            val_lab.setWordWrap(True)
+            cell_l.addWidget(key_lab)
+            cell_l.addWidget(val_lab)
+            row, col = divmod(index, 2)
+            summary_grid.addWidget(cell, row, col)
+            self._results_summary_cells.append((cell, key_lab, val_lab))
+        for col in range(2):
+            summary_grid.setColumnStretch(col, 1)
+        summary_l.addLayout(summary_grid)
+        work_l.addWidget(summary_card)
+
+        observations_card, observations_l = self._setup_card()
+        self.results_observations_card = observations_card
+        self.lbl_results_observations = self._card_title()
+        observations_l.addWidget(self.lbl_results_observations)
+        observations_l.addSpacing(6)
+        self.results_verdict_label = QLabel("--")
+        self.results_verdict_label.setObjectName("StatValue")
+        self.results_verdict_label.setWordWrap(True)
+        observations_l.addWidget(self.results_verdict_label)
+        self.results_tags_label = QLabel("")
+        self.results_tags_label.setObjectName("Muted")
+        self.results_tags_label.setWordWrap(True)
+        observations_l.addWidget(self.results_tags_label)
+        self.results_observations_text = QLabel("")
+        self.results_observations_text.setObjectName("Muted")
+        self.results_observations_text.setWordWrap(True)
+        self.results_observations_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        observations_l.addWidget(self.results_observations_text)
+        work_l.addWidget(observations_card)
+
+        evidence_card, evidence_l = self._setup_card()
+        self.results_evidence_card = evidence_card
+        self.lbl_results_evidence = self._card_title()
+        evidence_l.addWidget(self.lbl_results_evidence)
+        evidence_l.addSpacing(6)
+        self.results_evidence_text = QTextEdit()
+        self.results_evidence_text.setObjectName("ResultsEvidence")
+        self.results_evidence_text.setReadOnly(True)
+        self.results_evidence_text.setMinimumHeight(140)
+        self.results_evidence_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        evidence_l.addWidget(self.results_evidence_text)
+        work_l.addWidget(evidence_card)
+
+        actions_card, actions_l = self._setup_card()
+        self.results_actions_card = actions_card
+        self.lbl_results_actions = self._card_title()
+        actions_l.addWidget(self.lbl_results_actions)
+        actions_l.addSpacing(8)
+        self.btn_new = QPushButton("New Run")
+        self.btn_new.setObjectName("Primary")
+        self.btn_new.clicked.connect(self.new_run)
+        self.results_lifecycle_bar = WrappingButtonBar([self.btn_new])
+        actions_l.addWidget(self.results_lifecycle_bar)
+
+        self.lbl_results_report = self._card_title()
+        actions_l.addSpacing(8)
+        actions_l.addWidget(self.lbl_results_report)
+        actions_l.addSpacing(8)
+        self.btn_generate_excel = QPushButton("Generate Excel")
+        self.btn_generate_excel.setObjectName("Primary")
+        self.btn_generate_excel.clicked.connect(self.generate_excel_report)
+        self.btn_finish = self.btn_generate_excel
+        self.btn_generate_html = QPushButton("Generate HTML")
+        self.btn_generate_html.setObjectName("Primary")
+        self.btn_generate_html.clicked.connect(self.generate_html_report)
+        self.btn_export = QToolButton()
+        self.btn_export.setObjectName("Secondary")
+        self.btn_export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_export.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.export_menu = QMenu(self.btn_export)
+        self.act_export_txt = self.export_menu.addAction("Analysis TXT")
+        self.act_export_csv = self.export_menu.addAction("Click Log CSV")
+        self.act_export_summary_json = self.export_menu.addAction("Summary JSON")
+        self.act_export_detail_json = self.export_menu.addAction("Detail JSON")
+        self.export_menu.addSeparator()
+        self.act_save_report_as = self.export_menu.addAction("Save Report As…")
+        self.act_export_txt.triggered.connect(lambda: self.export_report_artifact("txt"))
+        self.act_export_csv.triggered.connect(lambda: self.export_report_artifact("all_click_log_csv"))
+        self.act_export_summary_json.triggered.connect(lambda: self.export_report_artifact("summary_json"))
+        self.act_export_detail_json.triggered.connect(lambda: self.export_report_artifact("detail_json"))
+        self.act_save_report_as.triggered.connect(self.save_report_as)
+        self.btn_export.setMenu(self.export_menu)
+        self.btn_save = self.btn_export
+        self.results_report_bar = WrappingButtonBar([
+            self.btn_generate_excel, self.btn_generate_html, self.btn_export,
+        ])
+        actions_l.addWidget(self.results_report_bar)
+        self.results_action_bar = self.results_report_bar
+
+        self.btn_overlay = QPushButton("Compare Overlay")
+        self.btn_overlay.setObjectName("Secondary")
+        self.btn_overlay.clicked.connect(self.load_overlay_run)
+        self.btn_clear_overlay = QPushButton("Clear Overlay")
+        self.btn_clear_overlay.setObjectName("Secondary")
+        self.btn_clear_overlay.clicked.connect(self.clear_overlay)
+        self.results_compare_bar = WrappingButtonBar([
+            self.btn_overlay, self.btn_clear_overlay,
+        ])
+        actions_l.addWidget(self.results_compare_bar)
+        self.results_overlay_status = QLabel("")
+        self.results_overlay_status.setObjectName("Muted")
+        self.results_overlay_status.setWordWrap(True)
+        actions_l.addWidget(self.results_overlay_status)
+        work_l.addWidget(actions_card)
+
+        inner_l.addWidget(self.results_workspace)
+        inner_l.addStretch(1)
+
+        wrap = QWidget()
+        wrap_l = QHBoxLayout(wrap)
+        wrap_l.setContentsMargins(0, 0, 0, 0)
+        wrap_l.addWidget(inner)
+        wrap_l.addStretch(1)
+
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setObjectName("PageScroll")
+        self.results_scroll.setWidgetResizable(True)
+        self.results_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.results_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.results_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.results_scroll.setWidget(wrap)
+        page_l.addWidget(self.results_scroll)
+        self._refresh_results_workspace()
         return page
 
     def _build_preferences_page(self) -> QWidget:
@@ -1817,8 +1970,11 @@ class MainWindow(QMainWindow):
             self._refresh_metrics(final=self.completed)
         elif self.overlay_path:
             self._update_overlay_deltas({})
+        self._refresh_results_workspace()
         if self.completed:
-            settings = self.locked or self.settings()
+            settings = self.locked
+            if settings is None:
+                return
             annotated = annotate_events(list(self.events), settings)
             payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
             m = payload.get("metrics") or {}
@@ -1847,7 +2003,13 @@ class MainWindow(QMainWindow):
         self.lbl_pref_appearance.setText(self._tr("pref_appearance_section").upper())
         self.lbl_pref_language.setText(self._tr("language").upper())
         self.lbl_controls.setText(self._tr("controls"))
-        self.results_placeholder.setText(self._tr("page_results_placeholder"))
+        self.results_placeholder.setText(self._tr("results_empty"))
+        self.lbl_results_summary.setText(self._tr("results_run_summary").upper())
+        self.lbl_results_observations.setText(self._tr("results_observations").upper())
+        self.lbl_results_evidence.setText(self._tr("results_host_evidence_section").upper())
+        self.lbl_results_actions.setText(self._tr("results_actions").upper())
+        self.lbl_results_report.setText(self._tr("report").upper())
+        self.capture_completed_note.setText(self._tr("capture_run_completed"))
         self.preferences_note.setText(self._tr("preferences_more_note"))
         self.radio_manual.setText(self._tr("manual"))
         self.radio_fixture.setText(self._tr("fixture"))
@@ -1864,8 +2026,14 @@ class MainWindow(QMainWindow):
             lab.setText(self._tr(_QT_CUSTOM_LIMIT_LABEL_KEYS[key]))
         self.btn_stop.setText(self._tr("stop"))
         self.btn_new.setText(self._tr("new_run"))
-        self.btn_finish.setText(qt_button_label(self._tr("finish_button")))
-        self.btn_save.setText(self._tr("save_report_as"))
+        self.btn_generate_excel.setText(self._tr("generate_excel"))
+        self.btn_generate_html.setText(self._tr("generate_html"))
+        self.btn_export.setText(self._tr("export_save_as"))
+        self.act_export_txt.setText(self._tr("export_analysis_txt"))
+        self.act_export_csv.setText(self._tr("export_click_log_csv"))
+        self.act_export_summary_json.setText(self._tr("export_summary_json"))
+        self.act_export_detail_json.setText(self._tr("export_detail_json"))
+        self.act_save_report_as.setText(self._tr("save_report_as"))
         self.btn_overlay.setText(self._tr("compare_overlay"))
         self.btn_clear_overlay.setText(self._tr("clear_overlay"))
         self.btn_lock_profile.setText(self._tr("lock_profile_continue"))
@@ -1900,6 +2068,7 @@ class MainWindow(QMainWindow):
         self._sync_auto_stop_widgets()
         self._show_workflow_page(self._current_page)
         self._refresh_lifecycle_presentation()
+        self._refresh_results_workspace()
 
     # ── Settings / mode ─────────────────────────────────────────────
     def _ui_is_manual(self) -> bool:
@@ -2047,6 +2216,123 @@ class MainWindow(QMainWindow):
                 val_lab.setText("")
                 cell.hide()
         self.locked_profile_card.setVisible(bool(rows))
+
+    def _completed_run_facts(self) -> dict[str, Any] | None:
+        """Presentation facts from frozen run-owned data only. Does not rebuild Host Evidence."""
+        if not self.completed or self.locked is None:
+            return None
+        settings = self.locked
+        annotated = annotate_events(list(self.events), settings)
+        payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
+        metrics = payload.get("metrics") or {}
+        tags = _metrics_issue_tags(metrics, settings, annotated)
+        try:
+            elapsed_s = actual_run_duration_s(self.start_time, self.stop_time)
+        except ValueError:
+            elapsed_s = None
+        return {
+            "settings": settings,
+            "metrics": metrics,
+            "tags": tags,
+            "verdict": qt_visible_verdict(tags, metrics, settings),
+            "elapsed_s": elapsed_s,
+            "manual": _is_manual_profile(settings),
+        }
+
+    def _legacy_observation_lines(self, facts: dict[str, Any]) -> list[str]:
+        settings = facts["settings"]
+        metrics = facts["metrics"]
+        verdict = facts["verdict"]
+        visible_tags = qt_present_issue_tags(facts["tags"])
+        if facts["manual"]:
+            mode = self._tr("mode_manual")
+        else:
+            hz = settings.get("fixture_reference_hz")
+            mode = self._tr("mode_fixture", hz=f"{float(hz):g}" if isinstance(hz, (int, float)) else "-")
+        return [
+            self._tr("review_mode", mode=mode, button=settings.get("focus_button")),
+            self._tr("review_clicks", clicks=metrics.get("click_count"), verdict=verdict),
+            self._tr("review_interval", avg=metrics.get("interval_avg_ms"), cv=metrics.get("interval_cv_pct")),
+            self._tr(
+                "review_tags",
+                tags=", ".join(visible_tags) if visible_tags else self._tr("review_tags_none"),
+            ),
+        ]
+
+    def _results_summary_rows(self, facts: dict[str, Any]) -> list[tuple[str, str]]:
+        settings = facts["settings"]
+        metrics = facts["metrics"]
+        elapsed = facts["elapsed_s"]
+        interval = metrics.get("interval_avg_ms")
+        hold = metrics.get("hold_avg_ms")
+        rows = [
+            (self._tr("preview_mode"), self._tr("manual") if facts["manual"] else self._tr("fixture")),
+            (self._tr("device"), (self.target or "").strip() or "—"),
+            (self._tr("button"), str(settings.get("focus_button") or "Left")),
+            (self._tr("results_elapsed"), f"{elapsed:.1f}s" if isinstance(elapsed, (int, float)) else "—"),
+            (self._tr("results_host_clicks"), str(metrics.get("click_count") if metrics.get("click_count") is not None else 0)),
+            (self._tr("results_avg_interval"), f"{float(interval):.2f} ms" if isinstance(interval, (int, float)) else "—"),
+            (self._tr("results_avg_hold"), f"{float(hold):.2f} ms" if isinstance(hold, (int, float)) else "—"),
+            (self._tr("results_existing_result"), str(facts["verdict"])),
+            (
+                self._tr("issues"),
+                ", ".join(qt_present_issue_tags(facts["tags"])) or self._tr("review_tags_none"),
+            ),
+        ]
+        if facts["manual"]:
+            return rows
+        hz = settings.get("fixture_reference_hz")
+        tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
+        duration = settings.get("duration_sec")
+        rows.append((self._tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
+        rows.append((self._tr("preview_timing_tolerance"), f"±{float(tol):g} ms" if isinstance(tol, (int, float)) else "—"))
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+            rows.append((self._tr("auto_stop"), f"{float(duration):g} s"))
+        else:
+            rows.append((self._tr("auto_stop"), self._tr("preview_auto_stop_off")))
+        return rows
+
+    def _refresh_results_workspace(self) -> None:
+        facts = self._completed_run_facts()
+        has_run = facts is not None
+        self.results_empty_card.setVisible(not has_run)
+        self.results_workspace.setVisible(has_run)
+        self.results_placeholder.setText(self._tr("results_empty"))
+        if not has_run:
+            self.results_observations_text.setText("")
+            self.results_evidence_text.clear()
+            self.results_verdict_label.setText("--")
+            self.results_tags_label.setText("")
+            self.results_overlay_status.setText("")
+            self.results_evidence_card.hide()
+            for cell, key_lab, val_lab in self._results_summary_cells:
+                key_lab.setText("")
+                val_lab.setText("")
+                cell.hide()
+            return
+        rows = self._results_summary_rows(facts)
+        for index, (cell, key_lab, val_lab) in enumerate(self._results_summary_cells):
+            if index < len(rows):
+                key_lab.setText(rows[index][0].upper())
+                val_lab.setText(rows[index][1])
+                cell.show()
+            else:
+                key_lab.setText("")
+                val_lab.setText("")
+                cell.hide()
+        visible_tags = qt_present_issue_tags(facts["tags"])
+        self.results_verdict_label.setText(str(facts["verdict"]))
+        self.results_tags_label.setText(
+            ", ".join(visible_tags) if visible_tags else self._tr("review_tags_none")
+        )
+        self.results_observations_text.setText("\n".join(self._legacy_observation_lines(facts)))
+        evidence_lines = format_host_evidence_review_lines(self.host_evidence_snapshot, self._tr)
+        self.results_evidence_text.setPlainText("\n".join(evidence_lines))
+        self.results_evidence_card.setVisible(bool(evidence_lines))
+        if self.overlay_path:
+            self.results_overlay_status.setText(self.overlay_delta_label.text())
+        else:
+            self.results_overlay_status.setText("")
 
     def lock_profile(self) -> bool:
         if self.running or self.completed:
@@ -2386,6 +2672,7 @@ class MainWindow(QMainWindow):
         self.val_setup.setText("--")
         self.review_text.clear()
         self._set_review_panel_visible(False)
+        self.capture_completed_note.hide()
         self.alert_label.setText("")
 
     def enter_listen(self):
@@ -2460,6 +2747,8 @@ class MainWindow(QMainWindow):
         self.scatter.set_points([])
         self.interval_chart.set_series([])
         self.enter_listen()
+        self._refresh_results_workspace()
+        self._show_workflow_page("capture")
 
     def stop_run(self):
         if not self.running:
@@ -2475,11 +2764,15 @@ class MainWindow(QMainWindow):
         self._build_host_evidence_snapshot_for_completed_run()
         self.val_phase.setText(self._tr("phase_review"))
         self.hint.hide()
-        self._set_review_panel_visible(True)
+        self._set_review_panel_visible(False)
+        self.capture_completed_note.setText(self._tr("capture_run_completed"))
+        self.capture_completed_note.show()
+        self.review_text.clear()
         self._refresh_metrics(final=True)
         if not self.status_label.text().startswith(("PASS", "WARN", "FAIL")):
             self.status_label.setText(self._tr("review_hint"))
         self._update_controls()
+        self._show_workflow_page("results")
 
     def _build_host_evidence_snapshot_for_completed_run(self) -> None:
         """Build the neutral Host Evidence snapshot once, from run-locked settings.
@@ -2518,7 +2811,20 @@ class MainWindow(QMainWindow):
             _log.warning("Host evidence snapshot not built: %s", exc)
             self.host_evidence_snapshot = None
 
-    def finish_report(self):
+    def generate_excel_report(self):
+        """Primary Results action: full report bundle, success target is the engineering XLSX."""
+        self.finish_report(preferred_artifact="engineering_xlsx")
+
+    def generate_html_report(self):
+        """Primary Results action: full report bundle, success target is the engineering HTML."""
+        self.finish_report(preferred_artifact="engineering_html")
+
+    def finish_report(self, preferred_artifact: str | None = None, notify: bool = True):
+        """Write the full report bundle from the completed snapshot.
+
+        ``preferred_artifact`` must exist for the call to count as success.
+        ``notify=False`` suppresses only the success dialog; failures are always shown.
+        """
         if self.running:
             self.stop_run()
         if not self.events:
@@ -2533,6 +2839,12 @@ class MainWindow(QMainWindow):
             verification = _verify_artifacts(self.report_paths)
             if not verification.get("ok"):
                 raise RuntimeError("Missing: " + ", ".join(verification.get("missing") or []))
+            target_path: Path | str = self.report_root
+            if preferred_artifact:
+                preferred = str((self.report_paths or {}).get(preferred_artifact) or "")
+                if not preferred or not Path(preferred).exists():
+                    raise RuntimeError("Missing: " + (Path(preferred).name if preferred else preferred_artifact))
+                target_path = preferred
             self.report_written = True
             annotated = annotate_events(list(self.events), settings)
             payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
@@ -2548,26 +2860,61 @@ class MainWindow(QMainWindow):
             })
             self.status_label.setText(self._tr("report_ready"))
             self._update_controls()
-            QMessageBox.information(self, self._tr("report"), self._tr("saved_to", path=self.report_root))
+            if notify:
+                QMessageBox.information(self, self._tr("report"), self._tr("saved_to", path=target_path))
         except Exception as exc:
             QMessageBox.critical(self, self._tr("report_failed"), str(exc))
 
+    def export_report_artifact(self, key: str):
+        """Copy one bundle file through a native Save As dialog, preparing the bundle silently if needed."""
+        if not self.report_written:
+            self.finish_report(notify=False)
+            if not self.report_written:
+                return
+        src = Path(str((self.report_paths or {}).get(key) or ""))
+        if not src.exists():
+            QMessageBox.critical(self, self._tr("report_failed"), f"Missing: {src.name or key}")
+            return
+        filters = {
+            "txt": "Text (*.txt);;All (*.*)",
+            "all_click_log_csv": "CSV (*.csv);;All (*.*)",
+            "summary_json": "JSON (*.json);;All (*.*)",
+            "detail_json": "JSON (*.json);;All (*.*)",
+        }
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            self._tr("export_save_as"),
+            str(src),
+            filters.get(key) or "All (*.*)",
+        )
+        if not dest:
+            return
+        try:
+            shutil.copy2(src, dest)
+        except Exception as exc:
+            QMessageBox.critical(self, self._tr("report_failed"), str(exc))
+            return
+        self.status_label.setText(self._tr("saved_to", path=dest))
+
     def save_report_as(self):
         if not self.report_written:
-            self.finish_report()
+            self.finish_report(notify=False)
             if not self.report_written:
                 return
         dest = QFileDialog.getExistingDirectory(self, self._tr("save_report_as"))
         if not dest:
             return
-        import shutil
         out = Path(dest) / f"mcsa_{self.run_id}"
         out.mkdir(parents=True, exist_ok=True)
         n = 0
-        for path in (self.report_paths or {}).values():
-            if path and Path(path).exists():
-                shutil.copy2(path, out / Path(path).name)
-                n += 1
+        try:
+            for path in (self.report_paths or {}).values():
+                if path and Path(path).exists():
+                    shutil.copy2(path, out / Path(path).name)
+                    n += 1
+        except Exception as exc:
+            QMessageBox.critical(self, self._tr("report_failed"), str(exc))
+            return
         self.status_label.setText(self._tr("saved_files", n=n, path=out))
 
     def show_guide(self):
@@ -2579,8 +2926,9 @@ class MainWindow(QMainWindow):
         state = self._lifecycle_state()
         self.btn_stop.setEnabled(self.running)
         self.btn_new.setEnabled(not self.running)
-        self.btn_finish.setEnabled(self.completed and not self.running)
-        self.btn_save.setEnabled(self.report_written)
+        self.btn_generate_excel.setEnabled(self.completed and not self.running)
+        self.btn_generate_html.setEnabled(self.completed and not self.running)
+        self.btn_export.setEnabled(self.completed and not self.running)
         self.btn_lock_profile.setEnabled(state == "draft")
         self.btn_arm.setEnabled(state in ("ready", "armed"))
         self.btn_arm.setText(self._tr("disarm_capture") if state == "armed" else self._tr("arm_capture"))
@@ -2720,9 +3068,16 @@ class MainWindow(QMainWindow):
             self.btn_lock_profile,
             self.btn_arm,
             self.btn_edit_profile,
+            self.btn_new,
+            self.btn_generate_excel,
+            self.btn_generate_html,
+            self.btn_export,
+            self.btn_overlay,
+            self.btn_clear_overlay,
             *self._limit_edits.values(),
             self.setup_scroll.verticalScrollBar(),
             self.capture_scroll.verticalScrollBar(),
+            self.results_scroll.verticalScrollBar(),
         ]
 
     def _cursor_over_capture_exclusion_ui(self) -> bool:
@@ -2789,6 +3144,7 @@ class MainWindow(QMainWindow):
         self.capture_armed = False
         self._arm_boundary_perf = None
         self.report_written = False
+        self.capture_completed_note.hide()
         self.val_phase.setText(self._tr("phase_running"))
         self.hint.hide()
         self.test_area.setProperty("active", True)
@@ -2877,20 +3233,8 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(self._tr("fail_verdict"))
             alert = [tag for tag in _QT_ALERT_TAGS if tag in tags]
             self.alert_label.setText(" · ".join(alert))
-            visible_tags = qt_present_issue_tags(tags)
-            lines = [
-                self._tr("review_mode", mode=self.mode_label.text(), button=settings.get("focus_button")),
-                self._tr("review_clicks", clicks=m.get("click_count"), verdict=verdict),
-                self._tr("review_interval", avg=m.get("interval_avg_ms"), cv=m.get("interval_cv_pct")),
-                self._tr(
-                    "review_tags",
-                    tags=", ".join(visible_tags) if visible_tags else self._tr("review_tags_none"),
-                ),
-            ]
-            evidence_lines = format_host_evidence_review_lines(self.host_evidence_snapshot, self._tr)
-            if evidence_lines:
-                lines += ["", *evidence_lines]
-            self.review_text.setPlainText("\n".join(lines))
+            self.review_text.clear()
+            self._refresh_results_workspace()
 
         self._update_overlay_deltas(m)
 
