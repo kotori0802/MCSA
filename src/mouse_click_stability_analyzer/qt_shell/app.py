@@ -10,10 +10,12 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QPoint, QRect, QSettings, QSize
+from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTextEdit,
@@ -484,7 +487,286 @@ class CaptureBridge(QObject):
     event_received = Signal(dict)
 
 
+def locked_profile_preview_rows(
+    settings: dict[str, Any] | None,
+    target: str,
+    tr,
+) -> list[tuple[str, str]]:
+    """Read-only (label, value) rows derived only from a frozen profile snapshot."""
+    if settings is None:
+        return []
+    manual = bool(settings.get("manual_mode"))
+    rows = [
+        (tr("device"), (target or "").strip() or "—"),
+        (tr("button"), str(settings.get("focus_button") or "Left")),
+        (tr("preview_mode"), tr("manual") if manual else tr("fixture")),
+    ]
+    if manual:
+        return rows
+    hz = settings.get("fixture_reference_hz")
+    tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
+    duration = settings.get("duration_sec")
+    rows.append((tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
+    rows.append((tr("preview_timing_tolerance"), f"±{float(tol):g} ms" if isinstance(tol, (int, float)) else "—"))
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+        rows.append((tr("auto_stop"), f"{float(duration):g} s"))
+    else:
+        rows.append((tr("auto_stop"), tr("preview_auto_stop_off")))
+    return rows
+
+
+class ResponsiveCardGrid(QWidget):
+    """Reflows Setup cards into 3 / 2 / 1 columns by width, preferring scroll over squeeze."""
+
+    THREE_COLUMN_MIN_WIDTH = 1080
+    TWO_COLUMN_MIN_WIDTH = 700
+    # Keep below the thresholds above so the grid can always shrink and reflow.
+    CARD_MIN_WIDTH = 300
+
+    def __init__(self, cards: list[QWidget], parent: QWidget | None = None):
+        super().__init__(parent)
+        self._cards = list(cards)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(16)
+        self._grid.setVerticalSpacing(16)
+        for card in self._cards:
+            card.setMinimumWidth(self.CARD_MIN_WIDTH)
+        self._columns = 0
+        self._apply_columns(3)
+
+    @classmethod
+    def columns_for_width(cls, width: int) -> int:
+        if width >= cls.THREE_COLUMN_MIN_WIDTH:
+            return 3
+        if width >= cls.TWO_COLUMN_MIN_WIDTH:
+            return 2
+        return 1
+
+    def columns(self) -> int:
+        return self._columns
+
+    def _apply_columns(self, columns: int) -> None:
+        if columns == self._columns:
+            return
+        for card in self._cards:
+            self._grid.removeWidget(card)
+        for col in range(3):
+            self._grid.setColumnStretch(col, 0)
+        if columns >= 3:
+            positions = [(0, 0, 1, 1), (0, 1, 1, 1), (0, 2, 1, 1)]
+        elif columns == 2:
+            positions = [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 2)]
+        else:
+            positions = [(0, 0, 1, 1), (1, 0, 1, 1), (2, 0, 1, 1)]
+        for card, (row, col, row_span, col_span) in zip(self._cards, positions):
+            self._grid.addWidget(card, row, col, row_span, col_span)
+        for col in range(min(columns, 3)):
+            self._grid.setColumnStretch(col, 1)
+        self._columns = columns
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_columns(self.columns_for_width(event.size().width()))
+
+
+class ResponsiveItemGrid(QWidget):
+    """Reflow existing child widgets into N columns from actual available width."""
+
+    def __init__(
+        self,
+        items: list[QWidget],
+        *,
+        wide_columns: int,
+        medium_columns: int,
+        compact_columns: int,
+        wide_min_width: int,
+        medium_min_width: int,
+        h_spacing: int = 12,
+        v_spacing: int = 8,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._items = list(items)
+        self._wide_columns = wide_columns
+        self._medium_columns = medium_columns
+        self._compact_columns = compact_columns
+        self._wide_min_width = wide_min_width
+        self._medium_min_width = medium_min_width
+        self._max_columns = max(wide_columns, medium_columns, compact_columns)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(h_spacing)
+        self._grid.setVerticalSpacing(v_spacing)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._columns = 0
+        self._apply_columns(wide_columns)
+
+    def columns(self) -> int:
+        return self._columns
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        return QSize(self._compact_columns * 108, hint.height())
+
+    def columns_for_width(self, width: int) -> int:
+        if width >= self._wide_min_width:
+            return self._wide_columns
+        if width >= self._medium_min_width:
+            return self._medium_columns
+        return self._compact_columns
+
+    def _apply_columns(self, columns: int) -> None:
+        if columns == self._columns:
+            return
+        for item in self._items:
+            self._grid.removeWidget(item)
+        for col in range(self._max_columns):
+            self._grid.setColumnStretch(col, 0)
+        for index, item in enumerate(self._items):
+            self._grid.addWidget(item, index // columns, index % columns)
+        for col in range(columns):
+            self._grid.setColumnStretch(col, 1)
+        self._columns = columns
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_columns(self.columns_for_width(event.size().width()))
+
+
+class WrappingButtonBar(QWidget):
+    """Wrap action buttons onto extra rows when the Capture viewport is too narrow."""
+
+    def __init__(self, buttons: list[QWidget], parent: QWidget | None = None):
+        super().__init__(parent)
+        self._buttons = list(buttons)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(8)
+        self._grid.setVerticalSpacing(8)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._signature: tuple[int, ...] | None = None
+        for btn in self._buttons:
+            btn.setMinimumHeight(38)
+            btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._relayout(self.width() or 800)
+
+    def row_count(self) -> int:
+        if not self._signature:
+            return 1
+        return 1 + max(self._signature[0::2])
+
+    def _relayout(self, width: int) -> None:
+        available = max(int(width), 1)
+        positions: list[tuple[int, int]] = []
+        row = col = used = 0
+        for btn in self._buttons:
+            need = max(btn.sizeHint().width(), 88) + 8
+            if col and used + need > available:
+                row += 1
+                col = 0
+                used = 0
+            positions.append((row, col))
+            used += need
+            col += 1
+        signature = tuple(v for pos in positions for v in pos)
+        if signature == self._signature:
+            return
+        for btn in self._buttons:
+            self._grid.removeWidget(btn)
+        for col_i in range(len(self._buttons)):
+            self._grid.setColumnStretch(col_i, 0)
+        for btn, (r, c) in zip(self._buttons, positions):
+            self._grid.addWidget(btn, r, c)
+        self._signature = signature
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout(event.size().width())
+
+
+# Persisted IDs; "compact"/"standard"/"large" predate the size-named presets and must stay valid.
+WINDOW_MODES: tuple[str, ...] = (
+    "auto",
+    "compact",
+    "laptop",
+    "standard",
+    "large",
+    "large_plus",
+    "full_hd",
+    "custom",
+    "maximized",
+)
+WINDOW_PRESET_SIZES: dict[str, tuple[int, int]] = {
+    "compact": (1280, 720),
+    "laptop": (1366, 768),
+    "standard": (1440, 810),
+    "large": (1600, 900),
+    "large_plus": (1728, 972),
+    "full_hd": (1920, 1080),
+}
+CUSTOM_WINDOW_MAX_SIZE = (7680, 4320)
+AUTO_WINDOW_FRACTION = 0.9
+AUTO_WINDOW_MAX_SIZE = (1600, 900)
+# Fraction of a remembered window that must lie on a current work area to be restored.
+REMEMBERED_GEOMETRY_MIN_VISIBLE = 0.25
+
+
+def _fit_window_size(width: int, height: int, available: QSize, minimum: QSize) -> QSize:
+    """Honor the window minimum where possible, but never exceed the available work area."""
+    width = min(max(width, minimum.width()), available.width())
+    height = min(max(height, minimum.height()), available.height())
+    return QSize(max(width, 1), max(height, 1))
+
+
+def auto_window_size(available: QSize, minimum: QSize) -> QSize:
+    """Comfortable logical window size for a work area, capped at AUTO_WINDOW_MAX_SIZE."""
+    width = min(int(available.width() * AUTO_WINDOW_FRACTION), AUTO_WINDOW_MAX_SIZE[0])
+    height = min(int(available.height() * AUTO_WINDOW_FRACTION), AUTO_WINDOW_MAX_SIZE[1])
+    return _fit_window_size(width, height, available, minimum)
+
+
+def fit_requested_window_size(width: int, height: int, available: QSize, minimum: QSize) -> QSize:
+    """Exact size when it fits; otherwise scale down uniformly (keeping aspect), then clamp to the work area."""
+    if width <= available.width() and height <= available.height():
+        return _fit_window_size(width, height, available, minimum)
+    scale = min(available.width() / max(width, 1), available.height() / max(height, 1))
+    return _fit_window_size(int(width * scale), int(height * scale), available, minimum)
+
+
+def window_size_for_mode(mode: str, available: QSize, minimum: QSize, custom: QSize | None = None) -> QSize:
+    if mode in WINDOW_PRESET_SIZES:
+        width, height = WINDOW_PRESET_SIZES[mode]
+        return fit_requested_window_size(width, height, available, minimum)
+    if mode == "custom" and custom is not None and custom.isValid():
+        return fit_requested_window_size(custom.width(), custom.height(), available, minimum)
+    return auto_window_size(available, minimum)
+
+
+def centered_top_left(frame_size: QSize, available: QRect) -> QPoint:
+    """Top-left that centers a frame inside a work area, keeping the title bar on-screen."""
+    x = available.x() + max(0, (available.width() - frame_size.width()) // 2)
+    y = available.y() + max(0, (available.height() - frame_size.height()) // 2)
+    return QPoint(x, y)
+
+
+def geometry_is_reachable(rect: QRect, work_areas: list[QRect]) -> bool:
+    if rect.isNull() or rect.width() <= 0 or rect.height() <= 0:
+        return False
+    area = rect.width() * rect.height()
+    title_point = QPoint(rect.center().x(), rect.top() + 8)
+    for work in work_areas:
+        visible = rect.intersected(work)
+        if visible.isEmpty():
+            continue
+        if visible.width() * visible.height() >= area * REMEMBERED_GEOMETRY_MIN_VISIBLE and work.contains(title_point):
+            return True
+    return False
+
+
 class MainWindow(QMainWindow):
+    MAX_SETUP_CONTENT_WIDTH = 1360
+
     def __init__(
         self,
         *,
@@ -494,6 +776,7 @@ class MainWindow(QMainWindow):
         run_id: str = "",
         lang: str = "en",
         theme: str = "light",
+        window_settings: QSettings | None = None,
     ):
         super().__init__()
         self.lang = lang if lang in SUPPORTED_LANGS else "en"
@@ -501,6 +784,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t(self.lang, "app_title"))
         self.setMinimumSize(1024, 640)
         self.resize(1280, 840)
+        # Without a settings store, window preferences live for this session only.
+        self._window_settings = window_settings
+        self.custom_window_size = self._stored_custom_window_size()
+        stored_mode = str(self._window_pref("window/startup_mode", "auto"))
+        if stored_mode not in WINDOW_MODES or (stored_mode == "custom" and self.custom_window_size is None):
+            stored_mode = "auto"
+        self.window_mode = stored_mode
+        self.remember_window_geometry = self._window_pref_bool("window/remember_geometry", False)
         self.report_root = Path(report_root)
         self.report_root.mkdir(parents=True, exist_ok=True)
         self.target = target or ""
@@ -621,11 +912,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 18, 14, 14)
         layout.setSpacing(8)
 
+        self.brand_label = QLabel("MCSA")
+        self.brand_label.setObjectName("RailBrand")
+        layout.addWidget(self.brand_label)
         self.title_label = QLabel(TOOL_NAME)
-        self.title_label.setObjectName("Title")
+        self.title_label.setObjectName("RailProduct")
         self.title_label.setWordWrap(True)
         layout.addWidget(self.title_label)
-        layout.addSpacing(12)
+        layout.addSpacing(18)
 
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
@@ -659,9 +953,9 @@ class MainWindow(QMainWindow):
 
     def _build_workspace_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
-        header.setSpacing(10)
+        header.setContentsMargins(0, 2, 0, 6)
         titles = QVBoxLayout()
-        titles.setSpacing(2)
+        titles.setSpacing(4)
         self.page_title = QLabel("Setup")
         self.page_title.setObjectName("PageTitle")
         self.page_subtitle = QLabel("")
@@ -670,34 +964,30 @@ class MainWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_subtitle)
         header.addLayout(titles, 1)
-
-        self.lbl_theme = QLabel("Theme")
-        self._field_labels.append(self.lbl_theme)
-        header.addWidget(self.lbl_theme)
-        self.theme_combo = QComboBox()
-        self.theme_combo.setMaximumWidth(120)
-        self.theme_combo.addItem("Light", "light")
-        self.theme_combo.addItem("Dark", "dark")
-        self.theme_combo.setCurrentIndex(0 if self.theme == "light" else 1)
-        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        header.addWidget(self.theme_combo)
-
-        self.lbl_lang = QLabel("Language")
-        self._field_labels.append(self.lbl_lang)
-        header.addWidget(self.lbl_lang)
-        self.lang_combo = QComboBox()
-        self.lang_combo.setMaximumWidth(150)
-        for code in SUPPORTED_LANGS:
-            self.lang_combo.addItem(LANG_LABELS.get(code, code), code)
-        idx = SUPPORTED_LANGS.index(self.lang) if self.lang in SUPPORTED_LANGS else 0
-        self.lang_combo.setCurrentIndex(idx)
-        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
-        header.addWidget(self.lang_combo)
         return header
 
-    def _constrain_setup_field(self, widget: QWidget, width: int = 280) -> None:
-        widget.setMaximumWidth(width)
-        widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    def _card_title(self, text: str = "") -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("CardTitle")
+        return lab
+
+    def _field_label(self, text: str = "") -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("FieldLabel")
+        lab.setWordWrap(True)
+        self._field_labels.append(lab)
+        return lab
+
+    def _setup_field(self, widget: QWidget) -> None:
+        widget.setMinimumWidth(160)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def _setup_card(self) -> tuple[QFrame, QVBoxLayout]:
+        card = self._card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(22, 20, 22, 22)
+        layout.setSpacing(6)
+        return card, layout
 
     def _build_setup_page(self) -> QWidget:
         page = QWidget()
@@ -706,44 +996,43 @@ class MainWindow(QMainWindow):
         page_l.setContentsMargins(0, 0, 0, 0)
 
         inner = QWidget()
-        inner.setMaximumWidth(1120)
+        inner.setObjectName("SetupContent")
+        inner.setMaximumWidth(self.MAX_SETUP_CONTENT_WIDTH)
+        # Setup content must claim the viewport width rather than its one-column size hint;
+        # otherwise ResponsiveCardGrid never sees enough width to reflow upward.
+        inner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setup_content = inner
         inner_l = QVBoxLayout(inner)
-        inner_l.setContentsMargins(0, 0, 0, 0)
-        inner_l.setSpacing(20)
+        inner_l.setContentsMargins(0, 0, 4, 12)
+        inner_l.setSpacing(16)
 
-        cards = QHBoxLayout()
-        cards.setSpacing(16)
-
-        device_card = self._card()
-        device_l = QVBoxLayout(device_card)
-        device_l.setContentsMargins(20, 18, 20, 18)
-        device_l.setSpacing(8)
-        self.lbl_setup = self._section("Device / DUT")
+        device_card, device_l = self._setup_card()
+        self.setup_device_card = device_card
+        self.lbl_setup = self._card_title()
         device_l.addWidget(self.lbl_setup)
-        self.lbl_device = QLabel("Device")
-        self._field_labels.append(self.lbl_device)
+        device_l.addSpacing(8)
+        self.lbl_device = self._field_label("Device")
         device_l.addWidget(self.lbl_device)
         self.device_edit = QLineEdit(self.target)
         self.device_edit.setPlaceholderText("Device name (optional)")
-        self._constrain_setup_field(self.device_edit)
+        self._setup_field(self.device_edit)
         device_l.addWidget(self.device_edit)
-        self.lbl_button = QLabel("Button")
-        self._field_labels.append(self.lbl_button)
+        device_l.addSpacing(10)
+        self.lbl_button = self._field_label("Button")
         device_l.addWidget(self.lbl_button)
         self.button_combo = QComboBox()
         self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
-        self._constrain_setup_field(self.button_combo)
+        self._setup_field(self.button_combo)
         device_l.addWidget(self.button_combo)
         device_l.addStretch(1)
-        cards.addWidget(device_card, 1)
 
-        config_card = self._card()
-        config_l = QVBoxLayout(config_card)
-        config_l.setContentsMargins(20, 18, 20, 18)
-        config_l.setSpacing(8)
-        self.lbl_setup_config = self._section("Test Configuration")
+        config_card, config_l = self._setup_card()
+        self.setup_config_card = config_card
+        self.lbl_setup_config = self._card_title()
         config_l.addWidget(self.lbl_setup_config)
+        config_l.addSpacing(8)
         mode_row = QHBoxLayout()
+        mode_row.setSpacing(20)
         self.radio_manual = QRadioButton("Manual")
         self.radio_fixture = QRadioButton("Fixture")
         self.radio_manual.setChecked(True)
@@ -756,8 +1045,8 @@ class MainWindow(QMainWindow):
         config_l.addLayout(mode_row)
         self.radio_manual.toggled.connect(self._apply_mode_fields)
 
-        self.hz_label = QLabel("Reference Rate (Hz)")
-        self._field_labels.append(self.hz_label)
+        config_l.addSpacing(10)
+        self.hz_label = self._field_label("Reference Rate (Hz)")
         config_l.addWidget(self.hz_label)
         self.hz_combo = QComboBox()
         self.hz_combo.setEditable(True)
@@ -765,30 +1054,30 @@ class MainWindow(QMainWindow):
         self.hz_combo.setCompleter(None)
         self.hz_combo.addItems(["5", "10", "20", "40"])
         self.hz_combo.setCurrentText("10")
-        self._constrain_setup_field(self.hz_combo)
+        self._setup_field(self.hz_combo)
         config_l.addWidget(self.hz_combo)
         self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
-        self.timing_tol_label = QLabel("Fixture Timing Tolerance (± ms)")
-        self.timing_tol_label.setWordWrap(True)
-        self._field_labels.append(self.timing_tol_label)
+        config_l.addSpacing(10)
+        self.timing_tol_label = self._field_label("Fixture Timing Tolerance (± ms)")
         config_l.addWidget(self.timing_tol_label)
         self.timing_tol_edit = QLineEdit()
         self.timing_tol_edit.setPlaceholderText("e.g. 2")
-        self._constrain_setup_field(self.timing_tol_edit)
+        self._setup_field(self.timing_tol_edit)
         config_l.addWidget(self.timing_tol_edit)
 
-        self.auto_stop_label = QLabel("Auto Stop")
-        self._field_labels.append(self.auto_stop_label)
+        config_l.addSpacing(10)
+        self.auto_stop_label = self._field_label("Auto Stop")
         config_l.addWidget(self.auto_stop_label)
         auto_stop_row = QHBoxLayout()
-        auto_stop_row.setSpacing(6)
+        auto_stop_row.setSpacing(8)
         self.auto_stop_off = QPushButton("OFF")
         self.auto_stop_on = QPushButton("ON")
         for btn in (self.auto_stop_off, self.auto_stop_on):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setMinimumHeight(32)
+            btn.setMinimumHeight(38)
+            btn.setMinimumWidth(80)
             auto_stop_row.addWidget(btn)
         self.auto_stop_off.setChecked(True)
         self.auto_stop_on.setChecked(False)
@@ -799,74 +1088,113 @@ class MainWindow(QMainWindow):
         self.auto_stop_on.toggled.connect(self._sync_auto_stop_widgets)
         auto_stop_row.addStretch(1)
         config_l.addLayout(auto_stop_row)
-        self.auto_stop_sec_label = QLabel("Auto Stop After (s)")
-        self._field_labels.append(self.auto_stop_sec_label)
+        config_l.addSpacing(10)
+        self.auto_stop_sec_label = self._field_label("Auto Stop After (s)")
         config_l.addWidget(self.auto_stop_sec_label)
         self.auto_stop_sec_combo = QComboBox()
         self.auto_stop_sec_combo.setEditable(True)
         self.auto_stop_sec_combo.addItems(["30", "60", "120", "300"])
         self.auto_stop_sec_combo.setCurrentText("60")
-        self._constrain_setup_field(self.auto_stop_sec_combo)
+        self._setup_field(self.auto_stop_sec_combo)
         config_l.addWidget(self.auto_stop_sec_combo)
         config_l.addStretch(1)
-        cards.addWidget(config_card, 1)
-        inner_l.addLayout(cards)
 
-        limits_card = self._card()
-        limits_l = QVBoxLayout(limits_card)
-        limits_l.setContentsMargins(20, 18, 20, 18)
-        limits_l.setSpacing(8)
-        self.lbl_custom_limits = self._section("CUSTOM LIMITS")
+        limits_card, limits_l = self._setup_card()
+        self.setup_limits_card = limits_card
+        self.lbl_custom_limits = self._card_title()
         limits_l.addWidget(self.lbl_custom_limits)
+        limits_l.addSpacing(8)
         limits_grid = QGridLayout()
         limits_grid.setContentsMargins(0, 0, 0, 0)
-        limits_grid.setHorizontalSpacing(16)
-        limits_grid.setVerticalSpacing(8)
+        limits_grid.setHorizontalSpacing(14)
+        limits_grid.setVerticalSpacing(10)
+        limits_grid.setColumnStretch(0, 3)
+        limits_grid.setColumnStretch(1, 2)
         self._limit_edits: dict[str, QLineEdit] = {}
         self._limit_labels: dict[str, QLabel] = {}
         defaults = qt_custom_limit_defaults()
-        for index, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
-            lab = QLabel({
+        for row, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
+            lab = self._field_label({
                 "chatter_threshold_ms": "Chatter (ms)",
                 "duplicate_click_threshold_ms": "Double-click (ms)",
                 "fixture_actuation_too_short_ms": "Actuation short (ms)",
                 "low_hold_warning_ms": "Low hold (ms)",
                 "interval_cv_limit_pct": "Interval CV (%)",
             }[key])
-            lab.setWordWrap(True)
-            lab.setObjectName("StatLabel")
             edit = QLineEdit()
             edit.setText(f"{defaults[key]:g}")
             edit.setAlignment(Qt.AlignmentFlag.AlignRight)
-            self._constrain_setup_field(edit, 200)
+            edit.setMinimumWidth(110)
+            edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self._limit_labels[key] = lab
             self._limit_edits[key] = edit
-            row, col = divmod(index, 2)
-            cell = QVBoxLayout()
-            cell.setSpacing(4)
-            cell.addWidget(lab)
-            cell.addWidget(edit)
-            cell_w = QWidget()
-            cell_w.setLayout(cell)
-            limits_grid.addWidget(cell_w, row, col)
+            limits_grid.addWidget(lab, row, 0, Qt.AlignmentFlag.AlignVCenter)
+            limits_grid.addWidget(edit, row, 1)
         limits_l.addLayout(limits_grid)
-        inner_l.addWidget(limits_card)
+        limits_l.addStretch(1)
+
+        self.setup_card_grid = ResponsiveCardGrid([device_card, config_card, limits_card])
+        inner_l.addWidget(self.setup_card_grid)
+
+        profile_card, profile_l = self._setup_card()
+        self.setup_profile_card = profile_card
+        self.lbl_profile_section = self._card_title()
+        profile_l.addWidget(self.lbl_profile_section)
+        profile_l.addSpacing(6)
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(16)
         self.lbl_profile_status = QLabel("")
-        self.lbl_profile_status.setObjectName("Muted")
+        self.lbl_profile_status.setObjectName("ProfileStatus")
+        self.lbl_profile_status.setProperty("state", "draft")
         self.lbl_profile_status.setWordWrap(True)
-        inner_l.addWidget(self.lbl_profile_status)
+        profile_row.addWidget(self.lbl_profile_status, 1)
         self.btn_lock_profile = QPushButton("Lock Profile & Continue")
         self.btn_lock_profile.setObjectName("Primary")
         self.btn_lock_profile.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_lock_profile.setMinimumHeight(42)
+        self.btn_lock_profile.setMinimumWidth(220)
         self.btn_lock_profile.clicked.connect(self.lock_profile)
-        inner_l.addWidget(self.btn_lock_profile)
+        profile_row.addWidget(self.btn_lock_profile, 0, Qt.AlignmentFlag.AlignVCenter)
+        profile_l.addLayout(profile_row)
+        inner_l.addWidget(profile_card)
+
+        preview_card, preview_l = self._setup_card()
+        self.locked_profile_card = preview_card
+        self.lbl_locked_profile_section = self._card_title()
+        preview_l.addWidget(self.lbl_locked_profile_section)
+        preview_l.addSpacing(6)
+        preview_grid = QGridLayout()
+        preview_grid.setContentsMargins(0, 0, 0, 0)
+        preview_grid.setHorizontalSpacing(28)
+        preview_grid.setVerticalSpacing(12)
+        self._preview_cells: list[tuple[QWidget, QLabel, QLabel]] = []
+        for index in range(6):
+            cell = QWidget()
+            cell_l = QVBoxLayout(cell)
+            cell_l.setContentsMargins(0, 0, 0, 0)
+            cell_l.setSpacing(2)
+            key_lab = QLabel("")
+            key_lab.setObjectName("StatLabel")
+            val_lab = QLabel("")
+            val_lab.setObjectName("PreviewValue")
+            val_lab.setWordWrap(True)
+            cell_l.addWidget(key_lab)
+            cell_l.addWidget(val_lab)
+            row, col = divmod(index, 3)
+            preview_grid.addWidget(cell, row, col)
+            self._preview_cells.append((cell, key_lab, val_lab))
+        for col in range(3):
+            preview_grid.setColumnStretch(col, 1)
+        preview_l.addLayout(preview_grid)
+        preview_card.hide()
+        inner_l.addWidget(preview_card)
         inner_l.addStretch(1)
 
         wrap = QWidget()
         wrap_l = QHBoxLayout(wrap)
         wrap_l.setContentsMargins(0, 0, 0, 0)
-        wrap_l.addWidget(inner)
-        wrap_l.addStretch(1)
+        wrap_l.addWidget(inner, 1)
+        wrap_l.addStretch(0)
 
         self.setup_scroll = QScrollArea()
         self.setup_scroll.setObjectName("PageScroll")
@@ -883,9 +1211,19 @@ class MainWindow(QMainWindow):
         page.setObjectName("CapturePage")
         page_l = QVBoxLayout(page)
         page_l.setContentsMargins(0, 0, 0, 0)
-        page_l.setSpacing(12)
+        page_l.setSpacing(0)
+
+        inner = QWidget()
+        inner.setObjectName("CaptureContent")
+        inner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        inner.setMinimumWidth(360)
+        self.capture_content = inner
+        inner_l = QVBoxLayout(inner)
+        inner_l.setContentsMargins(0, 0, 4, 8)
+        inner_l.setSpacing(12)
 
         actions = self._card()
+        actions.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         actions_l = QVBoxLayout(actions)
         actions_l.setContentsMargins(16, 12, 16, 12)
         actions_l.setSpacing(8)
@@ -913,70 +1251,88 @@ class MainWindow(QMainWindow):
         self.btn_edit_profile = QPushButton("Edit Profile")
         self.btn_edit_profile.setObjectName("Secondary")
         self.btn_edit_profile.clicked.connect(self.edit_profile)
-        row1 = QHBoxLayout()
-        row2 = QHBoxLayout()
-        for btn in (self.btn_stop, self.btn_new, self.btn_finish, self.btn_arm):
-            row1.addWidget(btn)
-        row1.addStretch(1)
-        for btn in (self.btn_save, self.btn_overlay, self.btn_clear_overlay, self.btn_edit_profile):
-            row2.addWidget(btn)
-        row2.addStretch(1)
-        actions_l.addLayout(row1)
-        actions_l.addLayout(row2)
+        self.capture_action_bar = WrappingButtonBar([
+            self.btn_stop, self.btn_new, self.btn_finish, self.btn_arm,
+            self.btn_save, self.btn_overlay, self.btn_clear_overlay, self.btn_edit_profile,
+        ])
+        actions_l.addWidget(self.capture_action_bar)
         self.capture_actions = actions
-        page_l.addWidget(actions)
+        inner_l.addWidget(actions)
 
         live = self._card()
+        live.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.capture_live = live
         live_l = QVBoxLayout(live)
         live_l.setContentsMargins(16, 14, 16, 14)
+        live_l.setSpacing(8)
         self.mode_label = QLabel("Manual · Observation")
         self.mode_label.setObjectName("Subtitle")
         live_l.addWidget(self.mode_label)
 
-        stats = QGridLayout()
-        stats.setHorizontalSpacing(14)
-        stats.setVerticalSpacing(2)
-        self.val_phase = self._add_stat(stats, 0, "PHASE", "phase")
-        self.val_time = self._add_stat(stats, 1, "TIME", "time")
-        self.val_clicks = self._add_stat(stats, 2, "CLICKS", "clicks")
-        self.val_interval = self._add_stat(stats, 3, "INTERVAL", "interval")
-        self.val_hold = self._add_stat(stats, 4, "HOLD", "hold")
-        self.val_verdict = self._add_stat(stats, 5, "VERDICT", "verdict")
-        live_l.addLayout(stats)
+        phase_cell, self.val_phase = self._stat_cell("PHASE", "phase")
+        time_cell, self.val_time = self._stat_cell("TIME", "time")
+        clicks_cell, self.val_clicks = self._stat_cell("CLICKS", "clicks")
+        interval_cell, self.val_interval = self._stat_cell("INTERVAL", "interval")
+        hold_cell, self.val_hold = self._stat_cell("HOLD", "hold")
+        verdict_cell, self.val_verdict = self._stat_cell("VERDICT", "verdict")
+        # 1100 / 760 chosen from 6× ~155 px cells at 1280 (content ~1032) vs 6× ~180 px at 1440 (~1192).
+        self.capture_stats_grid = ResponsiveItemGrid(
+            [phase_cell, time_cell, clicks_cell, interval_cell, hold_cell, verdict_cell],
+            wide_columns=6,
+            medium_columns=3,
+            compact_columns=2,
+            wide_min_width=1100,
+            medium_min_width=760,
+        )
+        live_l.addWidget(self.capture_stats_grid)
 
-        issues = QGridLayout()
-        self.val_extra = self._add_stat(issues, 0, "EXTRA", "extra")
-        self.val_rebound = self._add_stat(issues, 1, "REBOUND", "rebound")
-        self.val_delay = self._add_stat(issues, 2, "DELAY", "delay")
-        self.val_dut = self._add_stat(issues, 3, "DUT", "dut")
-        self.val_setup = self._add_stat(issues, 4, "SETUP", "setup_score")
-        live_l.addSpacing(6)
         self.issue_title = QLabel("ISSUES")
         self.issue_title.setObjectName("StatLabel")
         live_l.addWidget(self.issue_title)
-        live_l.addLayout(issues)
+        extra_cell, self.val_extra = self._stat_cell("EXTRA", "extra")
+        rebound_cell, self.val_rebound = self._stat_cell("REBOUND", "rebound")
+        delay_cell, self.val_delay = self._stat_cell("DELAY", "delay")
+        dut_cell, self.val_dut = self._stat_cell("DUT", "dut")
+        setup_cell, self.val_setup = self._stat_cell("SETUP", "setup_score")
+        self.capture_issues_grid = ResponsiveItemGrid(
+            [extra_cell, rebound_cell, delay_cell, dut_cell, setup_cell],
+            wide_columns=5,
+            medium_columns=3,
+            compact_columns=2,
+            wide_min_width=1080,
+            medium_min_width=760,
+        )
+        live_l.addWidget(self.capture_issues_grid)
 
         self.status_label = QLabel("Click in the Test Area to start.")
         self.status_label.setObjectName("Muted")
+        self.status_label.setWordWrap(True)
         self.alert_label = QLabel("")
         self.alert_label.setObjectName("Alert")
+        self.alert_label.setWordWrap(True)
         self.overlay_delta_label = QLabel("")
         self.overlay_delta_label.setObjectName("OverlayDelta")
+        self.overlay_delta_label.setWordWrap(True)
         live_l.addWidget(self.status_label)
         live_l.addWidget(self.alert_label)
         live_l.addWidget(self.overlay_delta_label)
-        page_l.addWidget(live)
+        inner_l.addWidget(live)
 
         self.test_area = QFrame()
         self.test_area.setObjectName("TestArea")
         self.test_area.setProperty("active", False)
+        self.test_area.setMinimumHeight(320)
+        self.test_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ta_l = QVBoxLayout(self.test_area)
         self.hint = QLabel("TEST AREA\nClick here with the target button to start\nStop with F5 or Esc")
         self.hint.setObjectName("Hint")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint.setWordWrap(True)
         ta_l.addWidget(self.hint)
         self.scatter = ScatterChart()
         self.interval_chart = IntervalChart()
+        self.scatter.setMinimumHeight(160)
+        self.interval_chart.setMinimumHeight(140)
         self.scatter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.interval_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ta_l.addWidget(self.scatter, 3)
@@ -984,18 +1340,29 @@ class MainWindow(QMainWindow):
 
         self.review_text = QTextEdit()
         self.review_text.setReadOnly(True)
-        self.review_text.setMinimumHeight(120)
+        self.review_text.setMinimumHeight(160)
+        self.review_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.review_text.hide()
 
         self.capture_splitter = QSplitter(Qt.Orientation.Vertical)
         self.capture_splitter.setObjectName("CaptureSplitter")
-        self.capture_splitter.setChildrenCollapsible(True)
+        self.capture_splitter.setChildrenCollapsible(False)
+        self.capture_splitter.setMinimumHeight(320)
         self.capture_splitter.addWidget(self.test_area)
         self.capture_splitter.addWidget(self.review_text)
         self.capture_splitter.setStretchFactor(0, 3)
         self.capture_splitter.setStretchFactor(1, 1)
         self.capture_splitter.setSizes([1, 0])
-        page_l.addWidget(self.capture_splitter, 1)
+        inner_l.addWidget(self.capture_splitter, 1)
+
+        self.capture_scroll = QScrollArea()
+        self.capture_scroll.setObjectName("PageScroll")
+        self.capture_scroll.setWidgetResizable(True)
+        self.capture_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.capture_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.capture_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.capture_scroll.setWidget(inner)
+        page_l.addWidget(self.capture_scroll)
         return page
 
     def _build_results_page(self) -> QWidget:
@@ -1017,17 +1384,154 @@ class MainWindow(QMainWindow):
     def _build_preferences_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("PreferencesPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        card = self._card()
-        card_l = QVBoxLayout(card)
-        card_l.setContentsMargins(24, 24, 24, 24)
-        self.preferences_placeholder = QLabel("")
-        self.preferences_placeholder.setObjectName("Muted")
-        self.preferences_placeholder.setWordWrap(True)
-        card_l.addWidget(self.preferences_placeholder)
-        card_l.addStretch(1)
-        layout.addWidget(card)
+        page_l = QVBoxLayout(page)
+        page_l.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        inner.setObjectName("PreferencesContent")
+        inner.setMaximumWidth(720)
+        inner_l = QVBoxLayout(inner)
+        inner_l.setContentsMargins(0, 0, 4, 12)
+        inner_l.setSpacing(16)
+
+        appearance_card, appearance_l = self._setup_card()
+        self.pref_appearance_card = appearance_card
+        self.lbl_pref_appearance = self._card_title()
+        appearance_l.addWidget(self.lbl_pref_appearance)
+        appearance_l.addSpacing(8)
+        self.lbl_theme = self._field_label("Theme")
+        appearance_l.addWidget(self.lbl_theme)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.setCurrentIndex(0 if self.theme == "light" else 1)
+        self.theme_combo.setMinimumWidth(240)
+        self.theme_combo.setMaximumWidth(360)
+        self.theme_combo.setMinimumHeight(36)
+        self.theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance_l.addWidget(self.theme_combo)
+        inner_l.addWidget(appearance_card)
+
+        language_card, language_l = self._setup_card()
+        self.pref_language_card = language_card
+        self.lbl_pref_language = self._card_title()
+        language_l.addWidget(self.lbl_pref_language)
+        language_l.addSpacing(8)
+        self.lbl_lang = self._field_label("Display Language")
+        language_l.addWidget(self.lbl_lang)
+        self.lang_combo = QComboBox()
+        for code in SUPPORTED_LANGS:
+            self.lang_combo.addItem(LANG_LABELS.get(code, code), code)
+        idx = SUPPORTED_LANGS.index(self.lang) if self.lang in SUPPORTED_LANGS else 0
+        self.lang_combo.setCurrentIndex(idx)
+        self.lang_combo.setMinimumWidth(240)
+        self.lang_combo.setMaximumWidth(360)
+        self.lang_combo.setMinimumHeight(36)
+        self.lang_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
+        language_l.addWidget(self.lang_combo)
+        inner_l.addWidget(language_card)
+
+        window_card, window_l = self._setup_card()
+        self.pref_window_card = window_card
+        self.lbl_pref_window = self._card_title()
+        window_l.addWidget(self.lbl_pref_window)
+        window_l.addSpacing(8)
+        self.lbl_startup_window = self._field_label("Startup Window")
+        window_l.addWidget(self.lbl_startup_window)
+        self.startup_window_combo = QComboBox()
+        for mode in WINDOW_MODES:
+            self.startup_window_combo.addItem(mode, mode)
+        self.startup_window_combo.setCurrentIndex(WINDOW_MODES.index(self.window_mode))
+        self.startup_window_combo.setMinimumWidth(240)
+        self.startup_window_combo.setMaximumWidth(360)
+        self.startup_window_combo.setMinimumHeight(36)
+        self.startup_window_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.startup_window_combo.currentIndexChanged.connect(self._on_window_mode_changed)
+        window_l.addWidget(self.startup_window_combo)
+        self.window_fit_note = QLabel("")
+        self.window_fit_note.setObjectName("Muted")
+        self.window_fit_note.setWordWrap(True)
+        window_l.addWidget(self.window_fit_note)
+
+        self.custom_window_panel = QWidget()
+        self.custom_window_panel.setObjectName("Workspace")
+        custom_l = QVBoxLayout(self.custom_window_panel)
+        custom_l.setContentsMargins(0, 8, 0, 0)
+        custom_l.setSpacing(6)
+        self.lbl_custom_window = self._field_label("Custom Window Size")
+        custom_l.addWidget(self.lbl_custom_window)
+        size_row = QGridLayout()
+        size_row.setHorizontalSpacing(12)
+        size_row.setVerticalSpacing(4)
+        self.lbl_custom_width = QLabel("Width")
+        self.lbl_custom_width.setObjectName("Muted")
+        self.lbl_custom_height = QLabel("Height")
+        self.lbl_custom_height.setObjectName("Muted")
+        self.custom_width_spin = self._custom_size_spin(self.minimumWidth(), CUSTOM_WINDOW_MAX_SIZE[0])
+        self.custom_height_spin = self._custom_size_spin(self.minimumHeight(), CUSTOM_WINDOW_MAX_SIZE[1])
+        size_row.addWidget(self.lbl_custom_width, 0, 0)
+        size_row.addWidget(self.lbl_custom_height, 0, 1)
+        size_row.addWidget(self.custom_width_spin, 1, 0)
+        size_row.addWidget(self.custom_height_spin, 1, 1)
+        size_row.setColumnStretch(2, 1)
+        custom_l.addLayout(size_row)
+        self.apply_custom_size_button = QPushButton("Apply Custom Size")
+        self.apply_custom_size_button.setObjectName("Secondary")
+        self.apply_custom_size_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.apply_custom_size_button.setMinimumHeight(36)
+        self.apply_custom_size_button.clicked.connect(lambda: self.apply_custom_window_size())
+        custom_l.addWidget(self.apply_custom_size_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.custom_size_status = QLabel("")
+        self.custom_size_status.setObjectName("Muted")
+        self.custom_size_status.setWordWrap(True)
+        custom_l.addWidget(self.custom_size_status)
+        self.custom_width_spin.valueChanged.connect(self._sync_custom_size_status)
+        self.custom_height_spin.valueChanged.connect(self._sync_custom_size_status)
+        window_l.addWidget(self.custom_window_panel)
+        self._seed_custom_size_fields()
+        self._sync_custom_window_panel()
+
+        window_l.addSpacing(10)
+        self.remember_window_size_checkbox = QCheckBox("Remember last window size and position")
+        self.remember_window_size_checkbox.setChecked(self.remember_window_geometry)
+        self.remember_window_size_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remember_window_size_checkbox.toggled.connect(self._on_remember_window_toggled)
+        window_l.addWidget(self.remember_window_size_checkbox)
+        self.remember_window_size_note = QLabel("")
+        self.remember_window_size_note.setObjectName("Muted")
+        self.remember_window_size_note.setWordWrap(True)
+        window_l.addWidget(self.remember_window_size_note)
+        window_l.addSpacing(10)
+        self.reset_window_geometry_button = QPushButton("Reset Window Size && Position")
+        self.reset_window_geometry_button.setObjectName("Secondary")
+        self.reset_window_geometry_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reset_window_geometry_button.setMinimumHeight(38)
+        self.reset_window_geometry_button.clicked.connect(self.reset_window_geometry)
+        window_l.addWidget(self.reset_window_geometry_button, 0, Qt.AlignmentFlag.AlignLeft)
+        inner_l.addWidget(window_card)
+
+        self.preferences_note = QLabel("")
+        self.preferences_note.setObjectName("Muted")
+        self.preferences_note.setWordWrap(True)
+        inner_l.addWidget(self.preferences_note)
+        inner_l.addStretch(1)
+
+        wrap = QWidget()
+        wrap_l = QHBoxLayout(wrap)
+        wrap_l.setContentsMargins(0, 0, 0, 0)
+        wrap_l.addWidget(inner)
+        wrap_l.addStretch(1)
+
+        self.preferences_scroll = QScrollArea()
+        self.preferences_scroll.setObjectName("PageScroll")
+        self.preferences_scroll.setWidgetResizable(True)
+        self.preferences_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.preferences_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.preferences_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.preferences_scroll.setWidget(wrap)
+        page_l.addWidget(self.preferences_scroll)
         return page
 
     def _show_workflow_page(self, name: str) -> None:
@@ -1054,9 +1558,9 @@ class MainWindow(QMainWindow):
     def _set_review_panel_visible(self, visible: bool) -> None:
         if visible:
             self.review_text.show()
-            total = max(self.capture_splitter.height(), 400)
-            review = max(int(total * 0.34), 180)
-            self.capture_splitter.setSizes([max(total - review, 200), review])
+            total = max(self.capture_splitter.height(), 480)
+            review = max(160, min(int(total * 0.32), total - 280))
+            self.capture_splitter.setSizes([max(total - review, 280), review])
         else:
             self.review_text.hide()
             self.capture_splitter.setSizes([1, 0])
@@ -1067,20 +1571,24 @@ class MainWindow(QMainWindow):
         self._section_labels.append(lab)
         return lab
 
-    def _add_stat(self, grid: QGridLayout, col: int, name: str, key: str) -> QLabel:
+    def _stat_cell(self, name: str, key: str) -> tuple[QWidget, QLabel]:
         lab = QLabel(name)
         lab.setObjectName("StatLabel")
+        lab.setWordWrap(True)
         self._stat_name_labels[key] = lab
         val = QLabel("--")
         val.setObjectName("StatValue")
-        box = QVBoxLayout()
-        box.setSpacing(0)
+        val.setWordWrap(True)
+        cell = QWidget()
+        cell.setObjectName("StatCell")
+        box = QVBoxLayout(cell)
+        box.setContentsMargins(4, 2, 4, 2)
+        box.setSpacing(2)
         box.addWidget(lab)
         box.addWidget(val)
-        w = QWidget()
-        w.setLayout(box)
-        grid.addWidget(w, 0, col)
-        return val
+        cell.setMinimumWidth(108)
+        cell.setMinimumHeight(48)
+        return cell, val
 
     def _apply_theme(self):
         app = QApplication.instance()
@@ -1104,6 +1612,204 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._refresh_live_texts()
         self._update_controls()
+
+    def _window_pref(self, key: str, default: Any) -> Any:
+        if self._window_settings is None:
+            return default
+        return self._window_settings.value(key, default)
+
+    def _window_pref_bool(self, key: str, default: bool) -> bool:
+        value = self._window_pref(key, default)
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    def _store_window_pref(self, key: str, value: Any) -> None:
+        if self._window_settings is not None:
+            self._window_settings.setValue(key, value)
+
+    def _forget_window_geometry(self) -> None:
+        if self._window_settings is not None:
+            self._window_settings.remove("window/geometry")
+            self._window_settings.remove("window/maximized")
+
+    def _active_screen(self):
+        screen = self.screen() if self.isVisible() else None
+        if screen is None:
+            screen = QGuiApplication.screenAt(QCursor.pos())
+        return screen or QGuiApplication.primaryScreen()
+
+    def _available_geometry(self) -> QRect:
+        screen = self._active_screen()
+        return screen.availableGeometry() if screen is not None else QRect(0, 0, 1280, 720)
+
+    def _work_areas(self) -> list[QRect]:
+        return [screen.availableGeometry() for screen in QGuiApplication.screens()]
+
+    def _frame_extra(self) -> QSize:
+        """Window decoration size (frame minus client); zero until the native window exists."""
+        frame, client = self.frameGeometry(), self.geometry()
+        return QSize(max(0, frame.width() - client.width()), max(0, frame.height() - client.height()))
+
+    def apply_window_mode(self, mode: str | None = None) -> None:
+        """Resize/center (or maximize) this window only; lifecycle and run data are untouched."""
+        mode = mode or self.window_mode
+        if mode == "maximized":
+            self.showMaximized() if self.isVisible() else self.setWindowState(Qt.WindowState.WindowMaximized)
+            return
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+        available = self._available_geometry()
+        extra = self._frame_extra()
+        size = window_size_for_mode(mode, self._client_work_area(), self.minimumSize(), self.custom_window_size)
+        self.resize(size)
+        self.move(centered_top_left(size + extra, available))
+
+    def _client_work_area(self) -> QSize:
+        available, extra = self._available_geometry(), self._frame_extra()
+        return QSize(available.width() - extra.width(), available.height() - extra.height())
+
+    def show_startup_window(self) -> None:
+        restored = self._restorable_window_geometry()
+        if restored is not None:
+            rect, maximized = restored
+            self.setGeometry(rect)
+            self.showMaximized() if maximized else self.show()
+            return
+        if self.window_mode == "maximized":
+            self.showMaximized()
+            return
+        self.show()
+        self.apply_window_mode()
+
+    def _restorable_window_geometry(self) -> tuple[QRect, bool] | None:
+        if not self.remember_window_geometry:
+            return None
+        rect = self._window_pref("window/geometry", None)
+        if not isinstance(rect, QRect) or not geometry_is_reachable(rect, self._work_areas()):
+            return None
+        return rect, self._window_pref_bool("window/maximized", False)
+
+    def _save_window_geometry(self) -> None:
+        if not self.remember_window_geometry:
+            return
+        rect = self.normalGeometry() if self.isMaximized() else self.geometry()
+        if not geometry_is_reachable(rect, self._work_areas()):
+            return
+        self._store_window_pref("window/geometry", rect)
+        self._store_window_pref("window/maximized", self.isMaximized())
+
+    def _on_window_mode_changed(self, index: int) -> None:
+        mode = self.startup_window_combo.itemData(index)
+        if mode not in WINDOW_MODES:
+            return
+        if mode == "custom":
+            # Custom only becomes the active/persisted mode once Apply Custom Size succeeds.
+            self._seed_custom_size_fields()
+            self._sync_custom_window_panel()
+            return
+        self.window_mode = mode
+        self._store_window_pref("window/startup_mode", mode)
+        self._sync_custom_window_panel()
+        self.apply_window_mode()
+
+    def _custom_size_spin(self, minimum: int, maximum: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setSuffix(" px")
+        spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spin.setMinimumWidth(130)
+        spin.setMinimumHeight(36)
+        return spin
+
+    def _valid_custom_window_size(self, width: Any, height: Any) -> bool:
+        if isinstance(width, bool) or isinstance(height, bool):
+            return False
+        if not isinstance(width, int) or not isinstance(height, int):
+            return False
+        return (
+            self.minimumWidth() <= width <= CUSTOM_WINDOW_MAX_SIZE[0]
+            and self.minimumHeight() <= height <= CUSTOM_WINDOW_MAX_SIZE[1]
+        )
+
+    def _stored_custom_window_size(self) -> QSize | None:
+        try:
+            width = int(self._window_pref("window/custom_width", 0))
+            height = int(self._window_pref("window/custom_height", 0))
+        except (TypeError, ValueError):
+            return None
+        return QSize(width, height) if self._valid_custom_window_size(width, height) else None
+
+    def _custom_size_seed(self) -> QSize:
+        if self.custom_window_size is not None:
+            return QSize(self.custom_window_size)
+        if self.isMaximized() or self.isFullScreen():
+            normal = self.normalGeometry()
+            if normal.isValid() and not normal.isEmpty():
+                return normal.size()
+            return window_size_for_mode("auto", self._client_work_area(), self.minimumSize())
+        return self.size()
+
+    def _seed_custom_size_fields(self) -> None:
+        seed = self._custom_size_seed()
+        self.custom_width_spin.setValue(seed.width())
+        self.custom_height_spin.setValue(seed.height())
+
+    def _custom_size_pending(self) -> bool:
+        if self.startup_window_combo.currentData() != "custom":
+            return False
+        entered = QSize(self.custom_width_spin.value(), self.custom_height_spin.value())
+        return self.window_mode != "custom" or self.custom_window_size != entered
+
+    def _sync_custom_size_status(self, *_args) -> None:
+        pending = self._custom_size_pending()
+        self.custom_size_status.setText(self._tr("custom_size_pending") if pending else "")
+        self.custom_size_status.setVisible(pending)
+
+    def _sync_custom_window_panel(self) -> None:
+        self.custom_window_panel.setVisible(self.startup_window_combo.currentData() == "custom")
+        self._sync_custom_size_status()
+
+    def apply_custom_window_size(self, width: int | None = None, height: int | None = None) -> bool:
+        """Validate, persist and apply a custom window size; Custom becomes the startup mode only on success."""
+        width = self.custom_width_spin.value() if width is None else width
+        height = self.custom_height_spin.value() if height is None else height
+        if not self._valid_custom_window_size(width, height):
+            return False
+        self.custom_window_size = QSize(width, height)
+        self._store_window_pref("window/custom_width", width)
+        self._store_window_pref("window/custom_height", height)
+        self.window_mode = "custom"
+        self._store_window_pref("window/startup_mode", "custom")
+        self.startup_window_combo.blockSignals(True)
+        try:
+            self.startup_window_combo.setCurrentIndex(WINDOW_MODES.index("custom"))
+        finally:
+            self.startup_window_combo.blockSignals(False)
+        self.custom_width_spin.setValue(width)
+        self.custom_height_spin.setValue(height)
+        self._sync_custom_window_panel()
+        self.apply_window_mode("custom")
+        return True
+
+    def _on_remember_window_toggled(self, checked: bool) -> None:
+        self.remember_window_geometry = bool(checked)
+        self._store_window_pref("window/remember_geometry", self.remember_window_geometry)
+        if not self.remember_window_geometry:
+            self._forget_window_geometry()
+
+    def reset_window_geometry(self) -> None:
+        """Forget remembered geometry and return startup mode, combo and window to Auto in one step."""
+        self._forget_window_geometry()
+        self.window_mode = "auto"
+        self._store_window_pref("window/startup_mode", "auto")
+        self.startup_window_combo.blockSignals(True)
+        try:
+            self.startup_window_combo.setCurrentIndex(WINDOW_MODES.index("auto"))
+        finally:
+            self.startup_window_combo.blockSignals(False)
+        self._sync_custom_window_panel()
+        self.apply_window_mode("auto")
 
     def _refresh_live_texts(self):
         """Re-apply translated runtime strings (charts, review, overlay, verdict)."""
@@ -1134,11 +1840,15 @@ class MainWindow(QMainWindow):
         self.nav_capture.setText(self._tr("nav_capture"))
         self.nav_results.setText(self._tr("nav_results"))
         self.nav_preferences.setText(self._tr("nav_preferences"))
-        self.lbl_setup.setText(self._tr("setup_device_section"))
-        self.lbl_setup_config.setText(self._tr("setup_config_section"))
+        self.lbl_setup.setText(self._tr("setup_device_section").upper())
+        self.lbl_setup_config.setText(self._tr("setup_config_section").upper())
+        self.lbl_profile_section.setText(self._tr("setup_profile_section").upper())
+        self.lbl_locked_profile_section.setText(self._tr("setup_locked_profile_section").upper())
+        self.lbl_pref_appearance.setText(self._tr("pref_appearance_section").upper())
+        self.lbl_pref_language.setText(self._tr("language").upper())
         self.lbl_controls.setText(self._tr("controls"))
         self.results_placeholder.setText(self._tr("page_results_placeholder"))
-        self.preferences_placeholder.setText(self._tr("page_preferences_placeholder"))
+        self.preferences_note.setText(self._tr("preferences_more_note"))
         self.radio_manual.setText(self._tr("manual"))
         self.radio_fixture.setText(self._tr("fixture"))
         self.lbl_device.setText(self._tr("device"))
@@ -1149,7 +1859,7 @@ class MainWindow(QMainWindow):
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
-        self.lbl_custom_limits.setText(self._tr("custom_limits"))
+        self.lbl_custom_limits.setText(self._tr("custom_limits").upper())
         for key, lab in self._limit_labels.items():
             lab.setText(self._tr(_QT_CUSTOM_LIMIT_LABEL_KEYS[key]))
         self.btn_stop.setText(self._tr("stop"))
@@ -1164,7 +1874,25 @@ class MainWindow(QMainWindow):
         self.lbl_theme.setText(self._tr("theme"))
         self.theme_combo.setItemText(0, self._tr("theme_light"))
         self.theme_combo.setItemText(1, self._tr("theme_dark"))
-        self.lbl_lang.setText(self._tr("language"))
+        self.lbl_lang.setText(self._tr("display_language"))
+        self.lbl_pref_window.setText(self._tr("pref_window_section").upper())
+        self.lbl_startup_window.setText(self._tr("startup_window"))
+        for index, mode in enumerate(WINDOW_MODES):
+            label = self._tr(f"window_mode_{mode}")
+            if mode in WINDOW_PRESET_SIZES:
+                width, height = WINDOW_PRESET_SIZES[mode]
+                label = f"{width} × {height} — {label}"
+            self.startup_window_combo.setItemText(index, label)
+        self.window_fit_note.setText(self._tr("window_fit_note"))
+        self.lbl_custom_window.setText(self._tr("custom_window_size"))
+        self.lbl_custom_width.setText(self._tr("custom_width"))
+        self.lbl_custom_height.setText(self._tr("custom_height"))
+        self.apply_custom_size_button.setText(self._tr("apply_custom_size"))
+        self._sync_custom_size_status()
+        self.remember_window_size_checkbox.setText(self._tr("remember_window_size"))
+        self.remember_window_size_note.setText(self._tr("remember_window_size_note"))
+        # A lone "&" in button text is consumed as a mnemonic marker.
+        self.reset_window_geometry_button.setText(self._tr("reset_window_geometry").replace("&", "&&"))
         self.issue_title.setText(self._tr("issues"))
         for key, lab in self._stat_name_labels.items():
             lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
@@ -1293,10 +2021,32 @@ class MainWindow(QMainWindow):
         elif state == "completed":
             self.val_phase.setText(self._tr("phase_review"))
             self.lbl_profile_status.setText(self._tr("profile_status_locked"))
+        if state == "draft":
+            status_state = "error" if self._profile_validation_error_key else "draft"
+        else:
+            status_state = "locked"
+        if self.lbl_profile_status.property("state") != status_state:
+            self.lbl_profile_status.setProperty("state", status_state)
+            self.lbl_profile_status.style().unpolish(self.lbl_profile_status)
+            self.lbl_profile_status.style().polish(self.lbl_profile_status)
+        self._refresh_locked_profile_preview()
         if self._ui_is_manual():
             self.mode_label.setText(self._tr("mode_manual"))
         else:
             self._refresh_fixture_mode_label()
+
+    def _refresh_locked_profile_preview(self) -> None:
+        rows = locked_profile_preview_rows(self.profile_locked_settings, self.profile_locked_target, self._tr)
+        for index, (cell, key_lab, val_lab) in enumerate(self._preview_cells):
+            if index < len(rows):
+                key_lab.setText(rows[index][0].upper())
+                val_lab.setText(rows[index][1])
+                cell.show()
+            else:
+                key_lab.setText("")
+                val_lab.setText("")
+                cell.hide()
+        self.locked_profile_card.setVisible(bool(rows))
 
     def lock_profile(self) -> bool:
         if self.running or self.completed:
@@ -1862,8 +2612,12 @@ class MainWindow(QMainWindow):
         if not self._test_area_is_active():
             return False
         try:
-            gp = self.test_area.mapFromGlobal(self._cursor_global_pos())
-            return self.test_area.rect().contains(gp)
+            pos = self._cursor_global_pos()
+            if not self.test_area.rect().contains(self.test_area.mapFromGlobal(pos)):
+                return False
+            # Capture scrolls: Test Area geometry outside the viewport is clipped, not clickable.
+            viewport = self.capture_scroll.viewport()
+            return viewport.rect().contains(viewport.mapFromGlobal(pos))
         except Exception as exc:
             _log.warning("Test Area hit-test failed; treating cursor as outside: %s", exc)
             return False
@@ -1948,6 +2702,12 @@ class MainWindow(QMainWindow):
             self.capture_actions,
             self.theme_combo,
             self.lang_combo,
+            self.startup_window_combo,
+            self.custom_width_spin,
+            self.custom_height_spin,
+            self.apply_custom_size_button,
+            self.remember_window_size_checkbox,
+            self.reset_window_geometry_button,
             self.radio_manual,
             self.radio_fixture,
             self.device_edit,
@@ -1962,6 +2722,7 @@ class MainWindow(QMainWindow):
             self.btn_edit_profile,
             *self._limit_edits.values(),
             self.setup_scroll.verticalScrollBar(),
+            self.capture_scroll.verticalScrollBar(),
         ]
 
     def _cursor_over_capture_exclusion_ui(self) -> bool:
@@ -2160,6 +2921,7 @@ class MainWindow(QMainWindow):
             self._listen_start_timer.stop()
         if getattr(self, "ui_timer", None) is not None:
             self.ui_timer.stop()
+        self._save_window_geometry()
         self.stop_adapters()
         super().closeEvent(event)
 
@@ -2179,6 +2941,12 @@ def run_qt_ui(
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(get_style(theme))
+    window_settings = QSettings(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        "MCSA",
+        "MouseClickStabilityAnalyzer",
+    )
     win = MainWindow(
         report_root=root,
         target=target,
@@ -2186,6 +2954,7 @@ def run_qt_ui(
         run_id=run_id or "",
         lang=lang,
         theme=theme,
+        window_settings=window_settings,
     )
-    win.showMaximized()
+    win.show_startup_window()
     return app.exec()

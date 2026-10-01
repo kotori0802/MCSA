@@ -35,3 +35,6 @@ Repository = "https://github.com/kotori0802/mouse-click-stability-analyzer"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"mouse_click_stability_analyzer.qt_shell" = ["assets/*.svg"]

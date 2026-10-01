@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ QPushButton#NavButton {
     border: none;
     border-radius: 10px;
     padding: 10px 14px;
+    min-height: 20px;
     background: transparent;
     font-weight: 600;
 }
@@ -214,12 +216,62 @@ QPushButton#Danger {
     border: none;
 }
 QPushButton#Secondary {
+    background: #ffffff;
+    border: 1px solid #c7c7cc;
+    min-height: 20px;
+    padding: 10px 16px;
+}
+QPushButton#Secondary:hover {
     background: #f2f2f7;
-    border: 1px solid #d2d2d7;
+    border-color: #8e8e93;
+}
+QPushButton#Secondary:pressed {
+    background: #e5e5ea;
+}
+QPushButton#Secondary:focus {
+    border: 2px solid #007aff;
+}
+QPushButton#Secondary:disabled {
+    color: #a1a1a6;
+    background: #f2f2f7;
+    border-color: #d2d2d7;
 }
 QRadioButton, QCheckBox {
     background: transparent;
-    spacing: 8px;
+    spacing: 10px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #8e8e93;
+    border-radius: 4px;
+    background: #ffffff;
+}
+QCheckBox::indicator:hover {
+    border-color: #007aff;
+}
+QCheckBox::indicator:checked {
+    border-color: #007aff;
+    background: #007aff;
+    image: url("@CHECK_ICON@");
+}
+QCheckBox::indicator:checked:hover {
+    border-color: #0066d6;
+    background: #0066d6;
+}
+QCheckBox::indicator:disabled {
+    border-color: #d2d2d7;
+    background: #f2f2f7;
+}
+QCheckBox::indicator:checked:disabled {
+    border-color: #c7c7cc;
+    background: #c7c7cc;
+}
+QCheckBox:focus {
+    outline: none;
+}
+QCheckBox::indicator:focus {
+    border-color: #007aff;
 }
 QComboBox, QLineEdit, QSpinBox {
     background: #ffffff;
@@ -228,9 +280,26 @@ QComboBox, QLineEdit, QSpinBox {
     padding: 8px 10px;
     min-height: 18px;
 }
+QComboBox {
+    padding: 8px 32px 8px 12px;
+}
+QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
+    border-color: #8e8e93;
+}
+QComboBox:focus, QLineEdit:focus, QSpinBox:focus {
+    border: 2px solid #007aff;
+}
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 28px;
     border: none;
-    width: 24px;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    width: 12px;
+    height: 8px;
+    image: url("@CHEVRON_ICON@");
 }
 QTextEdit {
     background: #fbfbfd;
@@ -245,6 +314,58 @@ QListWidget {
     border: 1px solid #e5e5ea;
     border-radius: 10px;
     padding: 4px;
+}
+QLabel#RailBrand {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #007aff;
+    background: transparent;
+}
+QLabel#RailProduct {
+    font-size: 11px;
+    color: #6e6e73;
+    background: transparent;
+}
+QLabel#CardTitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    color: #3a3a3c;
+    background: transparent;
+}
+QLabel#FieldLabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: #48484a;
+    background: transparent;
+}
+QLabel#ProfileStatus {
+    font-size: 13px;
+    color: #6e6e73;
+    background: transparent;
+}
+QLabel#ProfileStatus[state="error"] {
+    color: #c0392b;
+    font-weight: 600;
+}
+QLabel#ProfileStatus[state="locked"] {
+    color: #248a3d;
+    font-weight: 600;
+}
+QLabel#PreviewValue {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1d1d1f;
+    background: transparent;
+}
+QWidget#SetupPage QLineEdit, QWidget#SetupPage QComboBox, QWidget#PreferencesPage QComboBox,
+QWidget#PreferencesPage QSpinBox {
+    min-height: 20px;
+}
+QWidget#SetupPage QLineEdit:disabled, QWidget#SetupPage QComboBox:disabled {
+    background: #f2f2f7;
+    color: #8e8e93;
 }
 """
 
@@ -292,6 +413,7 @@ QPushButton#NavButton {
     border: none;
     border-radius: 10px;
     padding: 10px 14px;
+    min-height: 20px;
     background: transparent;
     font-weight: 600;
     color: #f5f5f7;
@@ -402,11 +524,63 @@ QPushButton#Danger {
 }
 QPushButton#Secondary {
     background: #2c2c2e;
-    border: 1px solid #48484a;
+    border: 1px solid #636366;
+    min-height: 20px;
+    padding: 10px 16px;
+    color: #f5f5f7;
+}
+QPushButton#Secondary:hover {
+    background: #3a3a3c;
+    border-color: #8e8e93;
+}
+QPushButton#Secondary:pressed {
+    background: #48484a;
+}
+QPushButton#Secondary:focus {
+    border: 2px solid #0a84ff;
+}
+QPushButton#Secondary:disabled {
+    color: #636366;
+    background: #1c1c1e;
+    border-color: #3a3a3c;
 }
 QRadioButton, QCheckBox {
     background: transparent;
     color: #f5f5f7;
+    spacing: 10px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #8e8e93;
+    border-radius: 4px;
+    background: #2c2c2e;
+}
+QCheckBox::indicator:hover {
+    border-color: #0a84ff;
+}
+QCheckBox::indicator:checked {
+    border-color: #0a84ff;
+    background: #0a84ff;
+    image: url("@CHECK_ICON@");
+}
+QCheckBox::indicator:checked:hover {
+    border-color: #409cff;
+    background: #409cff;
+}
+QCheckBox::indicator:disabled {
+    border-color: #48484a;
+    background: #1c1c1e;
+}
+QCheckBox::indicator:checked:disabled {
+    border-color: #48484a;
+    background: #48484a;
+}
+QCheckBox:focus {
+    outline: none;
+}
+QCheckBox::indicator:focus {
+    border-color: #0a84ff;
 }
 QComboBox, QLineEdit, QSpinBox {
     background: #2c2c2e;
@@ -416,9 +590,26 @@ QComboBox, QLineEdit, QSpinBox {
     min-height: 18px;
     color: #f5f5f7;
 }
+QComboBox {
+    padding: 8px 32px 8px 12px;
+}
+QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
+    border-color: #8e8e93;
+}
+QComboBox:focus, QLineEdit:focus, QSpinBox:focus {
+    border: 2px solid #0a84ff;
+}
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 28px;
     border: none;
-    width: 24px;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    width: 12px;
+    height: 8px;
+    image: url("@CHEVRON_ICON@");
 }
 QTextEdit {
     background: #2c2c2e;
@@ -436,13 +627,81 @@ QListWidget {
     padding: 4px;
     color: #f5f5f7;
 }
+QLabel#RailBrand {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #0a84ff;
+    background: transparent;
+}
+QLabel#RailProduct {
+    font-size: 11px;
+    color: #98989d;
+    background: transparent;
+}
+QLabel#CardTitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    color: #d1d1d6;
+    background: transparent;
+}
+QLabel#FieldLabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c7c7cc;
+    background: transparent;
+}
+QLabel#ProfileStatus {
+    font-size: 13px;
+    color: #98989d;
+    background: transparent;
+}
+QLabel#ProfileStatus[state="error"] {
+    color: #ff6961;
+    font-weight: 600;
+}
+QLabel#ProfileStatus[state="locked"] {
+    color: #30d158;
+    font-weight: 600;
+}
+QLabel#PreviewValue {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f5f5f7;
+    background: transparent;
+}
+QWidget#SetupPage QLineEdit, QWidget#SetupPage QComboBox, QWidget#PreferencesPage QComboBox,
+QWidget#PreferencesPage QSpinBox {
+    min-height: 20px;
+}
+QWidget#SetupPage QLineEdit:disabled, QWidget#SetupPage QComboBox:disabled {
+    background: #1c1c1e;
+    color: #636366;
+}
 """
 
 APP_STYLE = LIGHT_STYLE  # backward compat
 
 
+ASSET_DIR = Path(__file__).resolve().parent / "assets"
+# Qt style sheets cannot load data: URIs, so indicator images come from package files.
+STYLE_ASSETS: dict[str, dict[str, str]] = {
+    "light": {"@CHECK_ICON@": "check_white.svg", "@CHEVRON_ICON@": "chevron_down_light.svg"},
+    "dark": {"@CHECK_ICON@": "check_white.svg", "@CHEVRON_ICON@": "chevron_down_dark.svg"},
+}
+
+
+def style_asset_path(name: str) -> Path:
+    return ASSET_DIR / name
+
+
 def get_style(theme: str) -> str:
-    return DARK_STYLE if theme == "dark" else LIGHT_STYLE
+    key = "dark" if theme == "dark" else "light"
+    sheet = DARK_STYLE if key == "dark" else LIGHT_STYLE
+    for token, name in STYLE_ASSETS[key].items():
+        sheet = sheet.replace(token, style_asset_path(name).as_posix())
+    return sheet
 
 
 def get_palette(theme: str) -> ChartPalette:

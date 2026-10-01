@@ -151,13 +151,126 @@ class CaptureExclusionTests(unittest.TestCase):
             with self.subTest(widget=widget.text()):
                 self._assert_click_excluded(widget)
 
-    def test_global_theme_language_are_excluded(self):
+    def test_visible_preferences_theme_language_are_excluded(self):
         self._setup_fixture()
         self._start_run()
-        self.assertTrue(self.win.theme_combo.isEnabled())
-        self.assertTrue(self.win.lang_combo.isEnabled())
-        self._assert_click_excluded(self.win.theme_combo)
-        self._assert_click_excluded(self.win.lang_combo)
+        self.win.nav_preferences.click()
+        self._qapp.processEvents()
+        for combo in (self.win.theme_combo, self.win.lang_combo):
+            with self.subTest(combo=combo):
+                self.assertTrue(combo.isVisibleTo(self.win))
+                self.assertTrue(combo.isEnabled())
+                self._assert_click_excluded(combo)
+        for widget in (
+            self.win.startup_window_combo,
+            self.win.remember_window_size_checkbox,
+            self.win.reset_window_geometry_button,
+        ):
+            with self.subTest(widget=widget.objectName() or widget.__class__.__name__):
+                self.assertTrue(widget.isVisibleTo(self.win))
+                self.assertTrue(widget.isEnabled())
+                self._assert_click_excluded(widget)
+        self.assertEqual(len(self.win.events), 1)
+        self.assertTrue(self.win.running)
+
+    def _stale_background_point(self, widgets):
+        """A point inside hidden widgets' stale geometry not covered by any visible exclusion widget."""
+        visible = [w for w in self.win._capture_exclusion_widgets() if w.isVisibleTo(self.win)]
+        for widget in widgets:
+            rect = widget.rect()
+            for fx in (0.2, 0.5, 0.8):
+                for fy in (0.25, 0.5, 0.75):
+                    local = QPoint(int(rect.width() * fx), int(rect.height() * fy))
+                    point = widget.mapToGlobal(local)
+                    if not any(w.rect().contains(w.mapFromGlobal(point)) for w in visible):
+                        return widget, point
+        return None, None
+
+    def test_hidden_preferences_theme_language_do_not_exclude_on_capture(self):
+        self._setup_fixture()
+        self.win.nav_preferences.click()
+        self._qapp.processEvents()
+        self.win.nav_capture.click()
+        self._start_run()
+        self._qapp.processEvents()
+        self.assertIs(self.win.page_stack.currentWidget(), self.win.page_capture)
+        combos = (
+            self.win.theme_combo,
+            self.win.lang_combo,
+            self.win.startup_window_combo,
+            self.win.remember_window_size_checkbox,
+            self.win.reset_window_geometry_button,
+        )
+        for combo in combos:
+            self.assertFalse(combo.isVisibleTo(self.win))
+        widget, point = self._stale_background_point(combos)
+        self.assertIsNotNone(point, "no stale Theme/Language point lies on Capture background")
+        self._cursor = point
+        self._in_test_area = False
+        self.assertFalse(self.win._cursor_over_capture_exclusion_ui(), widget)
+        self._raw_click()
+        self.assertEqual(len(self.win.events), 2)
+
+    def _reveal_custom_controls(self):
+        self.win.nav_preferences.click()
+        self._qapp.processEvents()
+        self.win.startup_window_combo.setCurrentIndex(qt_app.WINDOW_MODES.index("custom"))
+        self._qapp.processEvents()
+
+    def _custom_controls(self):
+        return (self.win.custom_width_spin, self.win.custom_height_spin, self.win.apply_custom_size_button)
+
+    def test_visible_custom_size_controls_are_excluded(self):
+        self._setup_fixture()
+        self._start_run()
+        self._reveal_custom_controls()
+        for widget in self._custom_controls():
+            with self.subTest(widget=widget.__class__.__name__):
+                self.assertTrue(widget.isVisibleTo(self.win))
+                self.assertTrue(widget.isEnabled())
+                self._assert_click_excluded(widget)
+        self.assertEqual(len(self.win.events), 1)
+        self.assertTrue(self.win.running)
+
+    def test_hidden_custom_controls_on_preferences_do_not_exclude(self):
+        self._setup_fixture()
+        self._start_run()
+        self._reveal_custom_controls()
+        self._qapp.processEvents()
+        combo = self.win.startup_window_combo
+        combo.blockSignals(True)
+        try:
+            combo.setCurrentIndex(qt_app.WINDOW_MODES.index("auto"))
+        finally:
+            combo.blockSignals(False)
+        self.win._sync_custom_window_panel()
+        self._qapp.processEvents()
+        for widget in self._custom_controls():
+            self.assertFalse(widget.isVisibleTo(self.win))
+        widget, point = self._stale_background_point(self._custom_controls())
+        self.assertIsNotNone(point, "no stale Custom-control point lies on uncovered Preferences background")
+        self._cursor = point
+        self._in_test_area = False
+        self.assertFalse(self.win._cursor_over_capture_exclusion_ui(), widget)
+        self._raw_click()
+        self.assertEqual(len(self.win.events), 2)
+
+    def test_custom_controls_on_hidden_preferences_do_not_exclude_on_capture(self):
+        self._setup_fixture()
+        self._reveal_custom_controls()
+        self.win.nav_capture.click()
+        self._start_run()
+        self._qapp.processEvents()
+        self.assertIs(self.win.page_stack.currentWidget(), self.win.page_capture)
+        for widget in self._custom_controls():
+            self.assertFalse(widget.isVisibleTo(self.win))
+        widget, point = self._stale_background_point(self._custom_controls())
+        self.assertIsNotNone(point, "no stale Custom-control point lies on Capture background")
+        self._cursor = point
+        self._in_test_area = False
+        self.assertFalse(self.win._cursor_over_capture_exclusion_ui(), widget)
+        self._raw_click()
+        self.assertEqual(len(self.win.events), 2)
 
     def test_visible_setup_controls_are_excluded_during_run(self):
         self._setup_fixture()
@@ -280,6 +393,19 @@ class CaptureExclusionTests(unittest.TestCase):
         self.assertEqual(observed, [e["press_elapsed_ms"] for e in accepted])
         self.assertIsNotNone(self.win.host_evidence_snapshot)
 
+    def test_capture_scrollbar_is_excluded_when_overflowing(self):
+        self._setup_fixture()
+        self.win.resize(1280, 720)
+        self.win._show_workflow_page("capture")
+        self._start_run()
+        self._qapp.processEvents()
+        bar = self.win.capture_scroll.verticalScrollBar()
+        self.assertIn(bar, self.win._capture_exclusion_widgets())
+        if bar.maximum() <= 0:
+            self.skipTest("Capture page did not overflow vertically at 1280x720")
+        self._assert_click_excluded(bar)
+        self.assertTrue(self.win.running)
+
 
 class HiddenTestAreaGeometryTests(unittest.TestCase):
     """Step 1a: the real Test Area hit-test must ignore stale geometry on hidden stacked pages."""
@@ -362,10 +488,13 @@ class HiddenTestAreaGeometryTests(unittest.TestCase):
             self.win.device_edit, self.win.button_combo, self.win.radio_manual,
             self.win.radio_fixture, self.win.hz_combo, self.win.timing_tol_edit,
             self.win.auto_stop_off, self.win.auto_stop_on, *self.win._limit_edits.values(),
+            self.win.btn_lock_profile, self.win.setup_profile_card,
+            self.win.setup_device_card, self.win.setup_config_card, self.win.setup_limits_card,
         ]
         for widget in candidates:
             if not widget.isVisibleTo(self.win):
                 continue
+            self.win.setup_scroll.ensureWidgetVisible(widget)
             rect = QRect(widget.mapToGlobal(QPoint(0, 0)), widget.size())
             overlap = rect.intersected(self.area_rect)
             if overlap.width() > 2 and overlap.height() > 2:

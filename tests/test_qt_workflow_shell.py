@@ -33,7 +33,7 @@ _NAV_KEYS = (
     "page_results_subtitle",
     "page_results_placeholder",
     "page_preferences_subtitle",
-    "page_preferences_placeholder",
+    "preferences_more_note",
     "setup_device_section",
     "setup_config_section",
 )
@@ -194,10 +194,10 @@ class WorkflowShellTests(unittest.TestCase):
         self.assertTrue(_under(self.win.btn_help, self.win.nav_rail))
         self.assertFalse(_under(self.win.btn_help, self.win.page_capture))
 
-    def test_theme_language_are_global(self):
-        self.assertFalse(_under(self.win.theme_combo, self.win.page_setup))
-        self.assertFalse(_under(self.win.lang_combo, self.win.page_setup))
-        self.assertFalse(_under(self.win.theme_combo, self.win.page_preferences))
+    def test_theme_language_live_in_preferences(self):
+        for combo in (self.win.theme_combo, self.win.lang_combo):
+            self.assertTrue(_under(combo, self.win.page_preferences), combo)
+            self.assertFalse(_under(combo, self.win.page_setup), combo)
 
     def test_action_buttons_single_connection(self):
         for btn in (
@@ -340,11 +340,9 @@ class WorkflowShellTests(unittest.TestCase):
                 with self.subTest(lang=lang, key=key):
                     self.assertTrue(str(STRINGS[lang].get(key) or "").strip())
 
-    def test_results_and_preferences_are_placeholders(self):
+    def test_results_is_placeholder(self):
         self.win.nav_results.click()
         self.assertIn("later phase", self.win.results_placeholder.text().lower())
-        self.win.nav_preferences.click()
-        self.assertIn("later phase", self.win.preferences_placeholder.text().lower())
 
     def test_minimum_size(self):
         self.assertEqual(self.win.minimumWidth(), 1024)
