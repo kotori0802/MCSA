@@ -431,3 +431,147 @@ class IntervalChart(_ChartBase):
             p.fillPath(fill, QColor(pal.interval_fill))
             p.setPen(QPen(QColor(pal.interval_line), 2))
             p.drawPath(path)
+
+
+class HistogramChart(_ChartBase):
+    """Static interval distribution histogram."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.bins: list[dict] = []
+        self.overlay_bins: list[dict] = []
+        self.title = "Interval distribution"
+        self.target_beat_ms: float | None = None
+        self.setMinimumHeight(220)
+
+    def set_bins(
+        self,
+        bins: list[dict],
+        *,
+        title: str = "",
+        overlay: list[dict] | None = None,
+        target_beat_ms: float | None = None,
+    ):
+        self.bins = list(bins or [])
+        self.overlay_bins = list(overlay or [])
+        if title:
+            self.title = title
+        self.target_beat_ms = target_beat_ms
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pal = self.palette
+        p.fillRect(self.rect(), QColor(pal.bg))
+        plot = self._plot_rect()
+        p.setPen(QColor(pal.text))
+        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        p.drawText(12, 16, self.title)
+        legend = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
+        if self.overlay_bins:
+            legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
+        if self.target_beat_ms:
+            legend.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+        self._draw_legend_box(p, plot, legend)
+        if not self.bins:
+            p.setPen(QColor(pal.muted))
+            p.setFont(QFont("Segoe UI", 11))
+            p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("waiting_data", "Waiting for click data"))
+            return
+        xmin = float(self.bins[0]["lo"])
+        xmax = float(self.bins[-1]["hi"])
+        if xmax <= xmin:
+            xmax = xmin + 1.0
+        ymax = max(1.0, max(int(b.get("count") or 0) for b in self.bins) * 1.15)
+        if self.overlay_bins:
+            ymax = max(ymax, max(int(b.get("count") or 0) for b in self.overlay_bins) * 1.15)
+
+        def map_x(v: float) -> float:
+            return plot.left() + (v - xmin) / (xmax - xmin) * plot.width()
+
+        def map_y(v: float) -> float:
+            return plot.bottom() - (v / ymax) * plot.height()
+
+        self._draw_axes(
+            p,
+            plot,
+            x_ticks=nice_ticks(xmin, xmax),
+            y_ticks=nice_ticks(0.0, ymax),
+            x_label=self._label("axis_interval_ms", "Interval (ms)"),
+            y_label=self._label("clicks", "Clicks"),
+            map_x=map_x,
+            map_y=map_y,
+        )
+        if self.target_beat_ms:
+            tx = map_x(self.target_beat_ms)
+            p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
+        bar_w = max(2.0, plot.width() / max(1, len(self.bins)) - 2)
+        for item in self.bins:
+            lo, hi = float(item["lo"]), float(item["hi"])
+            count = int(item.get("count") or 0)
+            x = map_x(lo)
+            w = max(2.0, map_x(hi) - x - 1)
+            y = map_y(count)
+            p.fillRect(QRectF(x, y, min(w, bar_w), plot.bottom() - y), QColor(pal.interval_fill))
+            p.setPen(QPen(QColor(pal.interval_line), 1))
+            p.drawRect(QRectF(x, y, min(w, bar_w), plot.bottom() - y))
+        if self.overlay_bins:
+            color = QColor(pal.overlay)
+            color.setAlpha(90)
+            for item in self.overlay_bins:
+                lo, hi = float(item["lo"]), float(item["hi"])
+                count = int(item.get("count") or 0)
+                x = map_x(lo) + 2
+                w = max(2.0, map_x(hi) - map_x(lo) - 4)
+                y = map_y(count)
+                p.fillRect(QRectF(x, y, w, plot.bottom() - y), color)
+
+
+class OccupancyBar(QWidget):
+    """Aggregate occupancy strip from Host Evidence counts. No per-slot invention."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.empty = 0
+        self.single = 0
+        self.multi = 0
+        self.setMinimumHeight(18)
+        self.setMaximumHeight(22)
+        self._apply_palette(LIGHT_PALETTE)
+
+    def _apply_palette(self, pal: ChartPalette):
+        self._empty = QColor(pal.grid)
+        self._single = QColor(pal.on_cadence)
+        self._multi = QColor(pal.extra)
+        self._vacant = QColor(pal.grid)
+
+    def set_theme(self, palette: ChartPalette, labels: dict[str, str] | None = None):
+        self._apply_palette(palette)
+        self.update()
+
+    def set_counts(self, empty: int, single: int, multi: int):
+        self.empty = max(0, int(empty))
+        self.single = max(0, int(single))
+        self.multi = max(0, int(multi))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect().adjusted(0, 4, 0, -4)
+        total = self.empty + self.single + self.multi
+        if total <= 0:
+            p.fillRect(rect, self._vacant)
+            return
+        x = float(rect.left())
+        parts = (
+            (self.empty, self._empty),
+            (self.single, self._single),
+            (self.multi, self._multi),
+        )
+        for count, color in parts:
+            w = rect.width() * count / total
+            p.fillRect(QRectF(x, rect.top(), max(0.0, w), rect.height()), color)
+            x += w

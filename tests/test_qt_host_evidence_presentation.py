@@ -296,6 +296,7 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertIn("Host Count Delta 0", text)
         self.assertIn("Outside Capture Window 1", text)
         self.win._show_workflow_page("results")
+        self.win.results_tabs.setCurrentIndex(1)
         self.assertTrue(self.win.results_evidence_card.isVisibleTo(self.win))
         self.win._show_workflow_page("capture")
         self.assertFalse(self.win.review_text.isVisibleTo(self.win))
@@ -304,10 +305,9 @@ class ReviewPresentationTests(unittest.TestCase):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         text = self._review()
-        legacy_part = text.split("\n\n", 1)[0]
-        self.assertEqual(len(legacy_part.splitlines()), 4)
-        self.assertNotIn(self.win._tr("he_title"), legacy_part)
+        self.assertNotIn(self.win._tr("he_title"), self.win.results_observations_text.text())
         self.assertIn(self.win._tr("he_title"), text)
+        self.assertTrue(self.win.results_observations_text.text().strip())
 
     def test_review_matches_injected_snapshot(self):
         self._setup_fixture()
@@ -325,7 +325,6 @@ class ReviewPresentationTests(unittest.TestCase):
         self._run([0, 25, 50, 75])
         text = self._review()
         self.assertTrue(text.strip())
-        self.assertEqual(len(text.splitlines()), 4)
         self.assertNotIn(self.win._tr("he_title"), text)
         self.assertNotIn("Expected Slots", text)
 
@@ -334,7 +333,6 @@ class ReviewPresentationTests(unittest.TestCase):
         self._run([0, 25, 50, 75])
         text = self._review()
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self.assertEqual(len(text.splitlines()), 4)
         self.assertNotIn("Expected Slots", text)
         self.assertNotIn("Host Count Delta", text)
 

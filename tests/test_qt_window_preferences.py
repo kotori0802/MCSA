@@ -1053,6 +1053,178 @@ class WindowPreferencesUiTests(unittest.TestCase):
         for widget in self._custom_widgets():
             self.assertIn(widget, widgets)
 
+    # Phase 4C-2: responsive Preferences
+    def test_preferences_desktop_two_columns_use_available_width(self):
+        self._show_prefs()
+        for mode in ("compact", "standard", "large"):
+            with self.subTest(mode=mode):
+                self._select_mode(mode)
+                viewport = self.win.preferences_scroll.viewport().width()
+                content = self.win.preferences_content
+                self.assertLessEqual(abs(content.width() - min(viewport, self.win.MAX_SETUP_CONTENT_WIDTH)), 2)
+                self.assertGreater(content.width(), 720)
+                self.assertEqual(self.win.preferences_grid.columns(), 2)
+                side = self.win.preferences_side_column.geometry()
+                window = self.win.pref_window_card.geometry()
+                self.assertLess(side.right(), window.left())
+                self.assertEqual(side.top(), window.top())
+                self.assertGreater(window.width(), side.width())
+                self.assertTrue(_under(self.win.custom_window_panel, self.win.pref_window_card))
+                self.assertTrue(_under(self.win.theme_combo, self.win.preferences_side_column))
+                self.assertTrue(_under(self.win.lang_combo, self.win.preferences_side_column))
+                self.assertEqual(self.win.preferences_scroll.horizontalScrollBar().maximum(), 0)
+
+    def test_preferences_compact_stacks_one_column(self):
+        self._show_prefs()
+        self.win.setMinimumSize(1, 1)
+        self.win._available_geometry = lambda: QRect(0, 0, 980, 760)
+        self.win.apply_window_mode("auto")
+        self._settle()
+        self.assertLess(self.win.width(), 1000)
+        self.assertEqual(self.win.preferences_grid.columns(), 1)
+        side = self.win.preferences_side_column.geometry()
+        window = self.win.pref_window_card.geometry()
+        self.assertGreaterEqual(window.top(), side.bottom())
+        self.assertEqual(self.win.preferences_scroll.horizontalScrollBar().maximum(), 0)
+
+    # Phase 4C-2: window mode transitions
+    def test_window_mode_transition_matrix(self):
+        self.win.show()
+        self._settle()
+        cases = (
+            ("normal->preset", None, "compact", QSize(1280, 720)),
+            ("preset->preset", "compact", "standard", QSize(1440, 810)),
+            ("maximized->preset", "maximized", "large", QSize(1600, 900)),
+            ("custom->preset", "custom", "standard", QSize(1440, 810)),
+        )
+        for label, start, target, size in cases:
+            with self.subTest(transition=label):
+                if start == "custom":
+                    self.assertTrue(self.win.apply_custom_window_size(1300, 760))
+                    self._settle()
+                    self.assertEqual(self.win.size(), QSize(1300, 760))
+                elif start is not None:
+                    self._select_mode(start)
+                self._select_mode(target)
+                self.assertFalse(self.win.isMaximized())
+                self.assertEqual(self.win.window_mode, target)
+                self.assertEqual(self.win.size(), size)
+                self._assert_centered_inside_work_area(self.win)
+        with self.subTest(transition="preset->custom"):
+            self._select_mode("compact")
+            self.assertTrue(self.win.apply_custom_window_size(1500, 820))
+            self._settle()
+            self.assertEqual(self.win.window_mode, "custom")
+            self.assertEqual(self.win.size(), QSize(1500, 820))
+            self._assert_centered_inside_work_area(self.win)
+
+    def test_reselecting_shown_mode_after_remembered_restore_applies_it(self):
+        settings = self._settings()
+        settings.setValue("window/startup_mode", "large")
+        settings.setValue("window/remember_geometry", True)
+        remembered = QRect(2000, 60, 1300, 760)
+        settings.setValue("window/geometry", remembered)
+        win = self._make_window(settings)
+        win.show_startup_window()
+        self._settle()
+        self.assertEqual(win.geometry(), remembered)
+        self.assertEqual(win.startup_window_combo.currentData(), "large")
+        index = WINDOW_MODES.index("large")
+        win.startup_window_combo.activated.emit(index)
+        self._settle()
+        self.assertEqual(win.size(), QSize(1600, 900))
+        self._assert_centered_inside_work_area(win)
+        self.assertEqual(win.window_mode, "large")
+        self.assertEqual(settings.value("window/startup_mode"), "large")
+        win.move(_REFERENCE_WORK_AREA.x() + 5, 5)
+        self._settle()
+        win.startup_window_combo.activated.emit(index)
+        self._settle()
+        self.assertEqual(win.size(), QSize(1600, 900))
+        self._assert_centered_inside_work_area(win)
+
+    def test_changed_index_with_activation_applies_once(self):
+        self.win.show()
+        self._settle()
+        index = WINDOW_MODES.index("standard")
+        with mock.patch.object(self.win, "apply_window_mode", wraps=self.win.apply_window_mode) as apply:
+            self.win.startup_window_combo.setCurrentIndex(index)
+            self.win.startup_window_combo.activated.emit(index)
+            self._settle()
+        apply.assert_called_once_with()
+        self.assertEqual(self.win.size(), QSize(1440, 810))
+        with mock.patch.object(self.win, "apply_window_mode") as apply:
+            self.win.startup_window_combo.activated.emit(index)
+            self._settle()
+        apply.assert_called_once_with()
+
+    # Phase 4C-2: remembered geometry contract
+    def test_remember_enabled_session_preset_still_applies_immediately(self):
+        settings = self._settings()
+        win = self._make_window(settings)
+        win.show()
+        self._settle()
+        win.remember_window_size_checkbox.setChecked(True)
+        for mode, size in (("compact", QSize(1280, 720)), ("large", QSize(1600, 900))):
+            with self.subTest(mode=mode):
+                win.startup_window_combo.setCurrentIndex(WINDOW_MODES.index(mode))
+                self._settle()
+                self.assertEqual(win.size(), size)
+                self.assertEqual(settings.value("window/startup_mode"), mode)
+        self.assertTrue(win.remember_window_geometry)
+
+    def test_restart_priority_remembered_geometry_over_startup_preset(self):
+        remembered = QRect(2000, 60, 1300, 760)
+        cases = (
+            ("valid+enabled", True, remembered, remembered.size()),
+            ("disabled", False, remembered, QSize(1280, 720)),
+            ("unreachable", True, QRect(9000, 3000, 1300, 760), QSize(1280, 720)),
+        )
+        for label, enabled, rect, expected_size in cases:
+            with self.subTest(case=label):
+                settings = self._settings()
+                settings.setValue("window/startup_mode", "compact")
+                settings.setValue("window/remember_geometry", enabled)
+                settings.setValue("window/geometry", rect)
+                settings.setValue("window/maximized", False)
+                win = self._make_window(settings)
+                win.show_startup_window()
+                self._settle()
+                self.assertEqual(win.size(), expected_size)
+                if label == "valid+enabled":
+                    self.assertEqual(win.geometry(), remembered)
+                else:
+                    self._assert_centered_inside_work_area(win)
+
+    def test_reset_with_remember_enabled_clears_geometry_and_applies_auto(self):
+        settings = self._settings()
+        settings.setValue("window/startup_mode", "large")
+        settings.setValue("window/remember_geometry", True)
+        settings.setValue("window/geometry", QRect(2000, 60, 1300, 760))
+        settings.setValue("window/maximized", False)
+        win = self._make_window(settings)
+        win.show_startup_window()
+        self._settle()
+        win.reset_window_geometry_button.click()
+        self._settle()
+        self.assertFalse(settings.contains("window/geometry"))
+        self.assertFalse(settings.contains("window/maximized"))
+        self.assertEqual(win.window_mode, "auto")
+        self.assertEqual(settings.value("window/startup_mode"), "auto")
+        self.assertEqual(win.startup_window_combo.currentData(), "auto")
+        self.assertEqual(win.size(), auto_window_size(_REFERENCE_WORK_AREA.size(), win.minimumSize()))
+        self._assert_centered_inside_work_area(win)
+
+    def test_remember_note_explains_priority_in_all_languages(self):
+        en = STRINGS["en"]["remember_window_size_note"]
+        self.assertIn("Startup Window", en)
+        self.assertIn("immediately", en)
+        self.assertIn("Auto", en)
+        for lang in SUPPORTED_LANGS:
+            with self.subTest(lang=lang):
+                note = STRINGS[lang]["remember_window_size_note"]
+                self.assertGreater(len(note), len("Restore this window size"))
+
 
 if __name__ == "__main__":
     unittest.main()

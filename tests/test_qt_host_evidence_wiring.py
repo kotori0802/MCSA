@@ -329,14 +329,6 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
         capture_texts = " ".join(lab.text().lower() for lab in self.win.page_capture.findChildren(QLabel))
         for token in ("host evidence", "expected slot", "count delta", "occupancy", "ambiguous", "outside window"):
             self.assertNotIn(token, capture_texts)
-        # Results owns a Host Evidence section title; diagnostic counts stay in the evidence text, not labels.
-        result_labels = " ".join(
-            lab.text().lower()
-            for lab in self.win.page_results.findChildren(QLabel)
-            if lab is not self.win.results_observations_text
-        )
-        for token in ("expected slot", "count delta", "occupancy", "ambiguous", "outside window"):
-            self.assertNotIn(token, result_labels)
         self.assertEqual(
             self.win.lbl_results_evidence.text(),
             self.win._tr("results_host_evidence_section").upper(),

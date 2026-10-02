@@ -330,6 +330,45 @@ QListWidget {
     border-radius: 10px;
     padding: 4px;
 }
+QTabWidget#ResultsTabs::pane {
+    border: none;
+    background: transparent;
+    top: 8px;
+}
+QTabWidget#ResultsTabs QTabBar::tab {
+    background: #f2f2f7;
+    color: #3a3a3c;
+    border: 1px solid #d2d2d7;
+    border-bottom: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    padding: 8px 14px;
+    margin-right: 4px;
+    font-weight: 600;
+}
+QTabWidget#ResultsTabs QTabBar::tab:selected {
+    background: #ffffff;
+    color: #007aff;
+}
+QTableWidget#ResultsClickTable {
+    background: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    gridline-color: #e5e5ea;
+    font-size: 12px;
+}
+QTableWidget#ResultsClickTable::item:selected {
+    background: #e8f1ff;
+    color: #1d1d1f;
+}
+QTableWidget#ResultsClickTable QHeaderView::section {
+    background: #f5f5f7;
+    color: #6e6e73;
+    border: none;
+    border-bottom: 1px solid #e5e5ea;
+    padding: 6px 8px;
+    font-weight: 600;
+}
 QLabel#RailBrand {
     font-size: 22px;
     font-weight: 700;
@@ -656,6 +695,46 @@ QListWidget {
     border-radius: 10px;
     padding: 4px;
     color: #f5f5f7;
+}
+QTabWidget#ResultsTabs::pane {
+    border: none;
+    background: transparent;
+    top: 8px;
+}
+QTabWidget#ResultsTabs QTabBar::tab {
+    background: #1c1c1e;
+    color: #98989d;
+    border: 1px solid #3a3a3c;
+    border-bottom: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    padding: 8px 14px;
+    margin-right: 4px;
+    font-weight: 600;
+}
+QTabWidget#ResultsTabs QTabBar::tab:selected {
+    background: #2c2c2e;
+    color: #0a84ff;
+}
+QTableWidget#ResultsClickTable {
+    background: #1c1c1e;
+    border: 1px solid #3a3a3c;
+    border-radius: 10px;
+    gridline-color: #3a3a3c;
+    color: #f5f5f7;
+    font-size: 12px;
+}
+QTableWidget#ResultsClickTable::item:selected {
+    background: #1a3a5c;
+    color: #f5f5f7;
+}
+QTableWidget#ResultsClickTable QHeaderView::section {
+    background: #2c2c2e;
+    color: #98989d;
+    border: none;
+    border-bottom: 1px solid #3a3a3c;
+    padding: 6px 8px;
+    font-weight: 600;
 }
 QLabel#RailBrand {
     font-size: 22px;
