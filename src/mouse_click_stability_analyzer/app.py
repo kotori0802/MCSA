@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import html
 import os
 import sys
 import threading
@@ -17,6 +16,7 @@ def _agent_log(*_args, **_kwargs) -> None:
 
 
 from .schema import artifact_names, build_host_environment
+from .report_v2 import host_information_rows, write_report_html, write_report_xlsx
 from .core import build_payload, normalize_settings, now_iso, safe_float, safe_int, make_synthetic_events
 from .adapters.raw_input_subprocess import WindowsRawInputSubprocess
 from .cadence import (
@@ -577,8 +577,47 @@ def _verify_artifacts(paths: dict[str, str]) -> dict[str, Any]:
     return {"ok": not missing, "missing": missing, "status": status, "xlsx_skipped": not status.get("engineering_xlsx", {}).get("exists")}
 
 
-def write_reports(report_root: Path, target: str, operator: str, settings: dict[str, Any], events: list[dict[str, Any]], run_id: str, raw_events: list[dict[str, Any]] | None = None) -> dict[str, str]:
+RESULT_SEMANTICS_RUN_STATUS = "run_status"
+LEGACY_HEURISTIC_ASSESSMENT_NOTE = (
+    "Non-authoritative. Derived from configurable heuristics with no approved "
+    "acceptance criterion; not a DUT PASS / WARN / FAIL. The authoritative "
+    "outcome is run_status."
+)
+# compute_metrics health fields: heuristic verdicts, exported only under legacy_heuristic_assessment.
+_LEGACY_HEALTH_METRIC_KEYS = ("health", "passed", "fail_reasons", "warn_reasons")
+
+
+def _report_fallback_model(target: str, operator: str, settings: dict[str, Any], events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
+    """Canonical model for callers without a frozen Results model (no expected-count promotion)."""
+    from .completed_result import build_completed_result_model
+
+    locked = normalize_settings(settings)
+    locked.update(settings)
+    locked["target_product"] = target or locked.get("target_product", "")
+    return build_completed_result_model(locked=locked, events=list(events), run_id=run_id, target=target, operator=operator)
+
+
+def write_reports(
+    report_root: Path,
+    target: str,
+    operator: str,
+    settings: dict[str, Any],
+    events: list[dict[str, Any]],
+    run_id: str,
+    raw_events: list[dict[str, Any]] | None = None,
+    completed_model: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Write the full report bundle.
+
+    Engineering HTML/XLSX render ``completed_model`` (the Results model); JSON,
+    CSV, and TXT sidecars keep their legacy layout, except that ``result`` /
+    ``run_status`` carry the authoritative run status and every legacy
+    heuristic verdict field lives under ``legacy_heuristic_assessment``.
+    """
     report_root.mkdir(parents=True, exist_ok=True)
+    if completed_model is None:
+        completed_model = _report_fallback_model(target, operator, settings, events, run_id)
+    run_status = str(completed_model["run"]["run_status"])
     settings_norm = normalize_settings(settings)
     settings_norm.update(settings)
     settings_norm = normalize_auto_settings({"settings": settings_norm})
@@ -587,11 +626,12 @@ def write_reports(report_root: Path, target: str, operator: str, settings: dict[
     legacy_payload = build_payload(target, operator, settings_norm, events, run_id=run_id)
     metrics = dict(legacy_payload.get("metrics") or {})
     tags = _metrics_issue_tags(metrics, settings_norm, events)
-    result = _result_from_tags(tags, metrics, settings_norm)
+    legacy_result = _result_from_tags(tags, metrics, settings_norm)
+    legacy_health = {key: metrics.pop(key) for key in _LEGACY_HEALTH_METRIC_KEYS if key in metrics}
     expected = int(settings_norm.get("expected_clicks") or settings_norm.get("target_clicks") or 0)
     actual = int(metrics.get("click_count") or 0)
     metrics.update({
-        "result": result,
+        "result": run_status,
         "issue_tags": tags,
         "expected_clicks": None if _is_manual_profile(settings_norm) else expected,
         "actual_clicks": actual,
@@ -601,7 +641,7 @@ def write_reports(report_root: Path, target: str, operator: str, settings: dict[
         "fixture_hz": float(settings_norm.get("fixture_hz") or settings_norm.get("fixture_reference_hz") or 0),
         "manual_mode": _is_manual_profile(settings_norm),
     })
-    click_session = _click_session_summary(result, settings_norm, metrics, tags)
+    click_session = _click_session_summary(legacy_result, settings_norm, metrics, tags)
     rid = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     names = artifact_names(rid)
     summary_path = report_root / names["summary_json"]
@@ -625,40 +665,49 @@ def write_reports(report_root: Path, target: str, operator: str, settings: dict[
         "tool_version": TOOL_VERSION,
         "run_id": run_id,
         "run_state": "COMPLETED",
-        "result": result,
+        "run_status": run_status,
+        "result": run_status,
+        "result_semantics": RESULT_SEMANTICS_RUN_STATUS,
         "created_at": now_iso(),
         "completed_at": now_iso(),
         "target_product": target or "",
         "operator": operator or "",
         "completed_cycles": 1,
         "target_cycles": 1,
-        "failed_cycles": 1 if result == "FAIL" else 0,
+        "failed_cycles": None,
         "settings": settings_norm,
         "metrics": metrics,
         "issue_tags": tags,
-        "operator_summary_zh": _operator_summary(result, settings_norm, metrics, tags),
         "engineering_summary_zh": _engineering_summary(settings_norm, metrics, tags),
-        "why_result_zh": click_session.get("why_result_zh"),
-        "why_result_en": click_session.get("why_result_en"),
-        "field_summary_zh": click_session.get("field_summary_zh"),
-        "field_summary_en": click_session.get("field_summary_en"),
-        "next_steps_zh": ["Manual profile 若只有 timing 變動，請先以同一按鍵重測或改用治具 profile 確認硬體連點。", "若出現 chatter 或多筆 <30ms interval，請開啟 Engineering HTML/XLSX 查看 All Click Log。"],
-        "next_steps_en": ["If manual mode only shows timing variation, retest the same button or use fixture profile before judging hardware failure.", "If chatter or repeated <30 ms intervals appear, open Engineering HTML/XLSX and inspect the All Click Log."],
         "engineering_reports": paths,
         "host_test_environment": build_host_environment(settings_norm),
-        "click_session_summary": click_session,
-        "click_operator_findings": {
+        "legacy_heuristic_assessment": {
+            "authoritative": False,
+            "note": LEGACY_HEURISTIC_ASSESSMENT_NOTE,
+            "result": legacy_result,
             "issue_tags": tags,
-            "button": settings_norm.get("focus_button"),
-            "profile_name": settings_norm.get("profile_name"),
-            "manual_mode": _is_manual_profile(settings_norm),
-            "profile_type": click_session.get("profile_type"),
-            "expected_count_source": click_session.get("expected_count_source"),
-            "fixture_hz": settings_norm.get("fixture_hz") or settings_norm.get("fixture_reference_hz"),
-            "expected_clicks": click_session.get("expected_clicks"),
-            "actual_clicks": actual,
-            "hardware_defect_result": click_session.get("hardware_defect_result"),
-            "manual_observation_result": click_session.get("manual_observation_result"),
+            "metrics_health": legacy_health,
+            "operator_summary_zh": _operator_summary(legacy_result, settings_norm, metrics, tags),
+            "why_result_zh": click_session.get("why_result_zh"),
+            "why_result_en": click_session.get("why_result_en"),
+            "field_summary_zh": click_session.get("field_summary_zh"),
+            "field_summary_en": click_session.get("field_summary_en"),
+            "next_steps_zh": ["Manual profile 若只有 timing 變動，請先以同一按鍵重測或改用治具 profile 確認硬體連點。", "若出現 chatter 或多筆 <30ms interval，請開啟 Engineering HTML/XLSX 查看 All Click Log。"],
+            "next_steps_en": ["If manual mode only shows timing variation, retest the same button or use fixture profile before judging hardware failure.", "If chatter or repeated <30 ms intervals appear, open Engineering HTML/XLSX and inspect the All Click Log."],
+            "click_session_summary": click_session,
+            "click_operator_findings": {
+                "issue_tags": tags,
+                "button": settings_norm.get("focus_button"),
+                "profile_name": settings_norm.get("profile_name"),
+                "manual_mode": _is_manual_profile(settings_norm),
+                "profile_type": click_session.get("profile_type"),
+                "expected_count_source": click_session.get("expected_count_source"),
+                "fixture_hz": settings_norm.get("fixture_hz") or settings_norm.get("fixture_reference_hz"),
+                "expected_clicks": click_session.get("expected_clicks"),
+                "actual_clicks": actual,
+                "hardware_defect_result": click_session.get("hardware_defect_result"),
+                "manual_observation_result": click_session.get("manual_observation_result"),
+            },
         },
     }
     detail = {
@@ -668,27 +717,44 @@ def write_reports(report_root: Path, target: str, operator: str, settings: dict[
         "tool_version": TOOL_VERSION,
         "created_at": now_iso(),
         "run_id": run_id,
+        "run_status": run_status,
+        "result_semantics": RESULT_SEMANTICS_RUN_STATUS,
         "target": target,
         "operator": operator,
         "settings": settings_norm,
         "metrics": metrics,
         "events": events,
         "all_click_events": events,
-        "legacy_payload": legacy_payload,
+        "legacy_payload": {
+            **legacy_payload,
+            "metrics": {
+                key: value for key, value in (legacy_payload.get("metrics") or {}).items()
+                if key not in _LEGACY_HEALTH_METRIC_KEYS
+            },
+        },
+        "legacy_heuristic_assessment": {
+            "authoritative": False,
+            "note": LEGACY_HEURISTIC_ASSESSMENT_NOTE,
+            "result": legacy_result,
+            "issue_tags": tags,
+            "metrics_health": legacy_health,
+        },
         "engineering_reports": paths,
         "raw_down_up_events": raw_events or [],
     }
     # Write engineering artifacts first, then write Summary JSON with verified artifact paths.
     detail_path.write_text(json.dumps(detail, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     _write_all_click_csv(csv_path, events)
-    xlsx_written = _write_engineering_xlsx(xlsx_path, summary, detail, events)
+    host_info = host_information_rows(build_host_environment(completed_model["run"]["settings"]), tool_version=TOOL_VERSION)
+    report_kwargs = {"host_info": host_info, "generated_at": summary["created_at"]}
+    xlsx_written = write_report_xlsx(xlsx_path, completed_model, **report_kwargs)
     if not xlsx_written:
         paths["engineering_xlsx"] = ""
         summary["xlsx_skipped"] = True
         summary["xlsx_skip_reason"] = "openpyxl not installed"
         summary["engineering_reports"] = paths
         detail["engineering_reports"] = paths
-    _write_engineering_html(html_path, summary, detail, events, paths)
+    write_report_html(html_path, completed_model, **report_kwargs)
     txt_path.write_text(_summary_txt(summary), encoding="utf-8")
     # Write provisional Summary before existence verification so summary_json itself is a verified artifact.
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
@@ -701,289 +767,6 @@ def write_reports(report_root: Path, target: str, operator: str, settings: dict[
     if not verification.get("ok"):
         raise RuntimeError("Mouse Click report artifact generation incomplete: " + ", ".join(verification.get("missing") or []))
     return paths
-
-def _fill_for_tags(tags: str) -> str:
-    tag_set = {t.strip() for t in str(tags or "").replace(",", ";").split(";") if t.strip()}
-    severity = _row_severity(list(tag_set))
-    return {
-        "FAIL": "FFC7CE",
-        "WARN": "FFEB9C",
-        "TIMING": "F4B183",
-        "EXCLUDED": "D9D9D9",
-        "OK": "FFFFFF",
-    }.get(severity, "FFFFFF")
-
-
-def _write_engineering_xlsx(path: Path, summary: dict[str, Any], detail: dict[str, Any], events: list[dict[str, Any]]) -> bool:
-    try:
-        from openpyxl import Workbook, load_workbook
-        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-        from openpyxl.utils import get_column_letter
-        from openpyxl.worksheet.table import Table, TableStyleInfo
-        from openpyxl.chart import ScatterChart, LineChart, Reference, Series
-    except Exception:
-        return False
-
-    def xl(value):
-        if isinstance(value, (list, dict, tuple, set)):
-            return json.dumps(value, ensure_ascii=False)
-        return value
-
-    wb = Workbook()
-    ws_exec = wb.active; ws_exec.title = "Executive Summary"
-    ws_dut = wb.create_sheet("DUT & Environment")
-    ws_criteria = wb.create_sheet("Test Criteria")
-    ws_kpi = wb.create_sheet("KPI Summary")
-    ws_log = wb.create_sheet("All Click Log")
-    ws_focus = wb.create_sheet("Anomaly Focus")
-    ws_interval = wb.create_sheet("Interval Stability")
-    ws_hold = wb.create_sheet("Hold Stability")
-    ws_rca = wb.create_sheet("Root Cause Hints")
-    ws_paths = wb.create_sheet("Detail Paths")
-
-    blue = "1F4E79"; header = "D9EAF7"; green = "C6EFCE"; red = "FFC7CE"; yellow = "FFEB9C"; gray = "D9D9D9"; orange = "F4B183"
-    thin = Side(style="thin", color="D9D9D9")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    title_font = Font(color="FFFFFF", bold=True, size=14)
-    header_font = Font(bold=True, color="1F1F1F")
-
-    def title(ws, text):
-        ws["A1"] = text
-        ws["A1"].fill = PatternFill("solid", fgColor=blue)
-        ws["A1"].font = title_font
-        ws.merge_cells("A1:F1")
-
-    def style_header(ws, row=1):
-        for c in ws[row]:
-            c.fill = PatternFill("solid", fgColor=header)
-            c.font = header_font
-            c.border = border
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    def autosize(ws, max_width=44):
-        for col in ws.columns:
-            letter = get_column_letter(col[0].column)
-            width = 10
-            for cell in col:
-                if cell.value is not None:
-                    width = max(width, min(max_width, len(str(cell.value)) + 2))
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-            ws.column_dimensions[letter].width = width
-
-    settings = summary.get("settings") or {}
-    metrics = summary.get("metrics") or {}
-    title(ws_exec, "Mouse Click Stability Analyzer Report")
-    exec_rows = [
-        ["Result", summary.get("result")],
-        ["Tool", f"{summary.get('tool_name')} {summary.get('tool_version')}"],
-        ["Created", summary.get("created_at")],
-        ["Target", summary.get("target_product")],
-        ["Operator", summary.get("operator")],
-        ["Profile", settings.get("profile_name")],
-        ["Button", settings.get("focus_button")],
-        ["Fixture Hz", settings.get("fixture_hz")],
-        ["Duration sec", settings.get("duration_sec")],
-        ["Expected / Actual clicks", f"{metrics.get('expected_clicks')} / {metrics.get('actual_clicks', metrics.get('click_count'))}"],
-        ["Issue Tags", ", ".join(summary.get("issue_tags") or [])],
-        ["Operator Summary", summary.get("operator_summary_zh")],
-        ["Engineering Summary", summary.get("engineering_summary_zh")],
-    ]
-    ws_exec.append(["Field", "Value"]); style_header(ws_exec, 2)
-    for row in exec_rows: ws_exec.append(row)
-
-    title(ws_dut, "DUT & Environment")
-    ws_dut.append(["Field", "Value"]); style_header(ws_dut, 2)
-    for row in [["DUT / Target", summary.get("target_product")], ["Operator", summary.get("operator")], ["Capture Source", settings.get("capture_mode")], ["Raw Input Backend", "Windows Raw Input"], ["Optional LDAT latency data", "Not provided"], ["Optional oscilloscope evidence", "Not provided"], ["Optional RF interference condition", "Not provided"]]: ws_dut.append(row)
-
-    title(ws_criteria, "Test Criteria")
-    ws_criteria.append(["Criterion", "Threshold", "Meaning"]); style_header(ws_criteria, 2)
-    criteria = [["Chatter hard", settings.get("chatter_threshold_ms"), "Interval below this is a hard chatter/bounce risk."], ["Double click", settings.get("duplicate_click_threshold_ms"), "Press interval below this is high-probability double click."], ["Too-short hold", settings.get("fixture_actuation_too_short_ms"), "Likely fixture actuation depth/press issue."], ["Low hold warn", settings.get("low_hold_warning_ms"), "Hold time near warning boundary."], ["Interval CV %", settings.get("interval_cv_limit_pct"), "Fixture timing stability limit."], ["Hold CV %", settings.get("hold_cv_limit_pct"), "Actuation consistency limit."], ["Allowed missed", settings.get("max_missed_count"), "Fixture profile only; manual profiles do not hard-fail missed count."]]
-    for row in criteria: ws_criteria.append(row)
-
-    title(ws_kpi, "KPI Summary")
-    ws_kpi.append(["KPI", "Value"]); style_header(ws_kpi, 2)
-    for k in ["result", "click_count", "expected_clicks", "excess_click_count", "missed_click_count", "chatter_count", "duplicate_click_risk_count", "interval_avg_ms", "interval_cv_pct", "interval_p99_ms", "timing_bias_ms", "timing_sigma_ms", "p99_abs_error_ms", "within_0_5ms_pct", "within_1ms_pct", "hold_avg_ms", "hold_cv_pct", "hold_p99_ms", "long_interval_spike_count", "fixture_actuation_too_short_count", "low_hold_warning_count"]:
-        ws_kpi.append([k, metrics.get(k)])
-
-    log_headers = ["click_index", "index", "timestamp", "button", "accepted", "press_time_ms", "release_time_ms", "hold_ms", "press_interval_ms", "expected_interval_ms", "expected_click_index", "expected_time_ms", "drift_ms", "interval_error_ms", "interval_error_pct", "result", "analysis_status", "issue_tags", "device_source", "raw_hdevice", "raw_dx", "raw_dy", "flags", "notes"]
-    ws_log.append(log_headers); style_header(ws_log, 1); ws_log.freeze_panes = "A2"
-    for e in events:
-        ws_log.append([xl(e.get(h, "")) for h in log_headers])
-        tags = e.get("issue_tags", "")
-        fill = _fill_for_tags(tags)
-        if fill != "FFFFFF":
-            for cell in ws_log[ws_log.max_row]: cell.fill = PatternFill("solid", fgColor=fill)
-    if ws_log.max_row > 1:
-        ref=f"A1:{get_column_letter(ws_log.max_column)}{ws_log.max_row}"
-        try:
-            tbl=Table(displayName="AllClickLog", ref=ref); tbl.tableStyleInfo=TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False); ws_log.add_table(tbl)
-        except Exception: pass
-
-    title(ws_focus, "Anomaly Focus")
-    ws_focus.append(log_headers); style_header(ws_focus, 2)
-    anomaly_indices = [i for i,e in enumerate(events) if e.get("issue_tags")]
-    context = set()
-    for i in anomaly_indices:
-        for j in range(max(0,i-5), min(len(events), i+6)): context.add(j)
-    for i in sorted(context):
-        e = events[i]
-        ws_focus.append([xl(e.get(h, "")) for h in log_headers])
-        fill = _fill_for_tags(e.get("issue_tags", "")) if e.get("issue_tags") else ("D9EAF7" if i in anomaly_indices else "FFFFFF")
-        if fill != "FFFFFF":
-            for cell in ws_focus[ws_focus.max_row]: cell.fill = PatternFill("solid", fgColor=fill)
-
-    for ws, name, value_key in [(ws_interval, "Interval Stability", "press_interval_ms"), (ws_hold, "Hold Stability", "hold_ms")]:
-        title(ws, name)
-        ws.append(["click_index", value_key, "issue_tags"]); style_header(ws, 2)
-        for e in events:
-            if e.get(value_key) not in (None, ""):
-                ws.append([e.get("click_index"), e.get(value_key), e.get("issue_tags", "")])
-        if ws.max_row > 2:
-            try:
-                chart = LineChart(); chart.title = name; chart.y_axis.title = "ms"; chart.x_axis.title = "Click index"
-                data = Reference(ws, min_col=2, min_row=2, max_row=ws.max_row)
-                cats = Reference(ws, min_col=1, min_row=3, max_row=ws.max_row)
-                chart.add_data(data, titles_from_data=True); chart.set_categories(cats)
-                chart.height = 10; chart.width = 20
-                ws.add_chart(chart, "E3")
-            except Exception: pass
-
-    title(ws_rca, "Root Cause Hints")
-    ws_rca.append(["Issue Tag", "Likely Cause", "Recommended Action"]); style_header(ws_rca, 2)
-    rca_rows = [["CHATTER_HARD", "Switch bounce / debounce too short / noisy actuation", "Check switch waveform, debounce firmware, and fixture force."], ["HIGH_PROBABILITY_DOUBLE_CLICK", "One physical press may be reported as multiple press events", "Compare all-click log around the abnormal row; check debounce and switch."], ["MISS_CLICK_FAIL", "Fixture expected count not met", "Confirm fixture CPS, stroke, and RF/USB stability."], ["EXCESS_CLICK_COUNT_FAIL", "More clicks than expected", "Check if fixture is over-speed, bouncing, or expected_clicks is wrong."], ["FIXTURE_ACTUATION_TOO_SHORT", "Fixture may not fully press the switch", "Increase travel/depth and confirm button face alignment."], ["INTERVAL_JITTER_WARN", "Fixture vibration or timing instability", "Secure fixture and retest with synthetic flat-line gate if chart looks wrong."], ["HOLD_VARIATION_WARN", "Actuation stroke inconsistency", "Check fixture vertical alignment and switch mechanism."], ["TIMING_JITTER_PAIR", "Early/late compensation pattern", "Treat as fixture/timing jitter unless paired with hard double-click evidence."]]
-    for row in rca_rows: ws_rca.append(row)
-
-    title(ws_paths, "Detail Paths")
-    ws_paths.append(["Artifact", "Path"]); style_header(ws_paths, 2)
-    ws_paths.append(["Summary JSON", "<same folder>/*_summary.json"]); ws_paths.append(["Detail JSON", "<same folder>/*_detail.json"]); ws_paths.append(["All Click Log CSV", "<same folder>/*_all_click_log.csv"])
-
-    for ws in wb.worksheets:
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.border = border
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-        autosize(ws)
-    for ws in [ws_exec, ws_dut, ws_criteria, ws_kpi, ws_focus, ws_rca, ws_paths]:
-        ws.freeze_panes = "A3"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp.xlsx")
-    wb.save(tmp)
-    check = load_workbook(tmp, read_only=True, data_only=True); check.sheetnames; check.close()
-    if path.exists(): path.unlink()
-    tmp.replace(path)
-    return True
-
-
-
-def _html_escape(value: Any) -> str:
-    return html.escape(str(value if value is not None else ""), quote=True)
-
-
-def _write_engineering_html(path: Path, summary: dict[str, Any], detail: dict[str, Any], events: list[dict[str, Any]], paths: dict[str, str]) -> None:
-    settings = summary.get("settings") or {}
-    metrics = summary.get("metrics") or {}
-    issue_tags = summary.get("issue_tags") or []
-    result = str(summary.get("result") or "UNKNOWN").upper()
-    badge = {"PASS":"#0a8f52", "WARN":"#b7791f", "FAIL":"#c53030"}.get(result, "#4a5568")
-    anomaly_events = [e for e in events if str(e.get("issue_tags") or "").strip()]
-    def link(label: str, key: str) -> str:
-        raw = paths.get(key) or ""
-        if not raw:
-            if key == "engineering_xlsx":
-                return f"<li>{_html_escape(label)}: skipped (openpyxl not installed)</li>"
-            return f"<li>{_html_escape(label)}: missing</li>"
-        p = Path(raw)
-        return f"<li><b>{_html_escape(label)}</b>: <a href='{p.as_uri() if p.is_absolute() else _html_escape(raw)}'>{_html_escape(raw)}</a></li>"
-    rows = []
-    display_events = anomaly_events[:80] if anomaly_events else events[:80]
-    for e in display_events:
-        cls = str(e.get("analysis_status") or e.get("result") or "OK").upper()
-        tags = str(e.get("issue_tags") or "")
-        if any(t in tags for t in ["CHATTER_HARD", "HIGH_PROBABILITY_DOUBLE_CLICK", "MISS_CLICK_FAIL", "EXCESS_CLICK_COUNT_FAIL", "WRONG_BUTTON_DETECTED"]):
-            cls = "FAIL"
-        elif any(t in tags for t in ["FIXTURE_ACTUATION_TOO_SHORT", "LOW_HOLD_WARNING", "INTERVAL_JITTER_WARN", "HOLD_VARIATION_WARN", "LONG_INTERVAL_SPIKE_WARN", "MISS_CLICK_WARN", "EXCESS_CLICK_COUNT_WARN", "FIXTURE_HZ_MISMATCH"]):
-            cls = "WARN"
-        elif "TIMING_JITTER_PAIR" in tags:
-            cls = "TIMING"
-        elif "EXCLUDED" in tags or "MANUAL_PROFILE" in tags:
-            cls = "EXCLUDED"
-        rows.append(f"<tr class='{_html_escape(cls)}'><td>{_html_escape(e.get('click_index') or e.get('index'))}</td><td>{_html_escape(e.get('button'))}</td><td>{_html_escape(e.get('press_interval_ms'))}</td><td>{_html_escape(e.get('hold_ms'))}</td><td>{_html_escape(e.get('expected_time_ms'))}</td><td>{_html_escape(e.get('drift_ms'))}</td><td>{_html_escape(e.get('issue_tags'))}</td><td>{_html_escape(e.get('notes'))}</td></tr>")
-    host = summary.get("host_test_environment") or {}
-    dev = host.get("device_under_test") or {}
-    host_env_block = f"""<div class='card'><h2>Host Test Environment</h2><table>
-<tr><th>Field</th><th>Value</th></tr>
-<tr><td>Platform</td><td>{_html_escape(host.get('platform'))}</td></tr>
-<tr><td>Python</td><td>{_html_escape(host.get('python_version'))}</td></tr>
-<tr><td>Capture backend</td><td>{_html_escape(host.get('capture_backend'))}</td></tr>
-<tr><td>Device</td><td>{_html_escape(dev.get('name') or settings.get('device_label') or '—')}</td></tr>
-<tr><td>VID / PID / bcdDevice</td><td>{_html_escape(dev.get('vid'))} / {_html_escape(dev.get('pid'))} / {_html_escape(dev.get('bcd_device'))}</td></tr>
-</table></div>"""
-    html_text = f"""<!doctype html>
-<meta charset='utf-8'>
-<title>Mouse Click Stability Analyzer — Report</title>
-<style>
-body{{font-family:Segoe UI,Arial,sans-serif;margin:28px;color:#1d1d1f;background:#fff}}
-h1{{margin-bottom:4px}} .meta{{color:#6e6e73}} .badge{{display:inline-block;padding:6px 12px;border-radius:12px;color:white;background:{badge};font-weight:700}}
-.card{{border:1px solid #ddd;border-radius:12px;padding:16px;margin:14px 0;background:#fbfbfd}}
-table{{border-collapse:collapse;width:100%;margin-top:10px;font-size:13px}} th,td{{border:1px solid #ddd;padding:7px;vertical-align:top}} th{{background:#f5f5f7}}
-.FAIL{{background:#ffc7ce}} .WARN{{background:#ffeb9c}} .TIMING{{background:#f4b183}} .EXCLUDED{{background:#d9d9d9}}
-.grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px}} code{{background:#f5f5f7;padding:1px 4px;border-radius:4px}}
-</style>
-<h1>Mouse Click Stability Analyzer — Engineering Report</h1>
-<div class='meta'>Document: MCSA-{_html_escape(detail.get('run_id'))} · Tool: {_html_escape(summary.get('tool_version'))} · Created: {_html_escape(summary.get('created_at'))}</div>
-<p>Final Result: <span class='badge'>{_html_escape(result)}</span></p>
-<div class='grid'>
-<div class='card'><h2>1. Metadata / 報告基本資訊</h2><table>
-<tr><th>Field</th><th>Value</th></tr>
-<tr><td>Run ID</td><td>{_html_escape(detail.get('run_id'))}</td></tr>
-<tr><td>Operator</td><td>{_html_escape(summary.get('operator'))}</td></tr>
-<tr><td>Target / DUT</td><td>{_html_escape(summary.get('target_product'))}</td></tr>
-<tr><td>Profile</td><td>{_html_escape(settings.get('profile_name'))}</td></tr>
-<tr><td>Button</td><td>{_html_escape(settings.get('focus_button'))}</td></tr>
-</table></div>
-<div class='card'><h2>2. KPI Summary / 數據總覽</h2><table>
-<tr><th>KPI</th><th>Value</th></tr>
-<tr><td>Expected / Actual clicks</td><td>{_html_escape(metrics.get('expected_clicks'))} / {_html_escape(metrics.get('actual_clicks', metrics.get('click_count')))}</td></tr>
-<tr><td>Fixture Hz / Measured Hz / Duration</td><td>{_html_escape(settings.get('fixture_hz'))} Hz / {_html_escape(metrics.get('measured_hz'))} Hz / {_html_escape(settings.get('duration_sec'))} sec</td></tr>
-<tr><td>Chatter / Double-click risk</td><td>{_html_escape(metrics.get('chatter_count'))} / {_html_escape(metrics.get('duplicate_click_risk_count'))}</td></tr>
-<tr><td>Missed / Excess click count</td><td>{_html_escape(metrics.get('missed_click_count'))} / {_html_escape(metrics.get('excess_click_count'))}</td></tr>
-<tr><td>Interval CV / Hold CV</td><td>{_html_escape(metrics.get('interval_cv_pct'))}% / {_html_escape(metrics.get('hold_cv_pct'))}%</td></tr>
-<tr><td>Timing bias / σ / P99 |error|</td><td>{_html_escape(metrics.get('timing_bias_ms'))} / {_html_escape(metrics.get('timing_sigma_ms'))} / {_html_escape(metrics.get('p99_abs_error_ms'))} ms</td></tr>
-<tr><td>Within ±0.5 ms / ±1.0 ms</td><td>{_html_escape(metrics.get('within_0_5ms_pct'))}% / {_html_escape(metrics.get('within_1ms_pct'))}%</td></tr>
-<tr><td>Issue Tags</td><td>{_html_escape(', '.join(str(x) for x in issue_tags))}</td></tr>
-</table></div>
-</div>
-{host_env_block}
-<div class='card'><h2>3. Test Method / 測試方法與判定標準</h2>
-<p>本報告以 Windows Raw Input 事件為依據，分析每筆 click 的 press/release pairing、press interval、hold duration、expected schedule drift、連點與漏鍵風險。</p>
-<ul>
-<li>Double Click / Bounce: press interval below <code>{_html_escape(settings.get('duplicate_click_threshold_ms'))} ms</code> is high-risk; below <code>{_html_escape(settings.get('chatter_threshold_ms'))} ms</code> is hard chatter.</li>
-<li>Missed / Excess Click: fixture profiles compare actual clicks against expected clicks; manual profiles do not hard-fail expected count.</li>
-<li>Stability: interval CV and hold CV are compared with profile thresholds.</li>
-</ul></div>
-<div class='card'><h2>4. Issue Log / Root Cause Hints</h2>
-<p>{_html_escape(summary.get('operator_summary_zh'))}</p>
-<p>{_html_escape(summary.get('engineering_summary_zh'))}</p>
-<ul>
-<li>Red rows = fail / high-risk double click or count failure.</li>
-<li>Yellow rows = fixture or stability warnings.</li>
-<li>Orange rows = timing jitter pair / early-late compensation.</li>
-<li>Gray rows = excluded or informational rows.</li>
-</ul></div>
-<div class='card'><h2>5. Anomaly Focus / 異常與前後文</h2>
-<p>Showing {'anomaly rows and context' if anomaly_events else 'first 80 click rows because no anomaly was detected'}; full data is in All Click Log CSV/XLSX.</p>
-<table><tr><th>#</th><th>Button</th><th>Press interval ms</th><th>Hold ms</th><th>Expected time ms</th><th>Drift ms</th><th>Issue Tags</th><th>Notes</th></tr>
-{''.join(rows)}
-</table></div>
-<div class='card'><h2>6. Engineering Artifacts / 工程附件</h2><ul>
-{link('Summary JSON','summary_json')}
-{link('Detail JSON','detail_json')}
-{link('All Click Log CSV','all_click_log_csv')}
-{link('Engineering XLSX','engineering_xlsx')}
-{link('Summary TXT','txt')}
-</ul></div>
-"""
-    path.write_text(html_text, encoding="utf-8")
 
 def _write_all_click_csv(path: Path, events: list[dict[str, Any]]) -> None:
     headers = [
@@ -1177,7 +960,7 @@ def _summary_txt(summary: dict[str, Any]) -> str:
     lines = [
         "Mouse Click Stability Analyzer Summary",
         "=" * 32,
-        f"Result: {summary.get('result')}",
+        f"Run Status: {summary.get('run_status') or summary.get('result')}",
         f"Tool: {summary.get('tool_name')} {summary.get('tool_version')}",
         f"Created: {summary.get('created_at')}",
         f"Button: {(summary.get('settings') or {}).get('focus_button')}",
@@ -1187,8 +970,6 @@ def _summary_txt(summary: dict[str, Any]) -> str:
         f"Timing bias / σ / P99 |error|: {m.get('timing_bias_ms')} / {m.get('timing_sigma_ms')} / {m.get('p99_abs_error_ms')} ms",
         f"Within ±0.5ms / ±1ms: {m.get('within_0_5ms_pct')}% / {m.get('within_1ms_pct')}%",
         f"Issue Tags: {', '.join(summary.get('issue_tags') or [])}",
-        "",
-        summary.get("operator_summary_zh", ""),
         "",
         summary.get("engineering_summary_zh", ""),
     ]

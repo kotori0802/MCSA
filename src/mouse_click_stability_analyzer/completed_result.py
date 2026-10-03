@@ -16,7 +16,7 @@ from .app import (
     annotate_events,
     build_payload,
 )
-from .cadence import cadence_ms
+from .cadence import cadence_ms, is_extreme_cadence
 from .measurements import actual_run_duration_s
 
 _QT_HIDDEN_PRESENTATION_TAGS = frozenset({"OPERATOR_FATIGUE", "HOLD_VARIATION_WARN"})
@@ -28,8 +28,7 @@ _RETIRED_COUNT_PRESENTATION_TAGS = frozenset({
 })
 _HOLD_CV_HEALTH_REASON_PREFIX = "hold_cv_pct "
 
-_FAIL_PRESENTATION_TAGS = frozenset({
-    "CHATTER_HARD",
+_VALIDITY_OBSERVATION_TAGS = frozenset({
     "INSUFFICIENT_CLICKS",
     "WRONG_BUTTON_DETECTED",
     "CAPTURE_SOURCE_INVALID",
@@ -57,6 +56,51 @@ _OBSERVATION_SPECS: tuple[tuple[str, str], ...] = (
 TIMING_ERROR_UNAVAILABLE_REASON = (
     "host_evidence_snapshot_stores_aggregate_matched_delta_stats_only"
 )
+
+# Authoritative completed-run status: capture / data validity only, never DUT acceptance.
+RUN_STATUS_COMPLETE = "COMPLETE"
+RUN_STATUS_NO_DATA = "NO_DATA"
+RUN_STATUS_INVALID = "INVALID"
+RUN_STATUSES = (RUN_STATUS_COMPLETE, RUN_STATUS_NO_DATA, RUN_STATUS_INVALID)
+# Threshold-free capture-validity facts; none depend on Custom Limits.
+_RUN_VALIDITY_TAGS = frozenset({"CAPTURE_SOURCE_INVALID", "WRONG_BUTTON_DETECTED"})
+
+
+def accepted_host_press_count(events: list[dict[str, Any]] | None) -> int:
+    """Canonical Host Press count: accepted host Press rows in the frozen event list.
+
+    This is the same fact as Capture's completed Host Presses value, Results
+    ``run.host_press_count``, and Report V2 Host Presses. It is not Host
+    Evidence in-window occupancy and is not live interval-bin histogram counts.
+    """
+    return sum(1 for event in events or [] if event.get("accepted"))
+
+
+def completed_run_status(events: list[dict[str, Any]] | None, tags: Any = None) -> str:
+    """Authoritative completed-run status.
+
+    COMPLETE: capture finished with accepted Host observations available.
+    NO_DATA: capture finished with zero accepted Host observations.
+    INVALID: capture source or recorded button does not match the run setup.
+
+    Heuristic rule tags (chatter, short interval, hold, interval CV, ...) are
+    informational and cannot change this status. No approved acceptance
+    criterion exists, so no DUT PASS / WARN / FAIL is derived here.
+    """
+    return run_status_for_count(accepted_host_press_count(events), tags)
+
+
+def run_status_for_count(host_press_count: Any, tags: Any = None) -> str:
+    """``completed_run_status`` from an already-known accepted Host Press count."""
+    try:
+        count = int(host_press_count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return RUN_STATUS_NO_DATA
+    if any(str(tag or "").strip() in _RUN_VALIDITY_TAGS for tag in tags or []):
+        return RUN_STATUS_INVALID
+    return RUN_STATUS_COMPLETE
 
 
 def _reason_is_hidden_hold_cv(reason: Any) -> bool:
@@ -99,25 +143,118 @@ def qt_present_issue_tags(tags: Any) -> list[str]:
     return out
 
 
+def _tag_from_health_reason(reason: Any, settings: dict[str, Any] | None) -> str | None:
+    """Map a legacy health reason string to an existing canonical tag, or None.
+
+    Yield / missed-count / outlier-ratio reasons have no presentation-safe tag.
+    """
+    text = str(reason or "")
+    if text.startswith("chatter_count "):
+        return "CHATTER_HARD"
+    if text.startswith("duplicate_click_risk_count "):
+        return "TRUE_EXTRA_CLICK" if is_extreme_cadence(settings) else "HIGH_PROBABILITY_DOUBLE_CLICK"
+    if text.startswith("press_interval_cv_pct "):
+        return "INTERVAL_JITTER_WARN"
+    if text.startswith("hold_cv_pct "):
+        return "HOLD_VARIATION_WARN"
+    return None
+
+
+def _canonical_tags_from_structured_metrics(
+    metrics: dict[str, Any] | None,
+    settings: dict[str, Any] | None = None,
+) -> list[str]:
+    """Existing canonical tags implied by structured metrics / health reasons.
+
+    Reuses the same metric→tag mapping as ``_metrics_issue_tags`` for fields that
+    already have presentation-safe codes. Does not consult capture_mode, does
+    not invent outlier/yield inferences, and does not mutate ``metrics``.
+    """
+    m = dict(metrics or {})
+    s = dict(settings or {})
+    tags: list[str] = []
+
+    def add(tag: str) -> None:
+        if tag and tag not in tags:
+            tags.append(tag)
+
+    for reason in list(m.get("fail_reasons") or []) + list(m.get("warn_reasons") or []):
+        mapped = _tag_from_health_reason(reason, s)
+        if mapped:
+            add(mapped)
+
+    if int(m.get("chatter_count") or 0) > int(s.get("max_chatter_count") or 0):
+        add("CHATTER_HARD")
+    extreme = is_extreme_cadence(s)
+    extra_count = int(m.get("true_extra_click_count") or m.get("duplicate_click_risk_count") or 0)
+    if extra_count > 0:
+        add("TRUE_EXTRA_CLICK" if extreme else "HIGH_PROBABILITY_DOUBLE_CLICK")
+    if int(m.get("incomplete_rebound_count") or 0) > 0:
+        add("INCOMPLETE_REBOUND")
+    if int(m.get("miss_or_slow_count") or 0) > 0 or (
+        not _is_manual_profile(s) and int(m.get("long_interval_spike_count") or 0) > 0
+    ):
+        add("MISS_OR_SLOW")
+        add("LONG_INTERVAL_SPIKE_WARN")
+    if m.get("setup_alignment_suspect"):
+        add("SETUP_ALIGNMENT_SUSPECT")
+    if int(m.get("fixture_actuation_too_short_count") or 0) > 0:
+        add("FIXTURE_ACTUATION_TOO_SHORT")
+    if int(m.get("low_hold_warning_count") or 0) > 0:
+        add("LOW_HOLD_WARNING")
+    if int(m.get("pause_gap_count") or 0) > 0:
+        add("PAUSE_GAP_EXCLUDED")
+    if int(m.get("timing_jitter_pair_count") or 0) > 0:
+        add("TIMING_JITTER_PAIR")
+    if (m.get("interval_cv_pct") is not None) and float(m.get("interval_cv_pct") or 0) > float(
+        s.get("interval_cv_limit_pct") or 999
+    ):
+        add("INTERVAL_JITTER_WARN")
+    if (m.get("hold_cv_pct") is not None) and float(m.get("hold_cv_pct") or 0) > float(
+        s.get("hold_cv_limit_pct") or 999
+    ):
+        add("HOLD_VARIATION_WARN")
+    return tags
+
+
+def qt_visible_issue_tags(
+    tags: Any,
+    metrics: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> list[str]:
+    """Visible Result Codes: filtered raw tags, else existing structured reasons."""
+    visible = qt_present_issue_tags(tags)
+    if visible:
+        return visible
+    if not metrics:
+        return []
+    return qt_present_issue_tags(_canonical_tags_from_structured_metrics(metrics, settings))
+
+
 def qt_visible_verdict(
     tags: Any,
     metrics: dict[str, Any] | None,
     settings: dict[str, Any] | None = None,
 ) -> str:
-    """Primary Qt live/review verdict from presentation tags.
+    """Legacy heuristic verdict from presentation tags. Non-authoritative.
 
+    Driven by unproven configurable heuristics (Custom Limits). It is not
+    rendered as the run outcome; ``completed_run_status`` is authoritative.
     Does not mutate the legacy tag list or metrics. OPERATOR_FATIGUE,
     HOLD_VARIATION_WARN, and retired expected-click count tags cannot drive
-    the visible VERDICT. metrics.health is kept unless structured fail/warn
-    reasons prove it is exclusively hidden hold-CV, or leftover tags are
-    exclusively the retired count rules.
+    the visible VERDICT. Raw ``metrics.health`` is not itself a visible reason:
+    after presentation filtering, WARN/FAIL require at least one visible
+    canonical tag (or a recovered structured reason that already has one).
     """
     m = dict(metrics or {})
     if int(m.get("click_count") or m.get("actual_clicks") or 0) <= 0:
         return "IDLE"
-    if _legacy_health_is_exclusively_hidden_hold_cv(m) or _legacy_health_is_exclusively_retired_count(tags):
+    visible = qt_visible_issue_tags(tags, m, settings)
+    if not visible:
         m.pop("health", None)
-    return _result_from_tags(qt_present_issue_tags(tags), m, settings)
+    elif _legacy_health_is_exclusively_hidden_hold_cv(m) or _legacy_health_is_exclusively_retired_count(tags):
+        m.pop("health", None)
+    return _result_from_tags(visible, m, settings)
 
 
 def _finite_intervals(values: list[float]) -> list[float]:
@@ -247,7 +384,7 @@ def _build_observations(
         seen_titles.add(title_key)
         findings.append({
             "rule": tag,
-            "severity": "fail" if tag in _FAIL_PRESENTATION_TAGS else "warn",
+            "severity": "run_validity" if tag in _VALIDITY_OBSERVATION_TAGS else "informational",
             "title_key": title_key,
             "rows": _observation_rows_for_rule(tag, metrics=metrics, settings=settings, reference_ms=reference_ms),
         })
@@ -336,8 +473,8 @@ def build_completed_result_model(
     payload = build_payload(target, operator, settings, annotated, run_id=run_id)
     metrics = dict(payload.get("metrics") or {})
     tags_all = _metrics_issue_tags(metrics, settings, annotated)
-    visible_tags = qt_present_issue_tags(tags_all)
-    verdict = qt_visible_verdict(tags_all, metrics, settings)
+    visible_tags = qt_visible_issue_tags(tags_all, metrics, settings)
+    run_status = completed_run_status(events, tags_all)
     manual = _is_manual_profile(settings)
     try:
         elapsed_s = actual_run_duration_s(start_time, stop_time)
@@ -351,11 +488,13 @@ def build_completed_result_model(
     return {
         "run": {
             "run_id": run_id,
+            "run_status": run_status,
             "target": str(target or "").strip(),
+            "operator": str(operator or "").strip(),
             "button": str(settings.get("focus_button") or settings.get("button") or "Left"),
             "manual": manual,
             "elapsed_s": elapsed_s,
-            "host_press_count": int(metrics.get("click_count") or 0),
+            "host_press_count": accepted_host_press_count(events),
             "reference_hz": None if manual else hz,
             "reference_interval_ms": None if manual else reference_ms,
             "timing_tolerance_ms": None if manual else _finite(settings.get("fixture_timing_tolerance_ms")),
@@ -363,7 +502,6 @@ def build_completed_result_model(
             "settings": settings,
         },
         "assessment": {
-            "verdict": verdict,
             "tags": visible_tags,
             "tags_all": tags_all,
             "metrics": metrics,

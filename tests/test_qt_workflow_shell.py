@@ -105,6 +105,8 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.record_click("Left", press, press + 0.01, {})
         if stop:
             self.win.stop_run()
+        if self.win._post_run_input_guard_active:
+            self.win._release_post_run_input_guard()
 
     def test_shell_exists(self):
         self.assertTrue(isinstance(self.win.page_stack, QStackedWidget))

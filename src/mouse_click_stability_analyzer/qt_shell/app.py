@@ -60,14 +60,18 @@ from ..app import (
     _is_manual_profile,
     _metrics_issue_tags,
     _now_run_id,
-    _result_from_tags,
     _verify_artifacts,
 )
 from ..cadence import cadence_ms, ranking_metrics
 from ..completed_result import (
+    RUN_STATUSES,
+    accepted_host_press_count,
     build_completed_result_model,
+    completed_run_status,
+    run_status_for_count,
     paired_interval_histograms,
     qt_present_issue_tags,
+    qt_visible_issue_tags,
     qt_visible_verdict,
 )
 from ..core import now_iso
@@ -80,6 +84,61 @@ from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
 from .styles import get_palette, get_style
 
 _log = logging.getLogger(__name__)
+
+# Quiet-period floor after a completed run. Fixture runs use
+# max(floor, POST_RUN_QUIET_INTERVALS * reference_interval_ms) with no upper cap.
+POST_RUN_INPUT_QUIET_MS = 900
+POST_RUN_QUIET_INTERVALS = 2.0
+POST_RUN_HUMAN_INTENT_MOVE_PX = 28
+_POST_RUN_BUTTON_EVENTS = frozenset({
+    QEvent.Type.MouseButtonPress,
+    QEvent.Type.MouseButtonRelease,
+})
+
+
+def post_run_quiet_ms(settings: dict[str, Any] | None) -> int:
+    """Cadence-aware post-run quiet period in milliseconds.
+
+    Manual (and missing/invalid Fixture rate) uses ``POST_RUN_INPUT_QUIET_MS``.
+    Fixture uses ``max(floor, POST_RUN_QUIET_INTERVALS * (1000 / Hz))``.
+    Does not invent a Fixture reference rate for Manual.
+    """
+    floor = max(0, int(POST_RUN_INPUT_QUIET_MS))
+    if not settings or _is_manual_profile(settings):
+        return floor
+    hz = settings.get("fixture_reference_hz")
+    if hz is None:
+        hz = settings.get("fixture_hz")
+    if hz is None or isinstance(hz, bool):
+        return floor
+    try:
+        hz_f = float(hz)
+    except (TypeError, ValueError):
+        return floor
+    if not math.isfinite(hz_f) or hz_f <= 0.0:
+        return floor
+    interval_ms = 1000.0 / hz_f
+    scaled = float(POST_RUN_QUIET_INTERVALS) * interval_ms
+    return max(floor, int(round(scaled)))
+
+
+def _mouse_event_global_pos(event) -> QPoint | None:
+    if event is None:
+        return None
+    getter = getattr(event, "globalPosition", None)
+    if callable(getter):
+        try:
+            return getter().toPoint()
+        except Exception:
+            pass
+    getter = getattr(event, "globalPos", None)
+    if callable(getter):
+        try:
+            pos = getter()
+            return QPoint(int(pos.x()), int(pos.y()))
+        except Exception:
+            pass
+    return None
 
 
 def _finite_raw_time_perf(event: dict[str, Any]) -> float | None:
@@ -813,6 +872,13 @@ class MainWindow(QMainWindow):
         self._stat_name_labels: dict[str, QLabel] = {}
         self._section_labels: list[QLabel] = []
         self._field_labels: list[QLabel] = []
+        self._post_run_input_guard_active = False
+        self._post_run_human_intent = False
+        self._post_run_quiet_ready = False
+        self._post_run_guard_origin = QPoint(0, 0)
+        self._post_run_quiet_timer = QTimer(self)
+        self._post_run_quiet_timer.setSingleShot(True)
+        self._post_run_quiet_timer.timeout.connect(self._on_post_run_quiet_timeout)
 
         self._build_ui()
         self._apply_theme()
@@ -830,6 +896,9 @@ class MainWindow(QMainWindow):
         self._listen_start_timer.setSingleShot(True)
         self._listen_start_timer.timeout.connect(self.enter_listen)
         self._listen_start_timer.start(150)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     def _tr(self, key: str, **kwargs) -> str:
         return t(self.lang, key, **kwargs)
@@ -1249,10 +1318,10 @@ class MainWindow(QMainWindow):
 
         phase_cell, self.val_phase = self._stat_cell("PHASE", "phase")
         time_cell, self.val_time = self._stat_cell("TIME", "time")
-        clicks_cell, self.val_clicks = self._stat_cell("CLICKS", "clicks")
+        clicks_cell, self.val_clicks = self._stat_cell("HOST PRESSES", "host_presses")
         interval_cell, self.val_interval = self._stat_cell("INTERVAL", "interval")
         hold_cell, self.val_hold = self._stat_cell("HOLD", "hold")
-        verdict_cell, self.val_verdict = self._stat_cell("VERDICT", "verdict")
+        verdict_cell, self.val_verdict = self._stat_cell("RUN STATUS", "run_status")
         # 1100 / 760 chosen from 6× ~155 px cells at 1280 (content ~1032) vs 6× ~180 px at 1440 (~1192).
         self.capture_stats_grid = ResponsiveItemGrid(
             [phase_cell, time_cell, clicks_cell, interval_cell, hold_cell, verdict_cell],
@@ -1377,6 +1446,12 @@ class MainWindow(QMainWindow):
         work_l.setContentsMargins(0, 0, 0, 0)
         work_l.setSpacing(12)
 
+        self.results_input_guard_status = QLabel("")
+        self.results_input_guard_status.setObjectName("Muted")
+        self.results_input_guard_status.setWordWrap(True)
+        self.results_input_guard_status.hide()
+        work_l.addWidget(self.results_input_guard_status)
+
         context_card, context_l = self._setup_card()
         self.results_summary_card = context_card
         self.lbl_results_summary = self._card_title()
@@ -1389,6 +1464,8 @@ class MainWindow(QMainWindow):
 
         assess_card, assess_l = self._setup_card()
         self.results_assessment_card = assess_card
+        self.lbl_results_run_status = self._card_title()
+        assess_l.addWidget(self.lbl_results_run_status)
         self.results_verdict_label = QLabel("--")
         self.results_verdict_label.setObjectName("StatValue")
         self.results_verdict_label.setWordWrap(True)
@@ -1856,6 +1933,8 @@ class MainWindow(QMainWindow):
         self.page_subtitle.setText(self._tr(subtitle_key))
         if name == "results":
             self._schedule_results_layout_sync()
+            if self.completed and getattr(self, "results_scroll", None) is not None:
+                self.results_scroll.verticalScrollBar().setValue(0)
 
     def _set_review_panel_visible(self, visible: bool) -> None:
         if visible:
@@ -2206,23 +2285,8 @@ class MainWindow(QMainWindow):
         elif self.overlay_path:
             self._update_overlay_deltas({})
         self._refresh_results_workspace()
-        if self.completed:
-            settings = self.locked
-            if settings is None:
-                return
-            annotated = annotate_events(list(self.events), settings)
-            payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
-            m = payload.get("metrics") or {}
-            tags = _metrics_issue_tags(m, settings, annotated)
-            verdict = qt_visible_verdict(tags, m, settings)
-            if verdict == "PASS" and _is_manual_profile(settings):
-                self.status_label.setText(self._tr("pass_manual"))
-            elif verdict == "WARN":
-                self.status_label.setText(self._tr("warn_manual") if _is_manual_profile(settings) else self._tr("warn_fixture"))
-            elif verdict == "FAIL":
-                self.status_label.setText(self._tr("fail_verdict"))
-            elif not self.running:
-                self.status_label.setText(self._tr("review_hint"))
+        if self.completed and self.locked is not None and not self.running:
+            self.status_label.setText(self._tr("review_hint"))
 
     def _retranslate_ui(self):
         self.setWindowTitle(self._tr("app_title"))
@@ -2240,9 +2304,12 @@ class MainWindow(QMainWindow):
         self.lbl_controls.setText(self._tr("controls"))
         self.results_placeholder.setText(self._tr("results_empty"))
         self.lbl_results_summary.setText(self._tr("results_run_context").upper())
+        self.lbl_results_run_status.setText(self._tr("run_status").upper())
         self.lbl_results_observations.setText(self._tr("results_observations").upper())
         self.lbl_results_evidence.setText(self._tr("results_host_evidence_section").upper())
         self.lbl_results_actions.setText(self._tr("next_run").upper())
+        if self._post_run_input_guard_active:
+            self.results_input_guard_status.setText(self._tr("waiting_for_mouse_input"))
         self.lbl_results_report.setText(self._tr("report").upper())
         self.lbl_analysis_view.setText(self._tr("analysis_view"))
         self.results_tabs.setTabText(0, self._tr("analysis"))
@@ -2495,7 +2562,7 @@ class MainWindow(QMainWindow):
             "settings": run["settings"],
             "metrics": assessment["metrics"],
             "tags": assessment["tags"],
-            "verdict": assessment["verdict"],
+            "run_status": run["run_status"],
             "elapsed_s": run["elapsed_s"],
             "manual": run["manual"],
             "model": model,
@@ -2572,9 +2639,10 @@ class MainWindow(QMainWindow):
             self.results_click_table.setRowCount(0)
             return
         model = facts["model"]
+        self.val_clicks.setText(str(int(model["run"]["host_press_count"])))
         self.results_context_label.setText(self._format_run_context(model))
         visible_tags = model["assessment"]["tags"]
-        self.results_verdict_label.setText(str(model["assessment"]["verdict"]))
+        self.results_verdict_label.setText(str(model["run"]["run_status"]))
         self.results_tags_label.setText(
             ", ".join(visible_tags) if visible_tags else self._tr("review_tags_none")
         )
@@ -2869,24 +2937,19 @@ class MainWindow(QMainWindow):
         settings: dict[str, Any] | None = None,
         events: list[dict[str, Any]] | None = None,
     ) -> tuple[str, str]:
-        result = str(payload.get("result") or "").strip()
+        """Run status (never a legacy heuristic PASS/WARN/FAIL) and click count for list labels."""
         metrics = dict(payload.get("metrics") or {})
         ev = events or payload.get("events") or payload.get("all_click_events") or []
-        s = settings or payload.get("settings") or {}
-        if ev and (not result or result == "?"):
-            annotated = annotate_events(list(ev), s)
-            if not metrics.get("click_count"):
-                metrics = (build_payload(
-                    str(payload.get("target") or self.target),
-                    str(payload.get("operator") or self.operator),
-                    s,
-                    annotated,
-                    run_id=str(payload.get("run_id") or ""),
-                ).get("metrics") or {})
-            tags = _metrics_issue_tags(metrics, s, annotated)
-            result = _result_from_tags(tags, metrics, s) if int(metrics.get("click_count") or 0) > 0 else "IDLE"
+        status = str(payload.get("run_status") or "").strip()
+        if status not in RUN_STATUSES:
+            if ev and any("accepted" in e for e in ev):
+                count = accepted_host_press_count(ev)
+            else:
+                count = metrics.get("click_count") if metrics.get("click_count") is not None else len(ev)
+            tags = payload.get("issue_tags") or metrics.get("issue_tags") or []
+            status = run_status_for_count(count, tags)
         clicks = str(metrics.get("click_count") if metrics.get("click_count") is not None else len(ev) or "?")
-        return result or "?", clicks
+        return status, clicks
 
     def _overlay_list_label(self, run_id: str, result: str, clicks: str, target: str = "") -> str:
         label = f"{run_id} · {target}" if target else run_id
@@ -2924,16 +2987,12 @@ class MainWindow(QMainWindow):
         metrics = dict(run.get("metrics") or {})
         target = str(run.get("target") or "")
         result = str(run.get("result") or "").strip()
-        if not result and settings:
+        if result not in RUN_STATUSES and settings:
             annotated = annotate_events(events, settings)
             payload = build_payload(target, "", settings, annotated, run_id=rid)
             metrics = dict(payload.get("metrics") or metrics)
             tags = _metrics_issue_tags(metrics, settings, annotated)
-            result = (
-                qt_visible_verdict(tags, metrics, settings)
-                if int(metrics.get("click_count") or 0) > 0
-                else "IDLE"
-            )
+            result = completed_run_status(events, tags)
         clicks = str(metrics.get("click_count") if metrics.get("click_count") is not None else len(events) or "?")
         label = str(run.get("label") or "") or self._overlay_list_label(rid, result, clicks, target)
         return {
@@ -3054,14 +3113,15 @@ class MainWindow(QMainWindow):
         self.overlay_delta_label.setText(self._tr("overlay_status", name=name))
         self._refresh_metrics(final=self.completed)
         self._refresh_results_workspace()
+        self._sync_overlay_controls()
 
     def clear_overlay(self):
         self.overlay_events = []
         self.overlay_metrics = {}
         self.overlay_path = ""
-        self.overlay_delta_label.setText("")
         self._refresh_metrics(final=self.completed)
         self._refresh_results_workspace()
+        self._sync_overlay_controls()
 
     def _update_overlay_deltas(self, current_metrics: dict[str, Any]):
         if not self.overlay_metrics:
@@ -3114,6 +3174,7 @@ class MainWindow(QMainWindow):
     def enter_listen(self):
         if getattr(self, "_listen_start_timer", None) is not None:
             self._listen_start_timer.stop()
+        self._cancel_post_run_input_guard()
         self.listening = True
         self.running = False
         self.completed = False
@@ -3170,7 +3231,7 @@ class MainWindow(QMainWindow):
             host_evidence_snapshot=self.host_evidence_snapshot,
         )
         metrics = copy.deepcopy((model or {}).get("assessment", {}).get("metrics") or {})
-        result = str((model or {}).get("assessment", {}).get("verdict") or "IDLE")
+        result = str((model or {}).get("run", {}).get("run_status") or completed_run_status(events))
         clicks = str((model or {}).get("run", {}).get("host_press_count") or len(events) or 0)
         entry = {
             "run_id": rid,
@@ -3296,6 +3357,7 @@ class MainWindow(QMainWindow):
         self.listening = False
         self.completed = True
         self.stop_adapters()
+        self.val_clicks.setText(str(accepted_host_press_count(self.events)))
         self._build_host_evidence_snapshot_for_completed_run()
         self.val_phase.setText(self._tr("phase_review"))
         self.hint.hide()
@@ -3304,9 +3366,9 @@ class MainWindow(QMainWindow):
         self.capture_completed_note.show()
         self.review_text.clear()
         self._refresh_metrics(final=True)
-        if not self.status_label.text().startswith(("PASS", "WARN", "FAIL")):
-            self.status_label.setText(self._tr("review_hint"))
+        self.status_label.setText(self._tr("review_hint"))
         self._update_controls()
+        self._activate_post_run_input_guard()
         self._show_workflow_page("results")
 
     def _build_host_evidence_snapshot_for_completed_run(self) -> None:
@@ -3367,9 +3429,17 @@ class MainWindow(QMainWindow):
             return
         self.completed = True
         settings = self.locked or self.settings()
+        facts = self._completed_run_facts()
         try:
             self.report_paths = write_reports(
-                self.report_root, self.target, self.operator, settings, self.events, self.run_id, raw_events=list(self.raw_events)
+                self.report_root,
+                self.target,
+                self.operator,
+                settings,
+                self.events,
+                self.run_id,
+                raw_events=list(self.raw_events),
+                completed_model=facts["model"] if facts else None,
             )
             verification = _verify_artifacts(self.report_paths)
             if not verification.get("ok"):
@@ -3470,6 +3540,128 @@ class MainWindow(QMainWindow):
         ):
             w.setEnabled(editable)
         self._refresh_lifecycle_presentation()
+        if self._post_run_input_guard_active:
+            self._apply_post_run_input_guard_disable()
+        else:
+            self._sync_overlay_controls()
+
+    def _post_run_protected_widgets(self) -> list:
+        return [
+            self.btn_new,
+            self.btn_edit_setup_new_run,
+            self.btn_overlay,
+            self.btn_clear_overlay,
+            self.btn_generate_excel,
+            self.btn_generate_html,
+            self.btn_export,
+            self.nav_setup,
+            self.nav_capture,
+            self.nav_preferences,
+            self.btn_help,
+        ]
+
+    def _overlay_is_loaded(self) -> bool:
+        return bool(self.overlay_events) or bool(str(self.overlay_path or "").strip())
+
+    def _sync_overlay_controls(self) -> None:
+        """Restore Compare / Clear Overlay to normal lifecycle enablement."""
+        if self._post_run_input_guard_active:
+            self.btn_overlay.setEnabled(False)
+            self.btn_clear_overlay.setEnabled(False)
+            return
+        self.btn_overlay.setEnabled(True)
+        self.btn_clear_overlay.setEnabled(self._overlay_is_loaded())
+
+    def _set_post_run_input_guard_status_visible(self, visible: bool) -> None:
+        if visible:
+            self.results_input_guard_status.setText(self._tr("waiting_for_mouse_input"))
+            self.results_input_guard_status.show()
+        else:
+            self.results_input_guard_status.hide()
+            self.results_input_guard_status.setText("")
+
+    def _apply_post_run_input_guard_disable(self) -> None:
+        for widget in self._post_run_protected_widgets():
+            widget.setEnabled(False)
+
+    def _post_run_quiet_ms(self) -> int:
+        return post_run_quiet_ms(self.locked)
+
+    def _activate_post_run_input_guard(self) -> None:
+        """Disable destructive Results mouse targets until quiet + human intent."""
+        if not self.completed or self.running:
+            return
+        self._post_run_input_guard_active = True
+        self._post_run_human_intent = False
+        self._post_run_quiet_ready = False
+        origin = self._cursor_global_pos()
+        self._post_run_guard_origin = QPoint(origin)
+        self._apply_post_run_input_guard_disable()
+        self._set_post_run_input_guard_status_visible(True)
+        self._restart_post_run_quiet_timer()
+
+    def _restart_post_run_quiet_timer(self) -> None:
+        self._post_run_quiet_ready = False
+        self._post_run_quiet_timer.stop()
+        self._post_run_quiet_timer.start(int(self._post_run_quiet_ms()))
+
+    def _note_post_run_human_intent(self, event=None) -> None:
+        if not self._post_run_input_guard_active or self._post_run_human_intent:
+            return
+        pos = _mouse_event_global_pos(event)
+        if pos is None:
+            pos = QPoint(self._cursor_global_pos())
+        origin = self._post_run_guard_origin
+        dx = int(pos.x()) - int(origin.x())
+        dy = int(pos.y()) - int(origin.y())
+        threshold = int(POST_RUN_HUMAN_INTENT_MOVE_PX)
+        if (dx * dx) + (dy * dy) < (threshold * threshold):
+            return
+        self._post_run_human_intent = True
+        self._try_release_post_run_input_guard()
+
+    def _on_post_run_quiet_timeout(self) -> None:
+        if not self._post_run_input_guard_active:
+            return
+        self._post_run_quiet_ready = True
+        self._try_release_post_run_input_guard()
+
+    def _try_release_post_run_input_guard(self) -> None:
+        if (
+            self._post_run_input_guard_active
+            and self._post_run_quiet_ready
+            and self._post_run_human_intent
+        ):
+            self._release_post_run_input_guard()
+
+    def _cancel_post_run_input_guard(self) -> None:
+        was_active = self._post_run_input_guard_active
+        self._post_run_input_guard_active = False
+        self._post_run_human_intent = False
+        self._post_run_quiet_ready = False
+        self._post_run_quiet_timer.stop()
+        if was_active:
+            self._set_post_run_input_guard_status_visible(False)
+
+    def _release_post_run_input_guard(self) -> None:
+        if not self._post_run_input_guard_active:
+            return
+        self._cancel_post_run_input_guard()
+        self._update_controls()
+        self.nav_setup.setEnabled(True)
+        self.nav_capture.setEnabled(True)
+        self.nav_preferences.setEnabled(True)
+        self.nav_results.setEnabled(True)
+        self.btn_help.setEnabled(True)
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        if self._post_run_input_guard_active and event is not None:
+            etype = event.type()
+            if etype in _POST_RUN_BUTTON_EVENTS:
+                self._restart_post_run_quiet_timer()
+            elif etype == QEvent.Type.MouseMove:
+                self._note_post_run_human_intent(event)
+        return super().eventFilter(watched, event)
 
     def _cursor_global_pos(self):
         return self.cursor().pos()
@@ -3730,9 +3922,9 @@ class MainWindow(QMainWindow):
         payload = build_payload(self.target, self.operator, settings, annotated, run_id=self.run_id)
         m = payload.get("metrics") or {}
         tags = _metrics_issue_tags(m, settings, annotated) if (self.running or self.completed) else []
-        verdict = qt_visible_verdict(tags, m, settings)
+        run_status = completed_run_status(self.events, tags) if self.completed else "--"
         accepted = [e for e in annotated if e.get("accepted")]
-        self.val_clicks.setText(str(len(accepted)))
+        self.val_clicks.setText(str(accepted_host_press_count(self.events)))
         if accepted:
             last = accepted[-1]
             if last.get("press_interval_ms") is not None:
@@ -3749,14 +3941,8 @@ class MainWindow(QMainWindow):
         else:
             self.val_dut.setText(str(m.get("dut_score", "--")))
             self.val_setup.setText(str(m.get("setup_score", "--")))
-        self.val_verdict.setText(str(verdict))
+        self.val_verdict.setText(str(run_status))
         if final or self.completed:
-            if _is_manual_profile(settings) and verdict == "PASS":
-                self.status_label.setText(self._tr("pass_manual"))
-            elif verdict == "WARN":
-                self.status_label.setText(self._tr("warn_manual") if _is_manual_profile(settings) else self._tr("warn_fixture"))
-            elif verdict == "FAIL":
-                self.status_label.setText(self._tr("fail_verdict"))
             alert = [tag for tag in _QT_ALERT_TAGS if tag in tags]
             self.alert_label.setText(" · ".join(alert))
             self.review_text.clear()
@@ -3791,6 +3977,11 @@ class MainWindow(QMainWindow):
             self._listen_start_timer.stop()
         if getattr(self, "ui_timer", None) is not None:
             self.ui_timer.stop()
+        if getattr(self, "_post_run_quiet_timer", None) is not None:
+            self._post_run_quiet_timer.stop()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         self._save_window_geometry()
         self.stop_adapters()
         super().closeEvent(event)

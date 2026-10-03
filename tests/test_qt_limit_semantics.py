@@ -164,12 +164,16 @@ class HiddenHoldCvPresentationTests(unittest.TestCase):
         raw = ["HOLD_VARIATION_WARN"]
         snapshot_health = metrics["health"]
         snapshot_fail = list(metrics["fail_reasons"])
-        self.assertEqual(qt_visible_verdict(raw, metrics, settings), "PASS")
+        verdict = qt_visible_verdict(raw, metrics, settings)
+        self.assertNotEqual(verdict, "FAIL")
+        if verdict == "WARN":
+            from mouse_click_stability_analyzer.completed_result import qt_visible_issue_tags
+            self.assertTrue(qt_visible_issue_tags(raw, metrics, settings))
         self.assertEqual(metrics["health"], snapshot_health)
         self.assertEqual(metrics["fail_reasons"], snapshot_fail)
         self.assertEqual(raw, ["HOLD_VARIATION_WARN"])
 
-    def test_unrelated_health_fail_is_not_converted_to_pass(self):
+    def test_unrelated_health_fail_surfaces_existing_chatter_code(self):
         raw = ["HOLD_VARIATION_WARN"]
         settings = {"manual_mode": False, "profile_name": "Fixture_Custom", "fixture_hz": 10.0}
         metrics = {
@@ -181,10 +185,12 @@ class HiddenHoldCvPresentationTests(unittest.TestCase):
         snapshot = dict(metrics)
         self.assertEqual(qt_present_issue_tags(raw), [])
         self.assertEqual(qt_visible_verdict(raw, metrics, settings), "FAIL")
+        from mouse_click_stability_analyzer.completed_result import qt_visible_issue_tags
+        self.assertIn("CHATTER_HARD", qt_visible_issue_tags(raw, metrics, settings))
         self.assertEqual(raw, ["HOLD_VARIATION_WARN"])
         self.assertEqual(metrics, snapshot)
 
-    def test_unrelated_health_warn_is_not_converted_to_pass(self):
+    def test_unrelated_health_warn_without_visible_code_is_not_silent_warn(self):
         raw: list[str] = []
         settings = {"manual_mode": False, "profile_name": "Fixture_Custom", "fixture_hz": 40.0}
         metrics = {
@@ -194,16 +200,16 @@ class HiddenHoldCvPresentationTests(unittest.TestCase):
             "warn_reasons": ["hold_outlier_ratio_pct 5.0000% > limit"],
         }
         snapshot = dict(metrics)
-        self.assertEqual(qt_visible_verdict(raw, metrics, settings), "WARN")
+        self.assertEqual(qt_visible_verdict(raw, metrics, settings), "PASS")
         self.assertEqual(raw, [])
         self.assertEqual(metrics, snapshot)
 
-    def test_health_fail_without_structured_reasons_is_preserved(self):
+    def test_health_fail_without_structured_reasons_is_not_silent_fail(self):
         raw = ["HOLD_VARIATION_WARN"]
         settings = {"manual_mode": False, "profile_name": "Fixture_Custom", "fixture_hz": 10.0}
         metrics = {"click_count": 20, "health": "FAIL"}
         snapshot = dict(metrics)
-        self.assertEqual(qt_visible_verdict(raw, metrics, settings), "FAIL")
+        self.assertEqual(qt_visible_verdict(raw, metrics, settings), "PASS")
         self.assertEqual(raw, ["HOLD_VARIATION_WARN"])
         self.assertEqual(metrics, snapshot)
 

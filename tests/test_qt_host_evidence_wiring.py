@@ -93,6 +93,8 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
             win.record_click("Left", press, press + 0.01, {})
         if stop:
             win.stop_run()
+        if win._post_run_input_guard_active:
+            win._release_post_run_input_guard()
 
     def _visible_outputs(self, win):
         legacy_review = win.results_observations_text.text()

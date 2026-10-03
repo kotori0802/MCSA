@@ -271,6 +271,8 @@ class ReviewPresentationTests(unittest.TestCase):
             self.win.record_click("Left", press, press + 0.01, {})
         if stop:
             self.win.stop_run()
+        if self.win._post_run_input_guard_active:
+            self.win._release_post_run_input_guard()
 
     def _review(self):
         evidence = self.win.results_evidence_text.toPlainText().strip()
@@ -376,16 +378,11 @@ class ReviewPresentationTests(unittest.TestCase):
     def test_verdict_unchanged_by_presentation(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75, 90])
-        settings = self.win.locked
-        annotated = legacy_app.annotate_events(list(self.win.events), settings)
-        m = legacy_app.build_payload("", "", settings, annotated, run_id="x").get("metrics") or {}
-        tags = legacy_app._metrics_issue_tags(m, settings, annotated)
-        verdict = qt_app.qt_visible_verdict(tags, m, settings)
-        self.assertEqual(self.win.val_verdict.text(), str(verdict))
+        self.assertEqual(self.win.val_verdict.text(), "COMPLETE")
         status, alert = self.win.status_label.text(), self.win.alert_label.text()
         self.win.host_evidence_snapshot = None
         self.win._refresh_metrics(final=True)
-        self.assertEqual(self.win.val_verdict.text(), str(verdict))
+        self.assertEqual(self.win.val_verdict.text(), "COMPLETE")
         self.assertEqual((self.win.status_label.text(), self.win.alert_label.text()), (status, alert))
 
     def test_no_report_or_session_wiring(self):

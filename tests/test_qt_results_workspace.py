@@ -43,6 +43,7 @@ _RESULT_KEYS = (
     "results_actions",
     "results_elapsed",
     "results_host_clicks",
+    "host_presses",
     "results_avg_interval",
     "results_avg_hold",
     "results_existing_result",
@@ -84,6 +85,7 @@ _RESULT_KEYS = (
     "run_again",
     "edit_setup_new_run",
     "editing_next_run_note",
+    "waiting_for_mouse_input",
     "not_applicable_manual",
     "next_run",
     "compare",
@@ -160,7 +162,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.win.lock_profile())
         self.assertTrue(self.win.arm_capture())
 
-    def _run(self, offsets, *, stop=True, auto_stop=False):
+    def _run(self, offsets, *, stop=True, auto_stop=False, keep_guard=False):
         self._lock_and_arm()
         t0 = float(self.win._arm_boundary_perf) + 0.001
         self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
@@ -173,6 +175,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
             self.win._tick()
         elif stop:
             self.win.stop_run()
+        if not keep_guard and self.win._post_run_input_guard_active:
+            self.win._release_post_run_input_guard()
 
     def _facts(self):
         return self.win._completed_run_facts()
@@ -305,17 +309,19 @@ class ResultsWorkspaceTests(unittest.TestCase):
         metrics = legacy_app.build_payload(
             self.win.target, self.win.operator, settings, annotated, run_id=self.win.run_id
         ).get("metrics") or {}
-        tags = legacy_app._metrics_issue_tags(metrics, settings, annotated)
-        verdict = qt_app.qt_visible_verdict(tags, metrics, settings)
-        self.assertEqual(facts["verdict"], verdict)
+        self.assertEqual(facts["run_status"], "COMPLETE")
+        self.assertNotIn("verdict", facts)
         self.assertEqual(facts["metrics"].get("click_count"), metrics.get("click_count"))
         self.assertEqual(facts["metrics"].get("interval_avg_ms"), metrics.get("interval_avg_ms"))
         self.assertEqual(facts["metrics"].get("hold_avg_ms"), metrics.get("hold_avg_ms"))
-        self.assertEqual(self.win.results_verdict_label.text(), str(verdict))
+        self.assertEqual(self.win.results_verdict_label.text(), "COMPLETE")
+        self.assertEqual(self.win.lbl_results_run_status.text(), "RUN STATUS")
         obs = self.win.results_observations_text.text()
         self.assertTrue(obs)
         self.assertNotIn("DUT", obs)
         self.assertNotIn("Host click count", obs)
+        self.assertNotIn(self.win._tr("results_host_clicks"), obs)
+        self.assertNotIn(self.win._tr("waiting_for_mouse_input"), obs)
 
     def test_navigation_and_resize_preserve_values(self):
         self._setup_fixture()
@@ -434,6 +440,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         self.win.report_written = True
+        self.win._set_overlay(list(self.win.events), {}, "session:handlers")
         self.win._update_controls()
         mapping = (
             (self.win.btn_generate_excel, "generate_excel_report"),
@@ -805,7 +812,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(again["run"]["reference_hz"], model["run"]["reference_hz"])
         self.assertEqual(again["run"]["button"], "Left")
         self.assertIs(again["host_evidence"]["snapshot"], host)
-        self.assertEqual(again["assessment"]["verdict"], model["assessment"]["verdict"])
+        self.assertEqual(again["run"]["run_status"], model["run"]["run_status"])
         self.assertEqual(id(self.win.events), events_id)
         self.assertEqual(self.win.events, events_before)
         settings = locked
@@ -814,7 +821,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
             self.win.target, self.win.operator, settings, annotated, run_id=self.win.run_id
         ).get("metrics") or {}
         tags = legacy_app._metrics_issue_tags(metrics, settings, annotated)
-        self.assertEqual(again["assessment"]["verdict"], qt_app.qt_visible_verdict(tags, metrics, settings))
+        self.assertEqual(again["run"]["run_status"], "COMPLETE")
         self.assertEqual(again["assessment"]["tags"], qt_app.qt_present_issue_tags(tags))
 
     def test_results_tabs_default_analysis_and_hide_old_stack(self):
@@ -883,6 +890,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
             self.win._tr("observations_none"),
         )
         self.assertNotIn("Host click count", self.win.results_observations_text.text())
+        self.assertNotIn(self.win._tr("results_host_clicks"), self.win.results_observations_text.text())
+        self.assertNotIn(self.win._tr("waiting_for_mouse_input"), self.win.results_observations_text.text())
 
     def test_evidence_tab_matches_frozen_snapshot(self):
         self._setup_fixture()
@@ -926,6 +935,31 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.win.events, events_before)
         model_rows = self.win._completed_run_facts()["model"]["click_data"]
         self.assertEqual(model_rows[1]["interval_ms"], accepted[1].get("press_interval_ms"))
+
+    def test_capture_and_results_share_host_press_count(self):
+        from mouse_click_stability_analyzer.completed_result import accepted_host_press_count
+
+        self._setup_fixture(auto_sec="1")
+        self._run([0, 200, 400, 600, 1200])
+        canonical = accepted_host_press_count(self.win.events)
+        self.assertEqual(canonical, 5)
+        self.assertEqual(int(self.win.val_clicks.text()), canonical)
+        facts = self._facts()
+        model = facts["model"]
+        self.assertEqual(model["run"]["host_press_count"], canonical)
+        self.assertEqual(int(facts["metrics"]["click_count"]), canonical)
+        self.assertIn(
+            f"{canonical} {self.win._tr('results_host_clicks')}",
+            self.win.results_context_label.text(),
+        )
+        snap = self.win.host_evidence_snapshot
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["counts"]["raw_host_press_count"], canonical)
+        self.assertLess(snap["counts"]["in_window_host_press_count"], canonical)
+        self.win._show_workflow_page("capture")
+        self._settle()
+        self.assertEqual(self.win.val_phase.text(), self.win._tr("phase_review"))
+        self.assertEqual(int(self.win.val_clicks.text()), canonical)
 
     def test_compare_overlay_stays_on_analysis_and_preserves_run(self):
         self._setup_fixture()
@@ -1003,7 +1037,11 @@ class ResultsWorkspaceTests(unittest.TestCase):
         )
         self.assertEqual(
             qt_visible_verdict([], {"click_count": 20, "health": "FAIL"}, settings),
-            "FAIL",
+            "PASS",
+        )
+        self.assertEqual(
+            qt_visible_verdict([], {"click_count": 0, "health": "FAIL"}, settings),
+            "IDLE",
         )
         self._setup_fixture()
         self._run([0, 25, 50, 75])
@@ -1026,7 +1064,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
             self.assertNotIn(tag, model["assessment"]["tags"])
             self.assertNotIn(tag, self.win.results_observations_text.text())
         self.assertFalse(any(f["rule"] in count_only for f in model["observations"]))
-        self.assertNotEqual(model["assessment"]["verdict"], "FAIL")
+        self.assertEqual(model["run"]["run_status"], "COMPLETE")
 
     def test_presentation_facts_tags_exclude_retired_count_tags(self):
         retired = [
@@ -1059,6 +1097,37 @@ class ResultsWorkspaceTests(unittest.TestCase):
         metrics = {"click_count": 20}
         self.assertEqual(qt_visible_verdict(["CHATTER_HARD", "MISS_CLICK_WARN"], metrics, settings), "FAIL")
 
+    def test_health_only_fail_is_not_a_silent_visible_fail(self):
+        settings = {"manual_mode": False, "fixture_hz": 5.0, "expected_clicks": 0, "target_clicks": 0}
+        self.assertEqual(
+            qt_visible_verdict([], {"click_count": 20, "health": "FAIL"}, settings),
+            "PASS",
+        )
+        retired = [
+            "MISS_CLICK_FAIL", "EXCESS_CLICK_COUNT_FAIL",
+            "MISS_CLICK_WARN", "EXCESS_CLICK_COUNT_WARN",
+        ]
+        self.assertEqual(
+            qt_visible_verdict(retired, {"click_count": 20, "health": "FAIL"}, settings),
+            "PASS",
+        )
+        self.assertEqual(
+            qt_visible_verdict(
+                ["INTERVAL_JITTER_WARN"],
+                {"click_count": 20, "health": "PASS"},
+                settings,
+            ),
+            "WARN",
+        )
+        self.assertEqual(
+            qt_visible_verdict(["CHATTER_HARD"], {"click_count": 20, "health": "PASS"}, settings),
+            "FAIL",
+        )
+        self.assertEqual(
+            qt_visible_verdict([], {"click_count": 0, "health": "FAIL"}, settings),
+            "IDLE",
+        )
+
     def test_excel_html_run_again_archives_run_id_once(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
@@ -1079,7 +1148,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         rid = self.win.run_id
-        verdict = self.win._completed_run_facts()["verdict"]
+        verdict = self.win._completed_run_facts()["run_status"]
+        self.assertEqual(verdict, "COMPLETE")
         self.win.edit_setup_new_run()
         self._settle()
         self.win.device_edit.setText("DUT-B")
@@ -1278,7 +1348,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         chart, observations = split.sizes()
         self.assertGreaterEqual(chart / (chart + observations), 0.62)
         facts_after = self.win._completed_run_facts()
-        self.assertEqual(facts_after["verdict"], facts_before["verdict"])
+        self.assertEqual(facts_after["run_status"], facts_before["run_status"])
         self.assertEqual(facts_after["tags"], facts_before["tags"])
 
     def test_results_tab_change_and_window_state_schedule_layout_sync(self):
