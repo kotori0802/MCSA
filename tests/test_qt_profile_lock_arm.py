@@ -24,10 +24,15 @@ from mouse_click_stability_analyzer.qt_shell import app as qt_app
 _T0 = 1000.0
 _I18N_KEYS = (
     "lock_profile_continue", "edit_profile", "arm_capture", "disarm_capture",
+    "new_run",
     "profile_status_draft", "profile_status_locked",
     "status_draft", "status_ready", "status_armed",
+    "status_ready_manual", "status_ready_fixture",
+    "status_armed_manual", "status_armed_fixture",
     "phase_draft", "phase_ready", "phase_armed",
     "test_area_hint_draft", "test_area_hint_ready", "test_area_hint_armed",
+    "test_area_hint_ready_manual", "test_area_hint_ready_fixture",
+    "test_area_hint_armed_manual", "test_area_hint_armed_fixture",
 )
 
 
@@ -669,6 +674,128 @@ class ProfileLockArmTests(unittest.TestCase):
         run = self.win.session_runs[-1]
         self.assertNotIn("profile_locked_settings", run)
         self.assertNotIn("capture_armed", run.get("settings") or {})
+
+    def test_ready_shows_start_capture_while_internally_unarmed(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self.assertEqual(self.win._lifecycle_state(), "ready")
+        self.assertFalse(self.win.capture_armed)
+        self.assertEqual(self.win.btn_arm.text(), self.win._tr("arm_capture"))
+        self.assertIn("Start Capture", self.win.btn_arm.text())
+        self.assertTrue(self.win.btn_arm.isEnabled())
+        self.assertFalse(self.win.btn_stop.isEnabled())
+        self.assertTrue(self.win.btn_edit_profile.isEnabled())
+        self.assertTrue(self.win.capture_action_bar.isVisibleTo(self.win))
+        self.assertFalse(self.win.capture_completed_bar.isVisibleTo(self.win))
+        self.win.btn_arm.click()
+        self.assertEqual(self.win._lifecycle_state(), "armed")
+        self.assertTrue(self.win.capture_armed)
+        self.assertEqual(self.win.btn_arm.text(), self.win._tr("disarm_capture"))
+        self.assertIn("Cancel Start", self.win.btn_arm.text())
+
+    def test_start_capture_button_click_cannot_become_t0(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self.win.btn_arm.click()
+        boundary = float(self.win._arm_boundary_perf)
+        self._raw("down", t=boundary)
+        self._raw("up", t=boundary)
+        self.assertFalse(self.win.running)
+        self.assertEqual(self.win.events, [])
+
+    def test_cancel_start_returns_ready_without_a_run(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self.win.btn_arm.click()
+        self.win.device_press_queues[("dut", "Left")].append(_T0)
+        self.win.btn_arm.click()
+        self.assertEqual(self.win._lifecycle_state(), "ready")
+        self.assertFalse(self.win.capture_armed)
+        self.assertFalse(self.win.running)
+        self.assertFalse(self.win.completed)
+        self.assertEqual(self.win.events, [])
+        self.assertIsNone(self.win.locked)
+        self.assertEqual(sum(len(q) for q in self.win.device_press_queues.values()), 0)
+
+    def test_manual_ready_guidance_requires_test_area(self):
+        self.win.radio_manual.setChecked(True)
+        self.assertTrue(self.win.lock_profile())
+        self.assertIn("Test Area", self.win.status_label.text())
+        self.assertIn("Start Capture", self.win.status_label.text())
+        self.assertNotIn("fixture", self.win.status_label.text().lower())
+        self.win.btn_arm.click()
+        self.assertIn("Test Area", self.win.status_label.text())
+        self.assertIn("this area", self.win.hint.text().lower())
+
+    def test_fixture_ready_guidance_does_not_require_test_area(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        text = f"{self.win.status_label.text()}\n{self.win.hint.text()}"
+        self.assertIn("Start Capture", self.win.status_label.text())
+        self.assertIn("fixture", text.lower())
+        self.assertNotIn("click inside the Test Area", self.win.status_label.text())
+        self.assertIn("do not need to hit this area", self.win.hint.text())
+        self.win.btn_arm.click()
+        self.assertIn("fixture", self.win.status_label.text().lower())
+        self.assertNotIn("Click inside the Test Area", self.win.status_label.text())
+
+    def test_running_controls_enable_stop_only(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self._arm_now()
+        self._click()
+        self.assertEqual(self.win._lifecycle_state(), "running")
+        self.assertTrue(self.win.btn_stop.isEnabled())
+        self.assertFalse(self.win.btn_arm.isEnabled())
+        self.assertFalse(self.win.btn_edit_profile.isEnabled())
+        self.assertTrue(self.win.capture_action_bar.isVisibleTo(self.win))
+        self.assertFalse(self.win.capture_completed_bar.isVisibleTo(self.win))
+
+    def test_completed_capture_offers_new_run_results_edit_setup(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self._arm_now()
+        self._click()
+        self.win.stop_run()
+        self.win._release_post_run_input_guard()
+        self.win._show_workflow_page("capture")
+        self.assertEqual(self.win._lifecycle_state(), "completed")
+        self.assertFalse(self.win.capture_action_bar.isVisibleTo(self.win))
+        self.assertTrue(self.win.capture_completed_bar.isVisibleTo(self.win))
+        self.assertFalse(self.win.btn_stop.isVisibleTo(self.win))
+        self.assertFalse(self.win.btn_arm.isVisibleTo(self.win))
+        self.assertTrue(self.win.btn_capture_new_run.isEnabled())
+        self.assertTrue(self.win.btn_capture_goto_results.isEnabled())
+        self.assertTrue(self.win.btn_capture_edit_setup.isEnabled())
+        self.assertEqual(self.win.btn_capture_new_run.text(), self.win._tr("new_run"))
+        self.assertEqual(self.win.btn_capture_goto_results.text(), self.win._tr("nav_results"))
+        snap = self.win.profile_locked_settings
+        with mock.patch.object(self.win, "_show_workflow_page", wraps=self.win._show_workflow_page) as shown:
+            self.win.btn_capture_goto_results.click()
+        shown.assert_called_with("results")
+        self.assertIs(self.win.page_stack.currentWidget(), self.win.page_results)
+        self.win._show_workflow_page("capture")
+        self.win.btn_capture_new_run.click()
+        self.assertEqual(self.win._lifecycle_state(), "ready")
+        self.assertFalse(self.win.completed)
+        self.assertEqual(self.win.events, [])
+        self.assertIs(self.win.profile_locked_settings, snap)
+
+    def test_completed_capture_edit_setup_uses_existing_path(self):
+        self._fixture()
+        self.assertTrue(self.win.lock_profile())
+        self._arm_now()
+        self._click()
+        self.win.stop_run()
+        self.win._release_post_run_input_guard()
+        self.win._show_workflow_page("capture")
+        self.win.btn_capture_edit_setup.click()
+        self.assertEqual(self.win._lifecycle_state(), "draft")
+        self.assertIsNone(self.win.profile_locked_settings)
+        self.assertEqual(self.win._current_page, "setup")
+        self.assertFalse(self.win.completed)
+        self.assertEqual(self.win.events, [])
+        self.assertTrue(self.win.device_edit.isEnabled())
 
 
 if __name__ == "__main__":

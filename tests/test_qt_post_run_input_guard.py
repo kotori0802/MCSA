@@ -157,6 +157,9 @@ class PostRunInputGuardTests(unittest.TestCase):
         self.assertTrue(self.win._post_run_input_guard_active)
         self.assertFalse(self.win.btn_edit_setup_new_run.isEnabled())
         self.assertFalse(self.win.btn_new.isEnabled())
+        self.assertFalse(self.win.btn_capture_new_run.isEnabled())
+        self.assertFalse(self.win.btn_capture_goto_results.isEnabled())
+        self.assertFalse(self.win.btn_capture_edit_setup.isEnabled())
         self.assertFalse(self.win.btn_generate_excel.isEnabled())
         self.assertFalse(self.win.btn_generate_html.isEnabled())
         self.assertFalse(self.win.btn_export.isEnabled())
@@ -453,6 +456,27 @@ class PostRunInputGuardTests(unittest.TestCase):
         self.assertTrue(self.win._post_run_input_guard_active)
         self._unlock_guard()
         self.assertFalse(self.win._post_run_input_guard_active)
+
+    def test_completed_capture_actions_cannot_bypass_guard(self):
+        self._setup_fixture()
+        self._complete()
+        before = self._snapshot()
+        self.win._show_workflow_page("capture")
+        self._qapp.processEvents()
+        self.assertTrue(self.win._post_run_input_guard_active)
+        self.assertFalse(self.win.btn_capture_new_run.isEnabled())
+        self.assertFalse(self.win.btn_capture_goto_results.isEnabled())
+        self.assertFalse(self.win.btn_capture_edit_setup.isEnabled())
+        QTest.mouseClick(self.win.btn_capture_new_run, Qt.MouseButton.LeftButton)
+        QTest.mouseClick(self.win.btn_capture_edit_setup, Qt.MouseButton.LeftButton)
+        self._qapp.processEvents()
+        self._assert_preserved(before)
+        self.assertTrue(self.win.completed)
+        self.assertIsNotNone(self.win.locked)
+        self._unlock_guard()
+        self.win._show_workflow_page("capture")
+        self.assertTrue(self.win.btn_capture_new_run.isEnabled())
+        self.assertTrue(self.win.btn_capture_edit_setup.isEnabled())
 
 
 if __name__ == "__main__":

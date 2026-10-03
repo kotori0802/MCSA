@@ -186,6 +186,9 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.btn_arm,
             self.win.val_verdict,
             self.win.status_label,
+            self.win.btn_capture_new_run,
+            self.win.btn_capture_goto_results,
+            self.win.btn_capture_edit_setup,
         ):
             self.assertTrue(_under(widget, self.win.page_capture), widget)
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.page_setup))

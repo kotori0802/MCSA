@@ -1293,7 +1293,7 @@ class MainWindow(QMainWindow):
         self.btn_stop = QPushButton("Stop (F5 / Esc)")
         self.btn_stop.setObjectName("Danger")
         self.btn_stop.clicked.connect(self.stop_run)
-        self.btn_arm = QPushButton("Arm Capture")
+        self.btn_arm = QPushButton("Start Capture")
         self.btn_arm.setObjectName("Primary")
         self.btn_arm.clicked.connect(self._on_arm_clicked)
         self.btn_edit_profile = QPushButton("Edit Profile")
@@ -1303,6 +1303,20 @@ class MainWindow(QMainWindow):
             self.btn_stop, self.btn_arm, self.btn_edit_profile,
         ])
         actions_l.addWidget(self.capture_action_bar)
+        self.btn_capture_new_run = QPushButton("New Run")
+        self.btn_capture_new_run.setObjectName("Primary")
+        self.btn_capture_new_run.clicked.connect(self.new_run)
+        self.btn_capture_goto_results = QPushButton("Results")
+        self.btn_capture_goto_results.setObjectName("Secondary")
+        self.btn_capture_goto_results.clicked.connect(self._goto_results_from_capture)
+        self.btn_capture_edit_setup = QPushButton("Edit Setup")
+        self.btn_capture_edit_setup.setObjectName("Secondary")
+        self.btn_capture_edit_setup.clicked.connect(self.edit_setup_new_run)
+        self.capture_completed_bar = WrappingButtonBar([
+            self.btn_capture_new_run, self.btn_capture_goto_results, self.btn_capture_edit_setup,
+        ])
+        self.capture_completed_bar.hide()
+        actions_l.addWidget(self.capture_completed_bar)
         self.capture_actions = actions
         inner_l.addWidget(actions)
 
@@ -1376,7 +1390,7 @@ class MainWindow(QMainWindow):
         self.test_area.setMinimumHeight(320)
         self.test_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ta_l = QVBoxLayout(self.test_area)
-        self.hint = QLabel("TEST AREA\nClick here with the target button to start\nStop with F5 or Esc")
+        self.hint = QLabel("TEST AREA\nLock the Setup profile, then Start Capture.\nStop with F5 or Esc")
         self.hint.setObjectName("Hint")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint.setWordWrap(True)
@@ -2328,6 +2342,9 @@ class MainWindow(QMainWindow):
         self.results_click_table.setHorizontalHeaderLabels(headers)
         self.btn_new.setText(self._tr("run_again"))
         self.btn_edit_setup_new_run.setText(self._tr("edit_setup_new_run"))
+        self.btn_capture_new_run.setText(self._tr("new_run"))
+        self.btn_capture_goto_results.setText(self._tr("nav_results"))
+        self.btn_capture_edit_setup.setText(self._tr("edit_setup_new_run"))
         self.capture_completed_note.setText(self._tr("capture_run_completed"))
         self.preferences_note.setText(self._tr("preferences_more_note"))
         self.radio_manual.setText(self._tr("manual"))
@@ -2389,6 +2406,9 @@ class MainWindow(QMainWindow):
         self._refresh_results_workspace()
 
     # ── Settings / mode ─────────────────────────────────────────────
+    def _capture_mode_key(self, base: str) -> str:
+        return f"{base}_manual" if self._is_manual() else f"{base}_fixture"
+
     def _ui_is_manual(self) -> bool:
         return self.radio_manual.isChecked()
 
@@ -2499,19 +2519,20 @@ class MainWindow(QMainWindow):
             self.hint.setText(self._tr("test_area_hint_draft"))
         elif state == "ready":
             self.val_phase.setText(self._tr("phase_ready"))
-            self.status_label.setText(self._tr("status_ready"))
+            self.status_label.setText(self._tr(self._capture_mode_key("status_ready")))
             self.lbl_profile_status.setText(self._tr("profile_status_locked"))
-            self.hint.setText(self._tr("test_area_hint_ready"))
+            self.hint.setText(self._tr(self._capture_mode_key("test_area_hint_ready")))
         elif state == "armed":
             self.val_phase.setText(self._tr("phase_armed"))
-            self.status_label.setText(self._tr("status_armed"))
+            self.status_label.setText(self._tr(self._capture_mode_key("status_armed")))
             self.lbl_profile_status.setText(self._tr("profile_status_locked"))
-            self.hint.setText(self._tr("test_area_hint_armed"))
+            self.hint.setText(self._tr(self._capture_mode_key("test_area_hint_armed")))
         elif state == "running":
             self.val_phase.setText(self._tr("phase_running"))
             self.lbl_profile_status.setText(self._tr("profile_status_locked"))
         elif state == "completed":
             self.val_phase.setText(self._tr("phase_review"))
+            self.status_label.setText(self._tr("review_hint"))
             self.lbl_profile_status.setText(self._tr("profile_status_locked"))
         if state == "draft":
             status_state = "error" if self._profile_validation_error_key else "draft"
@@ -3516,8 +3537,16 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, self._tr("guide_title"), self._tr("guide_body"))
         self._ignore_arm_until = time.perf_counter() + 0.8
 
+    def _goto_results_from_capture(self) -> None:
+        if not self.completed or self.running:
+            return
+        self._show_workflow_page("results")
+
     def _update_controls(self):
         state = self._lifecycle_state()
+        completed = state == "completed"
+        self.capture_action_bar.setVisible(not completed)
+        self.capture_completed_bar.setVisible(completed)
         self.btn_stop.setEnabled(self.running)
         self.btn_new.setEnabled(not self.running)
         self.btn_edit_setup_new_run.setEnabled(self.completed and not self.running)
@@ -3528,6 +3557,10 @@ class MainWindow(QMainWindow):
         self.btn_arm.setEnabled(state in ("ready", "armed"))
         self.btn_arm.setText(self._tr("disarm_capture") if state == "armed" else self._tr("arm_capture"))
         self.btn_edit_profile.setEnabled(state in ("ready", "armed"))
+        capture_completed_ok = completed and not self.running
+        self.btn_capture_new_run.setEnabled(capture_completed_ok)
+        self.btn_capture_goto_results.setEnabled(capture_completed_ok)
+        self.btn_capture_edit_setup.setEnabled(capture_completed_ok)
         editable = setup_controls_editable(
             running=self.running,
             completed=self.completed,
@@ -3549,6 +3582,9 @@ class MainWindow(QMainWindow):
         return [
             self.btn_new,
             self.btn_edit_setup_new_run,
+            self.btn_capture_new_run,
+            self.btn_capture_goto_results,
+            self.btn_capture_edit_setup,
             self.btn_overlay,
             self.btn_clear_overlay,
             self.btn_generate_excel,
@@ -3785,6 +3821,9 @@ class MainWindow(QMainWindow):
             self.btn_lock_profile,
             self.btn_arm,
             self.btn_edit_profile,
+            self.btn_capture_new_run,
+            self.btn_capture_goto_results,
+            self.btn_capture_edit_setup,
             self.btn_new,
             self.btn_edit_setup_new_run,
             self.btn_generate_excel,
