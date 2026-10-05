@@ -428,7 +428,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.win.btn_generate_html.text(), self.win._tr("generate_html"))
         self.assertEqual(self.win.btn_export.text(), self.win._tr("export_save_as"))
         self.assertEqual(self.win.btn_new.text(), self.win._tr("run_again"))
-        self.assertEqual(self.win.btn_edit_setup_new_run.text(), self.win._tr("edit_setup_new_run"))
+        self.assertEqual(self.win.btn_edit_setup_new_run.text(), self.win._tr("edit_setup_new_run").replace("&", "&&"))
         self.assertTrue(_under(self.win.btn_overlay, self.win.results_analysis_page))
         self.assertTrue(_under(self.win.btn_clear_overlay, self.win.results_analysis_page))
         self.assertFalse(_under(self.win.btn_overlay, self.win.results_actions_card))

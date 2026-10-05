@@ -480,6 +480,36 @@ class SetupPreferencesUiTests(unittest.TestCase):
                     self.assertNotIn("{", text)
             self.assertNotIn("page_preferences_placeholder", STRINGS[lang])
 
+    def test_setup_check_heading_replaces_profile_validation(self):
+        self.assertEqual(STRINGS["en"]["setup_profile_section"], "Setup Check")
+        self.assertEqual(STRINGS["zh"]["setup_profile_section"], "設定檢查")
+        self.assertEqual(self.win.lbl_profile_section.text(), "SETUP CHECK")
+        self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("zh"))
+        self.assertEqual(self.win.lbl_profile_section.text(), "設定檢查")
+
+    def test_no_visible_mnemonic_markers_in_buttons_tabs_or_actions(self):
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QAbstractButton, QTabWidget
+
+        for lang in ("en", "zh"):
+            self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData(lang))
+            texts = [b.text() for b in self.win.findChildren(QAbstractButton)]
+            texts += [a.text() for a in self.win.findChildren(QAction)]
+            for tabs in self.win.findChildren(QTabWidget):
+                texts += [tabs.tabText(i) for i in range(tabs.count())]
+            for text in texts:
+                with self.subTest(lang=lang, text=text):
+                    self.assertNotIn("&", text.replace("&&", ""))
+        self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("en"))
+        rendered = {
+            self.win.btn_lock_profile: "Lock Profile & Continue",
+            self.win.btn_edit_setup_new_run: "Edit Setup & New Run",
+            self.win.btn_capture_edit_setup: "Edit Setup & New Run",
+        }
+        for button, visible in rendered.items():
+            with self.subTest(button=visible):
+                self.assertEqual(button.text().replace("&&", "&"), visible)
+
     # 17
     def test_capture_lifecycle_widgets_exist_once_on_capture(self):
         buttons = self.win.findChildren(QPushButton)

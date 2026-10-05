@@ -96,10 +96,9 @@ class CanonicalTerminologyTests(unittest.TestCase):
         for key in ("assoc_reference_interval", "assoc_window", "assoc_relative", "assoc_overlap",
                     "assoc_overlap_note", "assoc_derived_note", "he_overlap"):
             for word in _VERDICT_WORDS:
-                if word == "acceptance" and key == "assoc_derived_note":
-                    continue
                 self.assertNotIn(word, STRINGS["en"][key], (key, word))
-        self.assertIn("Not an acceptance threshold", STRINGS["en"]["assoc_derived_note"])
+            self.assertNotIn("驗收", STRINGS["zh"][key], key)
+        self.assertIn("Not a decision threshold", STRINGS["en"]["assoc_derived_note"])
         self.assertIn("Ambiguous", STRINGS["en"]["assoc_overlap_note"])
 
 
