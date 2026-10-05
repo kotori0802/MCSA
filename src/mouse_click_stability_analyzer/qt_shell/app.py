@@ -8,6 +8,7 @@ import math
 import shutil
 import time
 from collections import defaultdict, deque
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,7 @@ from ..completed_result import (
     qt_visible_verdict,
 )
 from ..core import now_iso
+from ..fixture_schedule import fixture_reference_interval_ms
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
 from ..i18n import LANG_LABELS, STRINGS, SUPPORTED_LANGS, normalize_lang, t
 from ..measurements import (
@@ -421,13 +423,13 @@ FIXTURE_TIMING_TOLERANCE_KEY = "fixture_timing_tolerance_ms"
 
 
 def parse_fixture_timing_tolerance_ms(raw: Any) -> float:
-    """Parse the tester-configured Fixture Timing Tolerance (± ms).
+    """Parse the tester-configured Schedule Association Window half-width (± ms).
 
-    Accepts 0 and any finite positive number. No default, clamp, rounding,
-    maximum, or frequency-derived value. Distinct from legacy
-    ``fixture_match_tolerance_ms``.
+    Persisted as ``fixture_timing_tolerance_ms``. Accepts 0 and any finite
+    positive number. No default, clamp, rounding, maximum, or frequency-derived
+    value. Distinct from legacy ``fixture_match_tolerance_ms``.
     """
-    message = "Fixture Timing Tolerance must be a finite number >= 0"
+    message = "Schedule Association Window must be a finite number >= 0"
     if raw is None or isinstance(raw, bool):
         raise ValueError(message)
     if isinstance(raw, str):
@@ -448,13 +450,66 @@ def parse_fixture_timing_tolerance_ms(raw: Any) -> float:
     return value
 
 
+def schedule_association_context(raw_rate: Any, raw_window: Any) -> dict[str, Any]:
+    """Derived, informational Setup context for the Schedule Association Window.
+
+    ``percent_of_interval`` = W / T × 100. ``windows_overlap`` uses the
+    matcher's own inclusive condition 2W >= T with the same reference-interval
+    and Decimal path. Neither value is editable or an acceptance threshold.
+    Invalid or incomplete input yields None for every derived value it needs.
+    """
+    try:
+        interval: float | None = fixture_reference_interval_ms(parse_reference_rate_hz(raw_rate))
+    except ValueError:
+        interval = None
+    try:
+        window: float | None = parse_fixture_timing_tolerance_ms(raw_window)
+    except ValueError:
+        window = None
+    percent: float | None = None
+    overlap: bool | None = None
+    if interval is not None and window is not None and math.isfinite(interval) and interval > 0.0:
+        percent = window / interval * 100.0
+        overlap = (Decimal(2) * Decimal(str(window))) >= Decimal(str(interval))
+    return {
+        "reference_interval_ms": interval,
+        "window_ms": window,
+        "percent_of_interval": percent,
+        "windows_overlap": overlap,
+    }
+
+
+def format_association_window_ms(window_ms: Any) -> str:
+    if window_ms is None or isinstance(window_ms, bool):
+        return "—"
+    try:
+        value = float(window_ms)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(value):
+        return "—"
+    return f"±{value:.2f} ms"
+
+
+def format_percent_of_interval(percent: Any) -> str:
+    if percent is None or isinstance(percent, bool):
+        return "—"
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(value):
+        return "—"
+    return f"{value:.1f} %"
+
+
 def stamp_qt_fixture_timing_tolerance(
     settings: dict[str, Any],
     *,
     manual: bool,
     tolerance_ms: float | None,
 ) -> dict[str, Any]:
-    """Stamp the V2 Fixture Timing Tolerance after legacy normalize.
+    """Stamp the Schedule Association Window (``fixture_timing_tolerance_ms``) after legacy normalize.
 
     None means not applicable (Manual) or not configured; 0.0 is a real
     configured tolerance and is never used as a placeholder.
@@ -584,7 +639,10 @@ def locked_profile_preview_rows(
     tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
     duration = settings.get("duration_sec")
     rows.append((tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
-    rows.append((tr("preview_timing_tolerance"), f"±{float(tol):g} ms" if isinstance(tol, (int, float)) else "—"))
+    rows.append((
+        tr("preview_timing_tolerance"),
+        format_association_window_ms(tol) if isinstance(tol, (int, float)) else "—",
+    ))
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
         rows.append((tr("auto_stop"), f"{float(duration):g} s"))
     else:
@@ -973,7 +1031,7 @@ class MainWindow(QMainWindow):
             "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
             "legend_overlay", "legend_target", "chart_interval", "chart_interval_trend",
             "interval_distribution", "legend_configured_reference",
-            "legend_association_window", "clicks", "hold_vs_interval",
+            "clicks", "hold_vs_interval",
             "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
         )
         return {k: self._tr(k) for k in keys}
@@ -1212,12 +1270,42 @@ class MainWindow(QMainWindow):
         self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         config_l.addSpacing(10)
-        self.timing_tol_label = self._field_label("Fixture Timing Tolerance (± ms)")
+        self.timing_tol_label = self._field_label("Schedule Association Window (± ms)")
         config_l.addWidget(self.timing_tol_label)
         self.timing_tol_edit = QLineEdit()
         self.timing_tol_edit.setPlaceholderText("e.g. 2")
         self._setup_field(self.timing_tol_edit)
         config_l.addWidget(self.timing_tol_edit)
+        self.assoc_context_box = QWidget()
+        self.assoc_context_box.setObjectName("AssociationContext")
+        assoc_grid = QGridLayout(self.assoc_context_box)
+        assoc_grid.setContentsMargins(0, 6, 0, 0)
+        assoc_grid.setHorizontalSpacing(12)
+        assoc_grid.setVerticalSpacing(2)
+        self._assoc_context_rows: dict[str, tuple[QLabel, QLabel]] = {}
+        for row, key in enumerate(("assoc_reference_interval", "assoc_window", "assoc_relative", "assoc_overlap")):
+            name = QLabel("")
+            value = QLabel("—")
+            for lab in (name, value):
+                lab.setObjectName("DerivedValue")
+                lab.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+                lab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            assoc_grid.addWidget(name, row, 0)
+            assoc_grid.addWidget(value, row, 1)
+            self._assoc_context_rows[key] = (name, value)
+        assoc_grid.setColumnStretch(1, 1)
+        self.assoc_overlap_note = QLabel("")
+        self.assoc_overlap_note.setObjectName("DerivedValue")
+        self.assoc_overlap_note.setWordWrap(True)
+        self.assoc_overlap_note.hide()
+        assoc_grid.addWidget(self.assoc_overlap_note, 4, 0, 1, 2)
+        self.assoc_derived_note = QLabel("")
+        self.assoc_derived_note.setObjectName("DerivedValue")
+        self.assoc_derived_note.setWordWrap(True)
+        assoc_grid.addWidget(self.assoc_derived_note, 5, 0, 1, 2)
+        config_l.addWidget(self.assoc_context_box)
+        self.hz_combo.currentTextChanged.connect(self._refresh_association_context)
+        self.timing_tol_edit.textChanged.connect(self._refresh_association_context)
 
         config_l.addSpacing(10)
         self.auto_stop_label = self._field_label("Auto Stop")
@@ -2578,6 +2666,7 @@ class MainWindow(QMainWindow):
         self._refresh_fixture_mode_label()
         self.timing_tol_label.setText(self._tr("fixture_timing_tolerance_ms"))
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
+        self._refresh_association_context()
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
         self.lbl_custom_limits.setText(self._tr("screening").upper())
@@ -2655,6 +2744,7 @@ class MainWindow(QMainWindow):
         self.hz_interval_label.setVisible(not manual)
         self.timing_tol_label.setVisible(not manual)
         self.timing_tol_edit.setVisible(not manual)
+        self.assoc_context_box.setVisible(not manual)
         self.auto_stop_label.setVisible(not manual)
         self.auto_stop_off.setVisible(not manual)
         self.auto_stop_on.setVisible(not manual)
@@ -2677,6 +2767,28 @@ class MainWindow(QMainWindow):
         except ValueError:
             hz_text = (raw or "").strip() or "—"
         self.mode_label.setText(self._tr("mode_fixture", hz=hz_text, ms=interval_text))
+
+    def _refresh_association_context(self, _text: str = "") -> None:
+        if getattr(self, "_assoc_context_rows", None) is None:
+            return
+        ctx = schedule_association_context(self.hz_combo.currentText(), self.timing_tol_edit.text())
+        overlap = ctx["windows_overlap"]
+        values = {
+            "assoc_reference_interval": (
+                f"{format_reference_interval_ms(ctx['reference_interval_ms'])} ms"
+                if ctx["reference_interval_ms"] is not None
+                else "—"
+            ),
+            "assoc_window": format_association_window_ms(ctx["window_ms"]),
+            "assoc_relative": format_percent_of_interval(ctx["percent_of_interval"]),
+            "assoc_overlap": "—" if overlap is None else self._tr("assoc_yes" if overlap else "assoc_no"),
+        }
+        for key, (name, value) in self._assoc_context_rows.items():
+            name.setText(self._tr(key))
+            value.setText(values[key])
+        self.assoc_overlap_note.setText(self._tr("assoc_overlap_note"))
+        self.assoc_overlap_note.setVisible(bool(overlap))
+        self.assoc_derived_note.setText(self._tr("assoc_derived_note"))
 
     def _sync_auto_stop_widgets(self):
         fixture = not self._ui_is_manual()
@@ -2832,7 +2944,7 @@ class MainWindow(QMainWindow):
             parts.append(f"{self._tr('fixture')} {hz:g} Hz" if hz is not None else self._tr("fixture"))
             tol = run["timing_tolerance_ms"]
             if tol is not None:
-                parts.append(f"±{tol:g} ms")
+                parts.append(f"{self._tr('tolerance')} {format_association_window_ms(tol)}")
         elapsed = run["elapsed_s"]
         if isinstance(elapsed, (int, float)):
             parts.append(f"{elapsed:.1f} s")
@@ -3445,20 +3557,6 @@ class MainWindow(QMainWindow):
             if iv is not None and elapsed is not None:
                 series.append((float(elapsed), float(iv)))
         return pts, series
-
-    def _fixture_association_half_width_ms(self, settings: dict[str, Any] | None) -> float | None:
-        if not settings:
-            return None
-        raw = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
-        try:
-            if raw is None:
-                return None
-            value = float(raw)
-        except (TypeError, ValueError):
-            return None
-        if not math.isfinite(value):
-            return None
-        return abs(value)
 
     def _on_capture_view_id(self, index: int) -> None:
         self._set_capture_view("stability" if index == 0 else "interval")
@@ -4340,7 +4438,6 @@ class MainWindow(QMainWindow):
         ov_pts, ov_series = self._chart_points(overlay_ann)
         fixture = not _is_manual_profile(settings)
         reference = beat if fixture else None
-        association = self._fixture_association_half_width_ms(settings) if fixture else None
         subtitle = self._capture_chart_subtitle(settings)
         duration_s = settings.get("duration_sec")
         capture_duration_ms = None
@@ -4352,14 +4449,12 @@ class MainWindow(QMainWindow):
             subtitle=subtitle,
             overlay=ov_pts,
             target_beat_ms=reference,
-            association_half_width_ms=association,
         )
         self.interval_chart.set_series(
             series,
             title=self._tr("chart_interval_trend"),
             overlay=ov_series,
             target_beat_ms=reference,
-            association_half_width_ms=association,
             capture_duration_ms=capture_duration_ms,
         )
 

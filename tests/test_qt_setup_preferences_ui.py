@@ -207,7 +207,7 @@ class SetupPreferencesUiTests(unittest.TestCase):
         self.assertEqual(values[self.win._tr("button")], "Left")
         self.assertEqual(values[self.win._tr("preview_mode")], self.win._tr("fixture"))
         self.assertEqual(values[self.win._tr("preview_reference_rate")], "5 Hz")
-        self.assertEqual(values[self.win._tr("preview_timing_tolerance")], "±2 ms")
+        self.assertEqual(values[self.win._tr("preview_timing_tolerance")], "±2.00 ms")
         self.assertEqual(values[self.win._tr("auto_stop")], "20 s")
 
     def test_manual_preview_shows_no_fixture_values(self):
@@ -252,7 +252,7 @@ class SetupPreferencesUiTests(unittest.TestCase):
         values = dict(self._preview_pairs())
         self.assertEqual(values[self.win._tr("device").upper()], "DUT-B")
         self.assertEqual(values[self.win._tr("preview_reference_rate").upper()], "40 Hz")
-        self.assertEqual(values[self.win._tr("preview_timing_tolerance").upper()], "±9 ms")
+        self.assertEqual(values[self.win._tr("preview_timing_tolerance").upper()], "±9.00 ms")
 
     # 7
     def test_edit_profile_removes_preview_and_returns_draft(self):

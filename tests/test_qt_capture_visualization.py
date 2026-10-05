@@ -53,7 +53,6 @@ _I18N_KEYS = (
     "viz_zoom_in",
     "viz_zoom_out",
     "viz_reset_view",
-    "legend_association_window",
     "legend_configured_reference",
     "legend_on_cadence",
     "legend_extra",
@@ -180,7 +179,7 @@ class ChartWidgetTests(unittest.TestCase):
         self._qapp.processEvents()
 
     def test_scatter_autofit_includes_cluster_and_skips_zero(self):
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)
         xmin, xmax, ymin, ymax = self.scatter.visible_bounds()
         self.assertGreater(xmin, 50.0)
         for x, y, *_rest in _CLUSTER:
@@ -188,8 +187,8 @@ class ChartWidgetTests(unittest.TestCase):
             self.assertGreaterEqual(xmax, x)
             self.assertLessEqual(ymin, y)
             self.assertGreaterEqual(ymax, y)
-        self.assertLessEqual(xmin, 164.67)
-        self.assertGreaterEqual(xmax, 168.67)
+        self.assertLessEqual(xmin, 166.67)
+        self.assertGreaterEqual(xmax, 166.67)
         self.assertTrue(_finite_tuple((xmin, xmax, ymin, ymax)))
 
     def test_hold_autofit_fits_displayed_holds(self):
@@ -199,25 +198,62 @@ class ChartWidgetTests(unittest.TestCase):
         self.assertGreaterEqual(ymax, 90.0)
         self.assertGreater(ymin, -20.0)
 
-    def test_fixture_reference_and_band_are_represented(self):
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
-        self.assertEqual(self.scatter.target_beat_ms, 166.67)
-        self.assertEqual(self.scatter.association_window(), (164.67, 168.67))
-        points_before = list(self.scatter.points)
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=20.0)
-        self.assertEqual(self.scatter.points, points_before)
-        self.assertEqual(self.scatter.association_window(), (146.67, 186.67))
+    def test_fixture_reference_line_is_the_only_guide(self):
+        for chart, load in (
+            (self.scatter, lambda ref: self.scatter.set_points(_CLUSTER, target_beat_ms=ref)),
+            (self.interval, lambda ref: self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=ref)),
+        ):
+            with self.subTest(chart=type(chart).__name__):
+                load(166.67)
+                self.assertEqual(chart.target_beat_ms, 166.67)
+                self.assertFalse(hasattr(chart, "association_window"))
+                self.assertFalse(hasattr(chart, "association_half_width_ms"))
+                labels = [label for _color, label in chart._guide_legend_items()]
+                self.assertEqual(labels, ["Configured reference"])
+
+    def test_capture_charts_render_reference_line_without_association_band(self):
+        ref = 166.67
+        for chart, load, vertical in (
+            (self.scatter, lambda r: self.scatter.set_points(_CLUSTER, target_beat_ms=r), True),
+            (self.interval, lambda r: self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=r), False),
+        ):
+            with self.subTest(chart=type(chart).__name__):
+                load(None)
+                bare = chart.grab().toImage()
+                load(ref)
+                guided = chart.grab().toImage()
+                plot = chart._plot_rect()
+                bounds = chart.visible_bounds()
+                anchor = chart.pixel_at_data(ref if vertical else bounds[0], (bounds[2] + bounds[3]) / 2 if vertical else ref)
+                self.assertIsNotNone(anchor)
+                line_pos = anchor.x() if vertical else anchor.y()
+                # A band spans the plot perpendicular to its axis; count changed pixels per
+                # column (vertical guide) or row (horizontal guide) below the in-plot legend.
+                below_legend = int(plot.top() + plot.height() * 0.4)
+                xs = range(int(plot.left()) + 2, int(plot.right()) - 1)
+                ys = range(below_legend, int(plot.bottom()) - 1)
+                counts: dict[int, int] = {}
+                for x in xs:
+                    for y in ys:
+                        if bare.pixel(x, y) != guided.pixel(x, y):
+                            key = x if vertical else y
+                            counts[key] = counts.get(key, 0) + 1
+                span = len(ys) if vertical else len(xs)
+                full = [pos for pos, n in counts.items() if n >= span * 0.5]
+                self.assertTrue(full, "configured reference line must be drawn")
+                for pos in full:
+                    self.assertLessEqual(abs(pos - line_pos), 3.0, pos)
 
     def test_manual_does_not_invent_fixture_guides(self):
-        self.scatter.set_points(_CLUSTER, target_beat_ms=None, association_half_width_ms=None)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=None)
         self.assertIsNone(self.scatter.target_beat_ms)
-        self.assertIsNone(self.scatter.association_window())
-        self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=None, association_half_width_ms=None)
+        self.assertEqual(self.scatter._guide_legend_items(), [])
+        self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=None)
         self.assertIsNone(self.interval.target_beat_ms)
-        self.assertIsNone(self.interval.association_window())
+        self.assertEqual(self.interval._guide_legend_items(), [])
 
     def test_interval_trend_y_fits_cluster(self):
-        self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=166.67)
         xmin, xmax, ymin, ymax = self.interval.visible_bounds()
         self.assertGreater(ymin, 40.0)
         for x, y in _CLUSTER_SERIES:
@@ -225,8 +261,8 @@ class ChartWidgetTests(unittest.TestCase):
             self.assertGreaterEqual(xmax, x)
             self.assertLessEqual(ymin, y)
             self.assertGreaterEqual(ymax, y)
-        self.assertLessEqual(ymin, 164.67)
-        self.assertGreaterEqual(ymax, 168.67)
+        self.assertLessEqual(ymin, 166.67)
+        self.assertGreaterEqual(ymax, 166.67)
 
     def test_empty_and_single_point_are_safe(self):
         self.scatter.set_points([])
@@ -258,7 +294,7 @@ class ChartWidgetTests(unittest.TestCase):
         self.assertTrue(_finite_tuple((xmin, xmax, ymin, ymax)))
 
     def test_zoom_changes_only_visible_range(self):
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)
         source = list(self.scatter.points)
         auto = self.scatter.visible_bounds()
         self.scatter.zoom_in()
@@ -282,7 +318,7 @@ class ChartWidgetTests(unittest.TestCase):
     def test_wheel_inside_plot_zooms_and_accepts(self):
         self.scatter.show()
         self._qapp.processEvents()
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)
         before = self.scatter.visible_bounds()
         pos = _plot_anchor_pixel(self.scatter)
         event = _send_wheel(self.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
@@ -306,8 +342,8 @@ class ChartWidgetTests(unittest.TestCase):
 
     def test_wheel_keeps_cursor_data_under_pixel(self):
         for chart, load in (
-            (self.scatter, lambda: self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)),
-            (self.interval, lambda: self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=166.67, association_half_width_ms=2.0)),
+            (self.scatter, lambda: self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)),
+            (self.interval, lambda: self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=166.67)),
         ):
             with self.subTest(chart=type(chart).__name__):
                 chart.show()
@@ -336,7 +372,7 @@ class ChartWidgetTests(unittest.TestCase):
         self.assertGreater(out[3] - out[2], zoomed[3] - zoomed[2])
 
     def test_button_and_wheel_share_scale_with_different_anchors(self):
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)
         auto = self.scatter.visible_bounds()
         self.scatter.zoom_in()
         button = self.scatter.visible_bounds()
@@ -528,7 +564,7 @@ class ChartWidgetTests(unittest.TestCase):
     def test_hover_inspection_is_factual(self):
         self.scatter.show()
         self._qapp.processEvents()
-        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67)
         mapped = self.scatter._maps()
         self.assertIsNotNone(mapped)
         _plot, _bounds, map_x, map_y = mapped
@@ -741,22 +777,26 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertEqual(self.win.events, [])
         self.assertIsNotNone(self.win.profile_locked_settings)
 
-    def test_fixture_refresh_uses_locked_association_not_setup_edit(self):
+    def test_fixture_refresh_uses_locked_reference_not_setup_edit(self):
         self._fixture(tol="2")
         self._start_run()
         self._raw_click()
         self.win._refresh_metrics(final=False)
         events_before = copy.deepcopy(self.win.events)
         status_before = self.win.val_verdict.text()
-        self.assertEqual(self.win.scatter.association_window(), (
-            self.win.scatter.target_beat_ms - 2.0,
-            self.win.scatter.target_beat_ms + 2.0,
-        ))
+        reference = self.win.scatter.target_beat_ms
+        self.assertIsNotNone(reference)
         self.win.timing_tol_edit.setText("20")
+        self.win.hz_combo.setCurrentText("5")
         self.win._refresh_metrics(final=False)
         self.assertEqual(self.win.events, events_before)
         self.assertEqual(self.win.val_verdict.text(), status_before)
-        self.assertEqual(self.win.scatter.association_half_width_ms, 2.0)
+        self.assertEqual(self.win.scatter.target_beat_ms, reference)
+        self.assertEqual(self.win.interval_chart.target_beat_ms, reference)
+        self.assertEqual(self.win.locked["fixture_timing_tolerance_ms"], 2.0)
+        for chart in (self.win.scatter, self.win.interval_chart):
+            labels = [label for _color, label in chart._guide_legend_items()]
+            self.assertEqual(labels, [self.win._tr("legend_configured_reference")])
 
     def test_manual_run_does_not_draw_fixture_guides(self):
         self.win.radio_manual.setChecked(True)
@@ -764,9 +804,9 @@ class CaptureVisualizationTests(unittest.TestCase):
         self._raw_click()
         self.win._refresh_metrics(final=False)
         self.assertIsNone(self.win.scatter.target_beat_ms)
-        self.assertIsNone(self.win.scatter.association_window())
+        self.assertEqual(self.win.scatter._guide_legend_items(), [])
         self.assertIsNone(self.win.interval_chart.target_beat_ms)
-        self.assertIsNone(self.win.interval_chart.association_window())
+        self.assertEqual(self.win.interval_chart._guide_legend_items(), [])
         self.assertEqual(self.win.scatter.subtitle, self.win._tr("chart_stability_map_subtitle"))
 
     def test_fixture_titles_are_factual(self):
@@ -999,7 +1039,8 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertEqual(STRINGS["en"]["chart_stability_map"], "Click Stability Map")
         self.assertEqual(STRINGS["en"]["chart_interval_trend"], "Interval Trend")
         self.assertEqual(STRINGS["en"]["legend_on_cadence"], "Observation")
-        self.assertNotIn("PASS zone", STRINGS["en"]["legend_association_window"])
+        for lang in SUPPORTED_LANGS:
+            self.assertNotIn("legend_association_window", STRINGS[lang])
 
 
 if __name__ == "__main__":

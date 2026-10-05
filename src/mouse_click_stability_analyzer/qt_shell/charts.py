@@ -126,7 +126,7 @@ def fitted_range(
     return lo, hi
 
 
-def _association_anchors(center: float | None, half_width: float | None) -> list[float]:
+def _reference_anchors(center: float | None) -> list[float]:
     if center is None:
         return []
     try:
@@ -135,16 +135,7 @@ def _association_anchors(center: float | None, half_width: float | None) -> list
         return []
     if not math.isfinite(ref):
         return []
-    anchors = [ref]
-    if half_width is None:
-        return anchors
-    try:
-        half = abs(float(half_width))
-    except (TypeError, ValueError):
-        return anchors
-    if math.isfinite(half):
-        anchors.extend((ref - half, ref + half))
-    return anchors
+    return [ref]
 
 
 def _valid_axis(lo: float, hi: float) -> bool:
@@ -231,7 +222,6 @@ class _ChartBase(QWidget):
         self.data_aware_fit = False
         self.factual_guides = False
         self.target_beat_ms: float | None = None
-        self.association_half_width_ms: float | None = None
         self.zoom_locked = False
         self._user_view: tuple[float, float, float, float] | None = None
         self._nav_home: tuple[float, float, float, float] | None = None
@@ -618,18 +608,6 @@ class _ChartBase(QWidget):
             self.unsetCursor()
         super().leaveEvent(event)
 
-    def association_window(self) -> tuple[float, float] | None:
-        if self.target_beat_ms is None or self.association_half_width_ms is None:
-            return None
-        try:
-            center = float(self.target_beat_ms)
-            half = abs(float(self.association_half_width_ms))
-        except (TypeError, ValueError):
-            return None
-        if not (math.isfinite(center) and math.isfinite(half)):
-            return None
-        return (center - half, center + half)
-
     def _guide_legend_items(self) -> list[tuple[str, str]]:
         items: list[tuple[str, str]] = []
         pal = self.palette
@@ -637,8 +615,6 @@ class _ChartBase(QWidget):
             return items
         if self.factual_guides:
             items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
-            if self.association_half_width_ms is not None:
-                items.append((pal.target_line, self._label("legend_association_window", "Association window")))
         else:
             items.append((pal.target_line, self._label("legend_target", "Target beat")))
         return items
@@ -653,19 +629,12 @@ class _ChartBase(QWidget):
             p.setFont(chart_font("subtitle"))
             p.drawText(12, 32, self.subtitle)
 
+    # Interval-domain charts draw only the configured reference. The Schedule
+    # Association Window applies to timestamps, so it has no interval-axis band.
     def _draw_vertical_guides(self, p: QPainter, plot: QRectF, map_x: Callable[[float], float]) -> None:
         if not self.target_beat_ms:
             return
         pal = self.palette
-        window = self.association_window() if self.factual_guides else None
-        if window is not None:
-            x0 = map_x(window[0])
-            x1 = map_x(window[1])
-            left, right = min(x0, x1), max(x0, x1)
-            width = max(1.0, right - left)
-            fill = QColor(pal.target_line)
-            fill.setAlpha(32)
-            p.fillRect(QRectF(left, plot.top(), width, plot.height()), fill)
         tx = map_x(float(self.target_beat_ms))
         p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
         p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
@@ -674,15 +643,6 @@ class _ChartBase(QWidget):
         if not self.target_beat_ms:
             return
         pal = self.palette
-        window = self.association_window() if self.factual_guides else None
-        if window is not None:
-            y0 = map_y(window[0])
-            y1 = map_y(window[1])
-            top, bottom = min(y0, y1), max(y0, y1)
-            height = max(1.0, bottom - top)
-            fill = QColor(pal.target_line)
-            fill.setAlpha(32)
-            p.fillRect(QRectF(plot.left(), top, plot.width(), height), fill)
         ty = map_y(float(self.target_beat_ms))
         p.setPen(QPen(QColor(pal.target_line), 1.2, Qt.PenStyle.DashLine))
         p.drawLine(QPointF(plot.left(), ty), QPointF(plot.right(), ty))
@@ -810,7 +770,6 @@ class ScatterChart(_ChartBase):
         subtitle: str = "",
         overlay: list[tuple] | None = None,
         target_beat_ms: float | None = None,
-        association_half_width_ms: float | None = None,
     ):
         self.points = list(points or [])
         self.overlay_points = list(overlay or [])
@@ -818,7 +777,6 @@ class ScatterChart(_ChartBase):
             self.title = title
         self.subtitle = subtitle or ""
         self.target_beat_ms = target_beat_ms
-        self.association_half_width_ms = association_half_width_ms
         self.update()
 
     def _class_color(self, cls: str) -> str:
@@ -840,7 +798,7 @@ class ScatterChart(_ChartBase):
 
     def autofit_bounds(self) -> tuple[float, float, float, float] | None:
         xs, ys = self._xy_values()
-        extras = _association_anchors(self.target_beat_ms, self.association_half_width_ms)
+        extras = _reference_anchors(self.target_beat_ms)
         if not xs and not extras:
             return fitted_range([], min_span=SCATTER_X_MIN_SPAN_MS) + fitted_range([], min_span=SCATTER_Y_MIN_SPAN_MS)
         if self.data_aware_fit:
@@ -1013,7 +971,6 @@ class IntervalChart(_ChartBase):
         title: str = "",
         overlay: list[tuple[float, float]] | None = None,
         target_beat_ms: float | None = None,
-        association_half_width_ms: float | None = None,
         capture_duration_ms: float | None = None,
     ):
         self.series = list(series or [])
@@ -1021,7 +978,6 @@ class IntervalChart(_ChartBase):
         if title:
             self.title = title
         self.target_beat_ms = target_beat_ms
-        self.association_half_width_ms = association_half_width_ms
         self.capture_duration_ms = capture_duration_ms
         self.update()
 
@@ -1035,7 +991,7 @@ class IntervalChart(_ChartBase):
         all_pts = list(self.series) + list(self.overlay_series)
         xs = _finite_values([a[0] for a in all_pts])
         ys = _finite_values([a[1] for a in all_pts])
-        extras = _association_anchors(self.target_beat_ms, self.association_half_width_ms)
+        extras = _reference_anchors(self.target_beat_ms)
         if self.data_aware_fit:
             xmin, xmax = fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS)
             ymin, ymax = fitted_range(ys, extra=extras, min_span=INTERVAL_Y_MIN_SPAN_MS)

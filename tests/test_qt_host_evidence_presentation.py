@@ -85,7 +85,7 @@ class FormatterTests(unittest.TestCase):
         for fragment in (
             "Fixture Frequency 40 Hz",
             "Capture Duration 10.000 s",
-            "Configured association tolerance ±2.000 ms",
+            "Schedule Association Window ±2.000 ms",
             "Configured reference interval 25.000 ms",
             "Schedule windows 400",
             "Host observations in capture 399",
@@ -115,7 +115,18 @@ class FormatterTests(unittest.TestCase):
             _snapshot(configuration={"matching_windows_can_overlap": True}), _en
         )
         self.assertEqual(len(overlap), len(lines) + 1)
-        self.assertIn("Matching windows overlap: Yes", overlap)
+        self.assertIn(
+            "Adjacent windows overlap: Yes · Host observations in overlapping windows may be reported as Ambiguous.",
+            overlap,
+        )
+
+    def test_association_wording_is_canonical_and_neutral(self):
+        text = "\n".join(format_host_evidence_review_lines(
+            _snapshot(configuration={"matching_windows_can_overlap": True}), _en,
+        ))
+        self.assertIn("Schedule Association Window ±2.000 ms", text)
+        for stale in ("tolerance", "Tolerance", "PASS", "FAIL", "WARN"):
+            self.assertNotIn(stale, text)
 
     def test_negative_delta_stays_negative(self):
         text = "\n".join(format_host_evidence_review_lines(_snapshot(), _en))

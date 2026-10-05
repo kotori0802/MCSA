@@ -67,7 +67,7 @@ _LEGACY = (
 _HOST_EVIDENCE_LABELS = (
     "Schedule windows",
     "Configured reference interval",
-    "Configured association tolerance",
+    "Schedule Association Window",
     "Host observations in capture",
     "Host observations recorded",
     "Host observations − schedule windows",
@@ -451,14 +451,32 @@ class ReportV2QtTests(unittest.TestCase):
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertEqual(body.count("class='ref'"), 1)
-                self.assertEqual(body.count("class='tol'"), 1)
+                self.assertNotIn("class='tol'", body)
+                self.assertNotIn("Association", body)
                 self.assertIn(f"class='rl' text-anchor='", body)
                 self.assertIn(f">{_REF_MS:.2f} ms</text>", body)
                 legend = re.findall(r"<span class='li'>.*?</span>", body)
                 self.assertEqual(
                     [re.sub(r"<[^>]+>", "", item) for item in legend],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Association window ±2 ms"],
+                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms"],
                 )
+
+    def test_run_context_uses_schedule_association_window_wording(self):
+        _, paths = self._golden()
+        html_text, xlsx = self._artifacts(paths)
+        info = _html_kv(html_text, "test-information")
+        summary = _sheet_kv(xlsx, "Summary")
+        relative_label = "Window relative to reference interval (derived, informational)"
+        for kv in (info, summary):
+            self.assertEqual(kv["Schedule Association Window"], "±2.00 ms")
+            self.assertEqual(kv[relative_label], f"{2.0 / _REF_MS * 100.0:.1f} %")
+        visible = _visible_html_text(html_text)
+        workbook = _workbook_text(xlsx)
+        for text in (visible, workbook):
+            _assert_no_verdict_words(self, text)
+            for stale in ("Fixture Timing Tolerance", "Timing Tolerance", "Configured association tolerance",
+                          "Association window"):
+                self.assertNotIn(stale, text)
 
     def test_manual_html_charts_have_no_configured_reference_marker(self):
         _, paths = self._manual()
@@ -473,7 +491,7 @@ class ReportV2QtTests(unittest.TestCase):
                 self.assertNotIn("class='legend'", body)
         self.assertNotIn("Configured reference", html_text)
         self.assertNotIn("Configured tolerance", html_text)
-        self.assertNotIn("Association window", html_text)
+        self.assertNotIn("Association Window", html_text)
         for title, series in _xlsx_charts(xlsx).items():
             with self.subTest(xlsx_chart=title):
                 self.assertEqual(len(series), 1)
@@ -495,7 +513,7 @@ class ReportV2QtTests(unittest.TestCase):
             with self.subTest(chart=title):
                 self.assertEqual(
                     [s["title"] for s in charts[title]],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Association window ±2 ms"],
+                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms"],
                 )
         wb = load_workbook(paths["engineering_xlsx"])
         try:
@@ -543,7 +561,8 @@ class ReportV2QtTests(unittest.TestCase):
             _assert_no_verdict_words(self, text)
             self.assertNotIn("MANUAL_PROFILE_NO_EXPECTED_COUNT", text)
             self.assertNotIn("Host Evidence", text)
-            for absent in ("Schedule windows", "Reference Rate", "Fixture Timing Tolerance", "Interval Δ vs ref."):
+            for absent in ("Schedule windows", "Reference Rate", "Schedule Association Window",
+                           "Fixture Timing Tolerance", "Interval Δ vs ref."):
                 self.assertNotIn(absent, text)
             for forbidden in _EXPLANATORY + _LEGACY:
                 self.assertNotIn(forbidden, text, forbidden)

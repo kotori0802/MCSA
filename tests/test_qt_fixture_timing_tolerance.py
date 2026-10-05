@@ -109,9 +109,11 @@ class I18nTests(unittest.TestCase):
 
     def test_label_does_not_claim_other_semantics(self):
         label = STRINGS["en"]["fixture_timing_tolerance_ms"].lower()
-        for word in ("match", "double", "missing", "debounce", "acceptance"):
+        for word in ("match", "double", "missing", "debounce", "acceptance", "tolerance"):
             self.assertNotIn(word, label)
         self.assertIn("±", STRINGS["en"]["fixture_timing_tolerance_ms"])
+        self.assertEqual(STRINGS["en"]["fixture_timing_tolerance_ms"], "Schedule Association Window (± ms)")
+        self.assertEqual(STRINGS["zh"]["fixture_timing_tolerance_ms"], "排程關聯範圍 (± ms)")
 
 
 def _make_qapp():

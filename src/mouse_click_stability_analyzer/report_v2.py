@@ -40,7 +40,8 @@ _XLSX_TEXT_LABELS = frozenset({
 })
 _LEGEND_HOST = "Host observation"
 _LEGEND_REFERENCE = "Configured reference"
-_LEGEND_TOLERANCE = "Association window"
+_ASSOCIATION_WINDOW_LABEL = "Schedule Association Window"
+_ASSOCIATION_RELATIVE_LABEL = "Window relative to reference interval (derived, informational)"
 
 
 def _finite(value: Any) -> float | None:
@@ -123,10 +124,13 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
     if not run.get("manual"):
         hz = _finite(run.get("reference_hz"))
         tol = _finite(run.get("timing_tolerance_ms"))
+        ref = _finite(run.get("reference_interval_ms"))
+        relative = tol / ref * 100.0 if tol is not None and ref else None
         rows += [
             ("Reference Rate", f"{hz:g} Hz" if hz is not None else None),
-            ("Reference Interval", _fmt(run.get("reference_interval_ms"), 2, "ms")),
-            ("Fixture Timing Tolerance", f"±{tol:g} ms" if tol is not None else None),
+            ("Reference Interval", _fmt(ref, 2, "ms")),
+            (_ASSOCIATION_WINDOW_LABEL, f"±{tol:.2f} ms" if tol is not None else None),
+            (_ASSOCIATION_RELATIVE_LABEL, f"{relative:.1f} %" if relative is not None else None),
         ]
     elapsed = _finite(run.get("elapsed_s"))
     rows += [
@@ -198,7 +202,7 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
         ("Schedule", [
             ("Schedule windows", str(counts["expected_slot_count"])),
             ("Configured reference interval", _fmt(config["reference_interval_ms"], 2, "ms")),
-            ("Configured association tolerance", f"±{float(config['timing_tolerance_ms']):.3f} ms"),
+            (_ASSOCIATION_WINDOW_LABEL, f"±{float(config['timing_tolerance_ms']):.3f} ms"),
         ]),
         ("Host observations", [
             ("Host observations in capture", str(counts["in_window_host_press_count"])),
@@ -255,8 +259,7 @@ def build_report_view(
     ref = None if manual else _finite(model["analysis"].get("reference_interval_ms"))
     chart_reference = None
     if ref is not None:
-        tol = _finite(run.get("timing_tolerance_ms"))
-        chart_reference = {"interval_ms": ref, "tolerance_ms": tol if tol and tol > 0 else None}
+        chart_reference = {"interval_ms": ref}
     return {
         "chart_reference": chart_reference,
         "title": REPORT_TITLE,
@@ -328,11 +331,13 @@ def _empty_chart(title: str) -> str:
     return _svg(f"<text x='{_W / 2:.0f}' y='{_H / 2:.0f}' class='lb' text-anchor='middle'>No data</text>", title)
 
 
+# Report charts are interval-domain: they draw only the configured reference.
+# The Schedule Association Window applies to timestamps and has no interval band.
 def _reference_span(reference: dict[str, Any] | None) -> tuple[float, float] | None:
     if not reference:
         return None
-    ref, tol = reference["interval_ms"], reference.get("tolerance_ms") or 0.0
-    return ref - tol, ref + tol
+    ref = reference["interval_ms"]
+    return ref, ref
 
 
 def _reference_label(reference: dict[str, Any]) -> str:
@@ -340,35 +345,21 @@ def _reference_label(reference: dict[str, Any]) -> str:
 
 
 def _svg_reference_horizontal(reference: dict[str, Any], ymin: float, ymax: float) -> str:
-    ref, tol = reference["interval_ms"], reference.get("tolerance_ms") or 0.0
+    ref = reference["interval_ms"]
     ry = _scale(ref, ymin, ymax, _H - _B, _T)
-    out = ""
-    if tol > 0:
-        top = _scale(ref + tol, ymin, ymax, _H - _B, _T)
-        bottom = _scale(ref - tol, ymin, ymax, _H - _B, _T)
-        out += (f"<rect x='{_L}' y='{top:.1f}' width='{_W - _R - _L}' height='{max(1.0, bottom - top):.1f}' "
-                f"class='tol'><title>{_LEGEND_TOLERANCE}</title></rect>")
-    out += (f"<line x1='{_L}' y1='{ry:.1f}' x2='{_W - _R}' y2='{ry:.1f}' class='ref'>"
+    return (f"<line x1='{_L}' y1='{ry:.1f}' x2='{_W - _R}' y2='{ry:.1f}' class='ref'>"
             f"<title>{_LEGEND_REFERENCE}</title></line>"
             f"<text x='{_W - _R - 4}' y='{ry - 5:.1f}' class='rl' text-anchor='end'>{_reference_label(reference)}</text>")
-    return out
 
 
 def _svg_reference_vertical(reference: dict[str, Any], xmin: float, xmax: float) -> str:
-    ref, tol = reference["interval_ms"], reference.get("tolerance_ms") or 0.0
+    ref = reference["interval_ms"]
     rx = _scale(ref, xmin, xmax, _L, _W - _R)
-    out = ""
-    if tol > 0:
-        left = _scale(ref - tol, xmin, xmax, _L, _W - _R)
-        right = _scale(ref + tol, xmin, xmax, _L, _W - _R)
-        out += (f"<rect x='{left:.1f}' y='{_T}' width='{max(1.0, right - left):.1f}' height='{_H - _B - _T}' "
-                f"class='tol'><title>{_LEGEND_TOLERANCE}</title></rect>")
     anchor = "start" if rx < (_L + _W - _R) / 2 else "end"
     dx = 5 if anchor == "start" else -5
-    out += (f"<line x1='{rx:.1f}' y1='{_T}' x2='{rx:.1f}' y2='{_H - _B}' class='ref'>"
+    return (f"<line x1='{rx:.1f}' y1='{_T}' x2='{rx:.1f}' y2='{_H - _B}' class='ref'>"
             f"<title>{_LEGEND_REFERENCE}</title></line>"
             f"<text x='{rx + dx:.1f}' y='{_T + 12}' class='rl' text-anchor='{anchor}'>{_reference_label(reference)}</text>")
-    return out
 
 
 def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str, Any] | None) -> str:
@@ -450,9 +441,6 @@ def _chart_legend(reference: dict[str, Any] | None, host_swatch: str) -> str:
         f"<span class='li'><i class='sw {host_swatch}'></i>{_LEGEND_HOST}</span>",
         f"<span class='li'><i class='sw sw-ref'></i>{_LEGEND_REFERENCE} {_e(_reference_label(reference))}</span>",
     ]
-    tol = reference.get("tolerance_ms")
-    if tol:
-        items.append(f"<span class='li'><i class='sw sw-tol'></i>{_LEGEND_TOLERANCE} ±{tol:g} ms</span>")
     return f"<div class='legend'>{''.join(items)}</div>"
 
 
@@ -489,7 +477,6 @@ svg .tk{font-size:13px;fill:#5f6b7a}
 svg .lb{font-size:14px;fill:#3e4c59}
 svg .series{fill:none;stroke:var(--accent);stroke-width:1.4}
 svg .ref{stroke:#16a34a;stroke-width:1.4;stroke-dasharray:6 4}
-svg .tol{fill:#16a34a;fill-opacity:.12}
 svg .rl{font-size:12px;font-weight:600;fill:#15803d;paint-order:stroke;stroke:#fff;stroke-width:3px}
 svg .bar{fill:#60a5fa}
 svg .dot{fill:#2563eb;fill-opacity:.55}
@@ -500,7 +487,6 @@ svg .dot{fill:#2563eb;fill-opacity:.55}
 .sw-bar{background:#60a5fa}
 .sw-dot{width:8px;height:8px;border-radius:50%;background:#2563eb;opacity:.7}
 .sw-ref{height:0;border-top:2px dashed #16a34a}
-.sw-tol{background:rgba(22,163,74,.18)}
 @media (max-width:640px){main{padding:12px 8px 32px}section{padding:12px}table.kv th{width:45%}}
 """
 
@@ -726,7 +712,7 @@ def write_report_xlsx(
         chart.height, chart.width = 7.5, 16
         return chart
 
-    # Reference/tolerance marker coordinates live in hidden helper columns of the Measurements sheet.
+    # Reference marker coordinates live in hidden helper columns of the Measurements sheet.
     helper_row = [0]
 
     def marker_series(xs: list[float | None], ys: list[float | None], title: str, dash: str):
@@ -749,19 +735,10 @@ def write_report_xlsx(
         return s
 
     def reference_markers(vertical: bool, lo: float, hi: float) -> list:
-        ref, tol = reference["interval_ms"], reference.get("tolerance_ms")
-        out = []
+        ref = reference["interval_ms"]
         if vertical:
-            out.append(marker_series([ref, ref], [lo, hi], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash"))
-            if tol:
-                out.append(marker_series([ref - tol, ref - tol, None, ref + tol, ref + tol], [lo, hi, None, lo, hi],
-                                         f"{_LEGEND_TOLERANCE} ±{tol:g} ms", "sysDot"))
-        else:
-            out.append(marker_series([lo, hi], [ref, ref], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash"))
-            if tol:
-                out.append(marker_series([lo, hi, None, lo, hi], [ref - tol, ref - tol, None, ref + tol, ref + tol],
-                                         f"{_LEGEND_TOLERANCE} ±{tol:g} ms", "sysDot"))
-        return out
+            return [marker_series([ref, ref], [lo, hi], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash")]
+        return [marker_series([lo, hi], [ref, ref], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash")]
 
     def with_legend(chart):
         chart.legend = Legend()

@@ -58,7 +58,14 @@ _REQUIRED_UI_KEYS = (
     "viz_zoom_out",
     "viz_reset_view",
     "legend_configured_reference",
-    "legend_association_window",
+    "assoc_reference_interval",
+    "assoc_window",
+    "assoc_relative",
+    "assoc_overlap",
+    "assoc_yes",
+    "assoc_no",
+    "assoc_overlap_note",
+    "assoc_derived_note",
     "test_area_hint_ready_manual",
     "test_area_hint_ready_fixture",
     "test_area_hint_armed_manual",
@@ -150,7 +157,7 @@ class SupportedLanguageTests(unittest.TestCase):
         self.assertEqual(zh["arm_capture"], "開始擷取")
         self.assertEqual(zh["disarm_capture"], "取消開始")
         self.assertEqual(zh["chart_stability_map"], "點擊穩定度圖")
-        self.assertNotIn("视", zh["legend_association_window"])
+        self.assertEqual(zh["assoc_window"], "排程關聯範圍")
         self.assertNotIn("视窗", "".join(zh.values()))
 
 

@@ -148,7 +148,7 @@ Only these inputs exist in MCSA today:
 - Button
 - Manual / Fixture
 - Reference Rate (Hz)
-- Fixture Timing Tolerance (± ms)
+- Schedule Association Window (± ms) — persisted as `fixture_timing_tolerance_ms`
 - Auto Stop (ON / OFF)
 - Auto Stop duration (s)
 - Custom Limits:
@@ -215,6 +215,38 @@ explicitly approved policy layer exists:
 - hardware fault
 - Host Evidence PASS / FAIL
 
+### Schedule Association Window
+
+The Schedule Association Window (排程關聯範圍) is an absolute ± ms half-width
+around each expected schedule timestamp. It only decides whether a Host
+observation can be associated with a schedule slot: one candidate is Matched,
+none is Unmatched, two or more is Ambiguous, and observations at or after the
+capture duration are Outside capture. It is not a DUT acceptance tolerance, a
+PASS / FAIL threshold, or a chatter / double-click / duplicate / miss / delay
+rule; those belong to future versioned Screening / Validation Profiles.
+
+Setup shows derived, read-only context: Reference Interval (T = 1000 / Hz),
+window relative to T (W / T × 100), and whether adjacent windows overlap
+(2W ≥ T, inclusive, the matcher's own condition). Overlap is informational and
+never blocks Profile Lock.
+
+The window applies to timestamps, not intervals. Interval-domain charts
+(Capture Stability Map, Interval Trend, report charts) show only the configured
+reference interval and no association band.
+
+Fixed ms, period-relative percentage, hybrid, or drift handling is not decided.
+Future fixture / host timing characterization (actuation jitter, fixture clock
+accuracy, Host timestamp and polling behavior, observed unmatched / ambiguous
+rates) will determine the model. Until then the matcher keeps the absolute ± ms
+rule.
+
+### t0 anchor limitation
+
+The schedule is anchored at the first accepted Host press (t0). Matched timing
+(Host − schedule) therefore describes the relative schedule residual and drift
+after t0. It does not measure absolute fixture-to-host latency or first
+actuation latency.
+
 ---
 
 ## 7. UX Pilot Mockup-Only Items
@@ -245,7 +277,7 @@ explicitly approved policy layer exists:
 | Surface Compensation | Not applicable | Do not add |
 | Firmware version | Not sourced | Do not add |
 | Number of Clicks (as a protocol input) | Not a current input (Auto Stop duration is) | Future decision |
-| Deviation Threshold ±ms | Covered by Fixture Timing Tolerance; no separate threshold | Do not add as a new field |
+| Deviation Threshold ±ms | Not an acceptance threshold; the Schedule Association Window is association-only | Do not add as a new field |
 | Timing Units selector | No contract | Future decision |
 | Auto-save Capture Runs | No contract | Future decision |
 | Detailed Telemetry / Include HID driver events | No source or contract | Future decision |
