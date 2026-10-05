@@ -236,6 +236,22 @@ QPushButton#Secondary:disabled, QToolButton#Secondary:disabled {
     background: #f2f2f7;
     border-color: #d2d2d7;
 }
+QPushButton#Segment {
+    background: #ffffff;
+    border: 1px solid #c7c7cc;
+    min-height: 20px;
+    padding: 8px 14px;
+    font-weight: 600;
+}
+QPushButton#Segment:hover {
+    background: #f2f2f7;
+    border-color: #8e8e93;
+}
+QPushButton#Segment:checked {
+    background: #007aff;
+    color: #ffffff;
+    border: none;
+}
 QToolButton#Secondary {
     border-radius: 12px;
     font-weight: 600;
@@ -597,6 +613,23 @@ QPushButton#Secondary:disabled, QToolButton#Secondary:disabled {
     color: #636366;
     background: #1c1c1e;
     border-color: #3a3a3c;
+}
+QPushButton#Segment {
+    background: #2c2c2e;
+    border: 1px solid #636366;
+    min-height: 20px;
+    padding: 8px 14px;
+    font-weight: 600;
+    color: #f5f5f7;
+}
+QPushButton#Segment:hover {
+    background: #3a3a3c;
+    border-color: #8e8e93;
+}
+QPushButton#Segment:checked {
+    background: #0a84ff;
+    color: #ffffff;
+    border: none;
 }
 QToolButton#Secondary {
     border-radius: 12px;

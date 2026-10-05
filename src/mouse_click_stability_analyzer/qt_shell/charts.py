@@ -4,11 +4,20 @@ from __future__ import annotations
 import math
 from typing import Callable
 
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QToolTip, QWidget
 
 from .styles import ChartPalette, LIGHT_PALETTE
+
+FIT_MARGIN_FRAC = 0.08
+SCATTER_X_MIN_SPAN_MS = 8.0
+SCATTER_Y_MIN_SPAN_MS = 8.0
+INTERVAL_Y_MIN_SPAN_MS = 8.0
+INTERVAL_X_MIN_SPAN_MS = 500.0
+ZOOM_IN_FACTOR = 0.8
+ZOOM_OUT_FACTOR = 1.25
+HOVER_HIT_PX = 12.0
 
 
 def nice_ticks(vmin: float, vmax: float, target: int = 5) -> list[float]:
@@ -66,6 +75,71 @@ def _fmt_tick(v: float) -> str:
     return f"{v:.2f}"
 
 
+def _finite_values(values) -> list[float]:
+    out: list[float] = []
+    for raw in values or ():
+        if raw is None:
+            continue
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(v):
+            out.append(v)
+    return out
+
+
+def fitted_range(
+    values,
+    *,
+    extra=None,
+    margin_frac: float = FIT_MARGIN_FRAC,
+    min_span: float = SCATTER_X_MIN_SPAN_MS,
+) -> tuple[float, float]:
+    """Deterministic visual range. Presentation-only; never mutates observations."""
+    nums = _finite_values(list(values or []) + list(extra or []))
+    span_floor = float(min_span) if math.isfinite(float(min_span)) and float(min_span) > 0 else 1.0
+    if not nums:
+        return 0.0, span_floor
+    lo = min(nums)
+    hi = max(nums)
+    span = hi - lo
+    pad = max(span * float(margin_frac), span_floor * 0.1)
+    lo -= pad
+    hi += pad
+    if (not math.isfinite(lo)) or (not math.isfinite(hi)) or hi <= lo:
+        mid = nums[0]
+        return mid - span_floor / 2.0, mid + span_floor / 2.0
+    if hi - lo < span_floor:
+        mid = (lo + hi) / 2.0
+        lo = mid - span_floor / 2.0
+        hi = mid + span_floor / 2.0
+    if hi <= lo:
+        return lo, lo + span_floor
+    return lo, hi
+
+
+def _association_anchors(center: float | None, half_width: float | None) -> list[float]:
+    if center is None:
+        return []
+    try:
+        ref = float(center)
+    except (TypeError, ValueError):
+        return []
+    if not math.isfinite(ref):
+        return []
+    anchors = [ref]
+    if half_width is None:
+        return anchors
+    try:
+        half = abs(float(half_width))
+    except (TypeError, ValueError):
+        return anchors
+    if math.isfinite(half):
+        anchors.extend((ref - half, ref + half))
+    return anchors
+
+
 class _ChartBase(QWidget):
     TITLE_H = 22
     LEGEND_H = 28
@@ -73,11 +147,19 @@ class _ChartBase(QWidget):
     LEFT = 58
     RIGHT = 16
     BOTTOM = 52
+    SUBTITLE_H = 16
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.palette: ChartPalette = LIGHT_PALETTE
         self.labels: dict[str, str] = {}
+        self.subtitle = ""
+        self.data_aware_fit = False
+        self.factual_guides = False
+        self.target_beat_ms: float | None = None
+        self.association_half_width_ms: float | None = None
+        self.zoom_locked = False
+        self._user_view: tuple[float, float, float, float] | None = None
         self.setMinimumHeight(200)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
@@ -87,14 +169,23 @@ class _ChartBase(QWidget):
             self.labels = labels
         self.update()
 
+    def set_data_aware_fit(self, enabled: bool) -> None:
+        self.data_aware_fit = bool(enabled)
+        self.factual_guides = bool(enabled)
+        self.setMouseTracking(bool(enabled))
+        self.update()
+
     def _label(self, key: str, fallback: str) -> str:
         return self.labels.get(key) or fallback
 
+    def _title_block_h(self) -> float:
+        return self.TITLE_H + (self.SUBTITLE_H if self.subtitle else 0)
+
     def _plot_top(self) -> float:
-        return self.TOP_PAD + self.TITLE_H + self.LEGEND_H + 10
+        return self.TOP_PAD + self._title_block_h() + self.LEGEND_H + 10
 
     def _legend_y(self) -> int:
-        return int(self.TOP_PAD + self.TITLE_H + 4)
+        return int(self.TOP_PAD + self._title_block_h() + 4)
 
     def _plot_rect(self) -> QRectF:
         top = self._plot_top()
@@ -104,6 +195,141 @@ class _ChartBase(QWidget):
             max(1, self.width() - self.LEFT - self.RIGHT),
             max(1, self.height() - top - self.BOTTOM),
         )
+
+    def fit_data(self) -> None:
+        self.zoom_locked = False
+        self._user_view = None
+        self.update()
+
+    def reset_view(self) -> None:
+        self.fit_data()
+
+    def zoom_in(self) -> None:
+        self._zoom_by(ZOOM_IN_FACTOR)
+
+    def zoom_out(self) -> None:
+        self._zoom_by(ZOOM_OUT_FACTOR)
+
+    def visible_bounds(self) -> tuple[float, float, float, float] | None:
+        if self.zoom_locked and self._user_view is not None:
+            xmin, xmax, ymin, ymax = self._user_view
+            if xmax > xmin and ymax > ymin and all(math.isfinite(v) for v in self._user_view):
+                return self._user_view
+        return self.autofit_bounds()
+
+    def autofit_bounds(self) -> tuple[float, float, float, float] | None:
+        return None
+
+    def _min_spans(self) -> tuple[float, float]:
+        return SCATTER_X_MIN_SPAN_MS, SCATTER_Y_MIN_SPAN_MS
+
+    def _zoom_by(self, factor: float, cx: float | None = None, cy: float | None = None) -> None:
+        bounds = self.visible_bounds()
+        if bounds is None:
+            return
+        xmin, xmax, ymin, ymax = bounds
+        if cx is None:
+            cx = (xmin + xmax) / 2.0
+        if cy is None:
+            cy = (ymin + ymax) / 2.0
+        min_x, min_y = self._min_spans()
+        xspan = max((xmax - xmin) * factor, min_x)
+        yspan = max((ymax - ymin) * factor, min_y)
+        if not (math.isfinite(xspan) and math.isfinite(yspan) and xspan > 0 and yspan > 0):
+            return
+        self._user_view = (cx - xspan / 2.0, cx + xspan / 2.0, cy - yspan / 2.0, cy + yspan / 2.0)
+        self.zoom_locked = True
+        self.update()
+
+    def wheelEvent(self, event):
+        if not self.data_aware_fit:
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+        factor = ZOOM_IN_FACTOR if delta > 0 else ZOOM_OUT_FACTOR
+        bounds = self.visible_bounds()
+        plot = self._plot_rect()
+        cx = cy = None
+        if bounds is not None and plot.width() > 0 and plot.height() > 0:
+            pos = event.position() if hasattr(event, "position") else QPointF(event.pos())
+            if plot.contains(pos):
+                xmin, xmax, ymin, ymax = bounds
+                cx = xmin + (pos.x() - plot.left()) / plot.width() * (xmax - xmin)
+                cy = ymin + (plot.bottom() - pos.y()) / plot.height() * (ymax - ymin)
+        self._zoom_by(factor, cx=cx, cy=cy)
+        event.accept()
+
+    def association_window(self) -> tuple[float, float] | None:
+        if self.target_beat_ms is None or self.association_half_width_ms is None:
+            return None
+        try:
+            center = float(self.target_beat_ms)
+            half = abs(float(self.association_half_width_ms))
+        except (TypeError, ValueError):
+            return None
+        if not (math.isfinite(center) and math.isfinite(half)):
+            return None
+        return (center - half, center + half)
+
+    def _guide_legend_items(self) -> list[tuple[str, str]]:
+        items: list[tuple[str, str]] = []
+        pal = self.palette
+        if not self.target_beat_ms:
+            return items
+        if self.factual_guides:
+            items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+            if self.association_half_width_ms is not None:
+                items.append((pal.target_line, self._label("legend_association_window", "Association window")))
+        else:
+            items.append((pal.target_line, self._label("legend_target", "Target beat")))
+        return items
+
+    def _draw_title(self, p: QPainter) -> None:
+        pal = self.palette
+        p.setPen(QColor(pal.text))
+        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        p.drawText(12, 16, self.title if hasattr(self, "title") else "")
+        if self.subtitle:
+            p.setPen(QColor(pal.muted))
+            p.setFont(QFont("Segoe UI", 8))
+            p.drawText(12, 32, self.subtitle)
+
+    def _draw_vertical_guides(self, p: QPainter, plot: QRectF, map_x: Callable[[float], float]) -> None:
+        if not self.target_beat_ms:
+            return
+        pal = self.palette
+        window = self.association_window() if self.factual_guides else None
+        if window is not None:
+            x0 = map_x(window[0])
+            x1 = map_x(window[1])
+            left, right = min(x0, x1), max(x0, x1)
+            width = max(1.0, right - left)
+            fill = QColor(pal.target_line)
+            fill.setAlpha(32)
+            p.fillRect(QRectF(left, plot.top(), width, plot.height()), fill)
+        tx = map_x(float(self.target_beat_ms))
+        p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
+        p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
+
+    def _draw_horizontal_guides(self, p: QPainter, plot: QRectF, map_y: Callable[[float], float]) -> None:
+        if not self.target_beat_ms:
+            return
+        pal = self.palette
+        window = self.association_window() if self.factual_guides else None
+        if window is not None:
+            y0 = map_y(window[0])
+            y1 = map_y(window[1])
+            top, bottom = min(y0, y1), max(y0, y1)
+            height = max(1.0, bottom - top)
+            fill = QColor(pal.target_line)
+            fill.setAlpha(32)
+            p.fillRect(QRectF(plot.left(), top, plot.width(), height), fill)
+        ty = map_y(float(self.target_beat_ms))
+        p.setPen(QPen(QColor(pal.target_line), 1.2, Qt.PenStyle.DashLine))
+        p.drawLine(QPointF(plot.left(), ty), QPointF(plot.right(), ty))
 
     def _draw_axes(
         self,
@@ -215,25 +441,28 @@ class ScatterChart(_ChartBase):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.points: list[tuple[float, float, str]] = []
-        self.overlay_points: list[tuple[float, float, str]] = []
+        self.points: list[tuple] = []
+        self.overlay_points: list[tuple] = []
         self.title = "Hold vs Interval"
-        self.target_beat_ms: float | None = None
         self.setMinimumHeight(260)
 
     def set_points(
         self,
-        points: list[tuple[float, float, str]],
+        points: list[tuple],
         *,
         title: str = "",
-        overlay: list[tuple[float, float, str]] | None = None,
+        subtitle: str = "",
+        overlay: list[tuple] | None = None,
         target_beat_ms: float | None = None,
+        association_half_width_ms: float | None = None,
     ):
         self.points = list(points or [])
         self.overlay_points = list(overlay or [])
         if title:
             self.title = title
+        self.subtitle = subtitle or ""
         self.target_beat_ms = target_beat_ms
+        self.association_half_width_ms = association_half_width_ms
         self.update()
 
     def _class_color(self, cls: str) -> str:
@@ -248,16 +477,114 @@ class ScatterChart(_ChartBase):
         }
         return mapping.get(cls, pal.on_cadence)
 
+    def _xy_values(self) -> tuple[list[float], list[float]]:
+        xs = _finite_values([row[0] for row in self.points] + [row[0] for row in self.overlay_points])
+        ys = _finite_values([row[1] for row in self.points] + [row[1] for row in self.overlay_points])
+        return xs, ys
+
+    def autofit_bounds(self) -> tuple[float, float, float, float] | None:
+        xs, ys = self._xy_values()
+        extras = _association_anchors(self.target_beat_ms, self.association_half_width_ms)
+        if not xs and not extras:
+            return fitted_range([], min_span=SCATTER_X_MIN_SPAN_MS) + fitted_range([], min_span=SCATTER_Y_MIN_SPAN_MS)
+        if self.data_aware_fit:
+            xmin, xmax = fitted_range(xs, extra=extras, min_span=SCATTER_X_MIN_SPAN_MS)
+            ymin, ymax = fitted_range(ys, min_span=SCATTER_Y_MIN_SPAN_MS)
+            return xmin, xmax, ymin, ymax
+        if not xs:
+            return None
+        xmax = max(50.0, max(xs) * 1.08)
+        ymax = max(15.0, max(ys) * 1.15 if ys else 15.0)
+        if self.target_beat_ms:
+            xmax = max(xmax, float(self.target_beat_ms) * 1.35)
+        return 0.0, xmax, 0.0, ymax
+
+    def _maps(self):
+        bounds = self.visible_bounds()
+        plot = self._plot_rect()
+        if bounds is None:
+            return None
+        xmin, xmax, ymin, ymax = bounds
+        dx = xmax - xmin
+        dy = ymax - ymin
+        if dx <= 0 or dy <= 0 or not all(math.isfinite(v) for v in bounds):
+            return None
+        if plot.width() <= 0 or plot.height() <= 0:
+            return None
+
+        def map_x(v: float) -> float:
+            return plot.left() + (v - xmin) / dx * plot.width()
+
+        def map_y(v: float) -> float:
+            return plot.bottom() - (v - ymin) / dy * plot.height()
+
+        return plot, bounds, map_x, map_y
+
+    def nearest_observation(self, pos: QPoint, max_px: float = HOVER_HIT_PX) -> dict | None:
+        mapped = self._maps()
+        if mapped is None or not self.points:
+            return None
+        plot, _bounds, map_x, map_y = mapped
+        px, py = float(pos.x()), float(pos.y())
+        if not plot.contains(QPointF(px, py)):
+            return None
+        best = None
+        best_d = float(max_px)
+        for row in self.points[-2500:]:
+            x, y = float(row[0]), float(row[1])
+            dx = map_x(x) - px
+            dy = map_y(y) - py
+            dist = math.hypot(dx, dy)
+            if dist <= best_d:
+                best_d = dist
+                index = row[3] if len(row) > 3 else None
+                best = {
+                    "interval_ms": x,
+                    "hold_ms": y,
+                    "click_class": str(row[2]) if len(row) > 2 else "",
+                    "index": index,
+                }
+        return best
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        if not self.data_aware_fit:
+            return
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        info = self.nearest_observation(pos)
+        if info is None:
+            QToolTip.hideText()
+            return
+        lines = []
+        index = info.get("index")
+        if index not in (None, ""):
+            lines.append(self._label("hover_click", "Click #{n}").replace("{n}", str(index)))
+        lines.append(
+            self._label("hover_interval", "Interval {value} ms").replace("{value}", f"{info['interval_ms']:.2f}")
+        )
+        lines.append(
+            self._label("hover_hold", "Hold {value} ms").replace("{value}", f"{info['hold_ms']:.2f}")
+        )
+        if self.factual_guides and self.target_beat_ms is not None:
+            delta = info["interval_ms"] - float(self.target_beat_ms)
+            lines.append(
+                self._label("hover_interval_delta", "Interval Δ vs reference {value} ms").replace(
+                    "{value}", f"{delta:+.2f}"
+                )
+            )
+        QToolTip.showText(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else self.mapToGlobal(pos), "\n".join(lines), self)
+
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         pal = self.palette
         p.fillRect(self.rect(), QColor(pal.bg))
         plot = self._plot_rect()
-
-        p.setPen(QColor(pal.text))
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-        p.drawText(12, 16, self.title)
+        self._draw_title(p)
 
         legend = [
             (pal.on_cadence, self._label("legend_on_cadence", "On cadence")),
@@ -267,8 +594,7 @@ class ScatterChart(_ChartBase):
         ]
         if self.overlay_points:
             legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
-        if self.target_beat_ms:
-            legend.append((pal.target_line, self._label("legend_target", "Target beat")))
+        legend.extend(self._guide_legend_items())
         self._draw_legend_box(p, plot, legend)
 
         if not self.points and not self.overlay_points:
@@ -277,18 +603,11 @@ class ScatterChart(_ChartBase):
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("waiting_data", "Waiting for click data"))
             return
 
-        all_x = [a[0] for a in self.points] + [a[0] for a in self.overlay_points]
-        all_y = [a[1] for a in self.points] + [a[1] for a in self.overlay_points]
-        xmin, xmax = 0.0, max(50.0, max(all_x) * 1.08)
-        ymin, ymax = 0.0, max(15.0, max(all_y) * 1.15)
-        if self.target_beat_ms:
-            xmax = max(xmax, self.target_beat_ms * 1.35)
-
-        def map_x(v: float) -> float:
-            return plot.left() + (v - xmin) / (xmax - xmin) * plot.width()
-
-        def map_y(v: float) -> float:
-            return plot.bottom() - (v - ymin) / (ymax - ymin) * plot.height()
+        mapped = self._maps()
+        if mapped is None:
+            return
+        plot, bounds, map_x, map_y = mapped
+        xmin, xmax, ymin, ymax = bounds
 
         self._draw_axes(
             p,
@@ -300,23 +619,25 @@ class ScatterChart(_ChartBase):
             map_x=map_x,
             map_y=map_y,
         )
+        self._draw_vertical_guides(p, plot, map_x)
 
-        if self.target_beat_ms:
-            tx = map_x(self.target_beat_ms)
-            p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
-            p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
-
-        for x, y, _cls in self.overlay_points[-2500:]:
+        p.save()
+        p.setClipRect(plot)
+        for row in self.overlay_points[-2500:]:
+            x, y = float(row[0]), float(row[1])
             c = QColor(pal.overlay)
             c.setAlpha(90)
             p.setBrush(QBrush(c))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(map_x(x), map_y(y)), 2.8, 2.8)
 
-        for x, y, cls in self.points[-2500:]:
+        for row in self.points[-2500:]:
+            x, y = float(row[0]), float(row[1])
+            cls = str(row[2]) if len(row) > 2 else "ON_CADENCE"
             p.setBrush(QBrush(QColor(self._class_color(cls))))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(map_x(x), map_y(y)), 3.4, 3.4)
+        p.restore()
 
 
 class IntervalChart(_ChartBase):
@@ -327,7 +648,6 @@ class IntervalChart(_ChartBase):
         self.series: list[tuple[float, float]] = []
         self.overlay_series: list[tuple[float, float]] = []
         self.title = "Interval over time"
-        self.target_beat_ms: float | None = None
         self.setMinimumHeight(220)
 
     def set_series(
@@ -337,13 +657,61 @@ class IntervalChart(_ChartBase):
         title: str = "",
         overlay: list[tuple[float, float]] | None = None,
         target_beat_ms: float | None = None,
+        association_half_width_ms: float | None = None,
     ):
         self.series = list(series or [])
         self.overlay_series = list(overlay or [])
         if title:
             self.title = title
         self.target_beat_ms = target_beat_ms
+        self.association_half_width_ms = association_half_width_ms
         self.update()
+
+    def _min_spans(self) -> tuple[float, float]:
+        return INTERVAL_X_MIN_SPAN_MS, INTERVAL_Y_MIN_SPAN_MS
+
+    def autofit_bounds(self) -> tuple[float, float, float, float] | None:
+        all_pts = list(self.series) + list(self.overlay_series)
+        xs = _finite_values([a[0] for a in all_pts])
+        ys = _finite_values([a[1] for a in all_pts])
+        extras = _association_anchors(self.target_beat_ms, self.association_half_width_ms)
+        if self.data_aware_fit:
+            xmin, xmax = fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS)
+            ymin, ymax = fitted_range(ys, extra=extras, min_span=INTERVAL_Y_MIN_SPAN_MS)
+            return xmin, xmax, ymin, ymax
+        if len(self.series) < 2 and len(self.overlay_series) < 2:
+            return None
+        xmin_ms, xmax_ms = min(xs), max(xs)
+        if xmax_ms <= xmin_ms:
+            xmax_ms = xmin_ms + 1
+        ymin, ymax = 0.0, max(40.0, max(ys) * 1.12)
+        if self.target_beat_ms:
+            ymax = max(ymax, float(self.target_beat_ms) * 1.25)
+        return xmin_ms, xmax_ms, ymin, ymax
+
+    def _maps(self):
+        bounds = self.visible_bounds()
+        plot = self._plot_rect()
+        if bounds is None:
+            return None
+        xmin, xmax, ymin, ymax = bounds
+        dx = xmax - xmin
+        dy = ymax - ymin
+        if dx <= 0 or dy <= 0 or not all(math.isfinite(v) for v in bounds):
+            return None
+        if plot.width() <= 0 or plot.height() <= 0:
+            return None
+
+        def map_x_ms(v_ms: float) -> float:
+            return plot.left() + (v_ms - xmin) / dx * plot.width()
+
+        def map_x_s(v_s: float) -> float:
+            return map_x_ms(v_s * 1000.0)
+
+        def map_y(v: float) -> float:
+            return plot.bottom() - (v - ymin) / dy * plot.height()
+
+        return plot, bounds, map_x_ms, map_x_s, map_y
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -351,43 +719,34 @@ class IntervalChart(_ChartBase):
         pal = self.palette
         p.fillRect(self.rect(), QColor(pal.bg))
         plot = self._plot_rect()
+        self._draw_title(p)
 
-        p.setPen(QColor(pal.text))
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-        p.drawText(12, 16, self.title)
-
-        legend = [(pal.interval_line, self._label("chart_interval", "Interval over time"))]
+        legend_label = (
+            self._label("chart_interval_trend", "Interval Trend")
+            if self.factual_guides
+            else self._label("chart_interval", "Interval over time")
+        )
+        legend = [(pal.interval_line, legend_label)]
         if self.overlay_series:
             legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
-        if self.target_beat_ms:
-            legend.append((pal.target_line, self._label("legend_target", "Target beat")))
+        legend.extend(self._guide_legend_items())
         self._draw_legend_box(p, plot, legend)
 
-        if len(self.series) < 2 and len(self.overlay_series) < 2:
+        empty = not self.series and not self.overlay_series
+        legacy_waiting = (not self.data_aware_fit) and len(self.series) < 2 and len(self.overlay_series) < 2
+        if empty or legacy_waiting:
             p.setPen(QColor(pal.muted))
             p.setFont(QFont("Segoe UI", 11))
-            p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("chart_interval", "Interval over time"))
+            wait = self._label("waiting_data", "Waiting for click data") if self.data_aware_fit else legend_label
+            p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), wait)
             return
 
-        all_pts = list(self.series) + list(self.overlay_series)
-        xs = [a[0] for a in all_pts]
-        ys = [a[1] for a in all_pts]
-        xmin_ms, xmax_ms = min(xs), max(xs)
-        if xmax_ms <= xmin_ms:
-            xmax_ms = xmin_ms + 1
+        mapped = self._maps()
+        if mapped is None:
+            return
+        plot, bounds, map_x_ms, map_x_s, map_y = mapped
+        xmin_ms, xmax_ms, ymin, ymax = bounds
         xmin_s, xmax_s = xmin_ms / 1000.0, xmax_ms / 1000.0
-        ymin, ymax = 0.0, max(40.0, max(ys) * 1.12)
-        if self.target_beat_ms:
-            ymax = max(ymax, self.target_beat_ms * 1.25)
-
-        def map_x_ms(v_ms: float) -> float:
-            return plot.left() + (v_ms - xmin_ms) / (xmax_ms - xmin_ms) * plot.width()
-
-        def map_x_s(v_s: float) -> float:
-            return map_x_ms(v_s * 1000.0)
-
-        def map_y(v: float) -> float:
-            return plot.bottom() - (v - ymin) / (ymax - ymin) * plot.height()
 
         self._draw_axes(
             p,
@@ -399,12 +758,10 @@ class IntervalChart(_ChartBase):
             map_x=map_x_s,
             map_y=map_y,
         )
+        self._draw_horizontal_guides(p, plot, map_y)
 
-        if self.target_beat_ms:
-            ty = map_y(self.target_beat_ms)
-            p.setPen(QPen(QColor(pal.target_line), 1.2, Qt.PenStyle.DashLine))
-            p.drawLine(QPointF(plot.left(), ty), QPointF(plot.right(), ty))
-
+        p.save()
+        p.setClipRect(plot)
         if len(self.overlay_series) >= 2:
             p.setPen(QPen(QColor(pal.overlay), 1.5, Qt.PenStyle.DashLine))
             prev = None
@@ -413,6 +770,13 @@ class IntervalChart(_ChartBase):
                 if prev is not None:
                     p.drawLine(prev, pt)
                 prev = pt
+        elif len(self.overlay_series) == 1:
+            x, y = self.overlay_series[0]
+            c = QColor(pal.overlay)
+            c.setAlpha(90)
+            p.setBrush(QBrush(c))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(map_x_ms(x), map_y(y)), 2.8, 2.8)
 
         if len(self.series) >= 2:
             path = QPainterPath()
@@ -431,6 +795,12 @@ class IntervalChart(_ChartBase):
             p.fillPath(fill, QColor(pal.interval_fill))
             p.setPen(QPen(QColor(pal.interval_line), 2))
             p.drawPath(path)
+        elif len(self.series) == 1:
+            x, y = self.series[0]
+            p.setBrush(QBrush(QColor(pal.interval_line)))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(map_x_ms(x), map_y(y)), 3.4, 3.4)
+        p.restore()
 
 
 class HistogramChart(_ChartBase):

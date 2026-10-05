@@ -907,9 +907,10 @@ class MainWindow(QMainWindow):
         keys = (
             "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s",
             "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
-            "legend_overlay", "legend_target", "chart_interval",
-            "interval_distribution", "legend_configured_reference", "clicks",
-            "hold_vs_interval",
+            "legend_overlay", "legend_target", "chart_interval", "chart_interval_trend",
+            "interval_distribution", "legend_configured_reference",
+            "legend_association_window", "clicks", "hold_vs_interval",
+            "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
         )
         return {k: self._tr(k) for k in keys}
 
@@ -1384,6 +1385,54 @@ class MainWindow(QMainWindow):
         live_l.addWidget(self.capture_completed_note)
         inner_l.addWidget(live)
 
+        viz = self._card()
+        viz.setObjectName("CaptureVizToolbar")
+        viz.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        viz_l = QHBoxLayout(viz)
+        viz_l.setContentsMargins(8, 4, 8, 4)
+        viz_l.setSpacing(6)
+        self.btn_view_stability = QPushButton("Stability Map")
+        self.btn_view_stability.setObjectName("Segment")
+        self.btn_view_stability.setCheckable(True)
+        self.btn_view_stability.setChecked(True)
+        self.btn_view_interval = QPushButton("Interval Trend")
+        self.btn_view_interval.setObjectName("Segment")
+        self.btn_view_interval.setCheckable(True)
+        self.btn_chart_fit = QPushButton("Fit Data")
+        self.btn_chart_fit.setObjectName("Secondary")
+        self.btn_chart_zoom_in = QPushButton("Zoom In")
+        self.btn_chart_zoom_in.setObjectName("Secondary")
+        self.btn_chart_zoom_out = QPushButton("Zoom Out")
+        self.btn_chart_zoom_out.setObjectName("Secondary")
+        self.btn_chart_reset = QPushButton("Reset View")
+        self.btn_chart_reset.setObjectName("Secondary")
+        for btn in (
+            self.btn_view_stability, self.btn_view_interval,
+            self.btn_chart_fit, self.btn_chart_zoom_in,
+            self.btn_chart_zoom_out, self.btn_chart_reset,
+        ):
+            btn.setMinimumHeight(28)
+            btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.capture_view_group = QButtonGroup(self)
+        self.capture_view_group.setExclusive(True)
+        self.capture_view_group.addButton(self.btn_view_stability, 0)
+        self.capture_view_group.addButton(self.btn_view_interval, 1)
+        self.capture_view_group.idClicked.connect(self._on_capture_view_id)
+        self.btn_chart_fit.clicked.connect(self._on_capture_fit_data)
+        self.btn_chart_zoom_in.clicked.connect(self._on_capture_zoom_in)
+        self.btn_chart_zoom_out.clicked.connect(self._on_capture_zoom_out)
+        self.btn_chart_reset.clicked.connect(self._on_capture_reset_view)
+        viz_l.addWidget(self.btn_view_stability)
+        viz_l.addWidget(self.btn_view_interval)
+        viz_l.addStretch(1)
+        viz_l.addWidget(self.btn_chart_fit)
+        viz_l.addWidget(self.btn_chart_zoom_in)
+        viz_l.addWidget(self.btn_chart_zoom_out)
+        viz_l.addWidget(self.btn_chart_reset)
+        self.capture_viz_bar = viz
+        self.capture_viz_toolbar = viz
+        inner_l.addWidget(viz)
+
         self.test_area = QFrame()
         self.test_area.setObjectName("TestArea")
         self.test_area.setProperty("active", False)
@@ -1397,12 +1446,22 @@ class MainWindow(QMainWindow):
         ta_l.addWidget(self.hint)
         self.scatter = ScatterChart()
         self.interval_chart = IntervalChart()
-        self.scatter.setMinimumHeight(160)
-        self.interval_chart.setMinimumHeight(140)
+        self.scatter.set_data_aware_fit(True)
+        self.interval_chart.set_data_aware_fit(True)
+        self.scatter.title = self._tr("chart_stability_map")
+        self.scatter.subtitle = self._tr("chart_stability_map_subtitle")
+        self.interval_chart.title = self._tr("chart_interval_trend")
+        self.scatter.setMinimumHeight(220)
+        self.interval_chart.setMinimumHeight(220)
         self.scatter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.interval_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        ta_l.addWidget(self.scatter, 3)
-        ta_l.addWidget(self.interval_chart, 2)
+        self.capture_chart_stack = QStackedWidget()
+        self.capture_chart_stack.setObjectName("CaptureChartStack")
+        self.capture_chart_stack.addWidget(self.scatter)
+        self.capture_chart_stack.addWidget(self.interval_chart)
+        self._capture_view = "stability"
+        self.capture_chart_stack.setCurrentIndex(0)
+        ta_l.addWidget(self.capture_chart_stack, 1)
 
         self.review_text = QTextEdit()
         self.review_text.setReadOnly(True)
@@ -2346,6 +2405,12 @@ class MainWindow(QMainWindow):
         self.btn_capture_goto_results.setText(self._tr("nav_results"))
         self.btn_capture_edit_setup.setText(self._tr("edit_setup_new_run"))
         self.capture_completed_note.setText(self._tr("capture_run_completed"))
+        self.btn_view_stability.setText(self._tr("viz_stability_map"))
+        self.btn_view_interval.setText(self._tr("viz_interval_trend"))
+        self.btn_chart_fit.setText(self._tr("viz_fit_data"))
+        self.btn_chart_zoom_in.setText(self._tr("viz_zoom_in"))
+        self.btn_chart_zoom_out.setText(self._tr("viz_zoom_out"))
+        self.btn_chart_reset.setText(self._tr("viz_reset_view"))
         self.preferences_note.setText(self._tr("preferences_more_note"))
         self.radio_manual.setText(self._tr("manual"))
         self.radio_fixture.setText(self._tr("fixture"))
@@ -3169,10 +3234,71 @@ class MainWindow(QMainWindow):
             hold = e.get("hold_ms")
             elapsed = e.get("press_elapsed_ms")
             if iv is not None and hold is not None:
-                pts.append((float(iv), float(hold), str(e.get("click_class") or "ON_CADENCE")))
+                pts.append((
+                    float(iv),
+                    float(hold),
+                    str(e.get("click_class") or "ON_CADENCE"),
+                    e.get("click_index") or e.get("index"),
+                ))
             if iv is not None and elapsed is not None:
                 series.append((float(elapsed), float(iv)))
         return pts, series
+
+    def _fixture_association_half_width_ms(self, settings: dict[str, Any] | None) -> float | None:
+        if not settings:
+            return None
+        raw = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
+        try:
+            if raw is None:
+                return None
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value):
+            return None
+        return abs(value)
+
+    def _on_capture_view_id(self, index: int) -> None:
+        self._set_capture_view("stability" if index == 0 else "interval")
+
+    def _set_capture_view(self, name: str) -> None:
+        if name not in ("stability", "interval"):
+            name = "stability"
+        self._capture_view = name
+        if getattr(self, "capture_chart_stack", None) is not None:
+            self.capture_chart_stack.setCurrentIndex(0 if name == "stability" else 1)
+        if getattr(self, "btn_view_stability", None) is None:
+            return
+        self.btn_view_stability.blockSignals(True)
+        self.btn_view_interval.blockSignals(True)
+        self.btn_view_stability.setChecked(name == "stability")
+        self.btn_view_interval.setChecked(name == "interval")
+        self.btn_view_stability.blockSignals(False)
+        self.btn_view_interval.blockSignals(False)
+
+    def _active_capture_chart(self):
+        if getattr(self, "_capture_view", "stability") == "interval":
+            return self.interval_chart
+        return self.scatter
+
+    def _on_capture_fit_data(self) -> None:
+        self._active_capture_chart().fit_data()
+
+    def _on_capture_zoom_in(self) -> None:
+        self._active_capture_chart().zoom_in()
+
+    def _on_capture_zoom_out(self) -> None:
+        self._active_capture_chart().zoom_out()
+
+    def _on_capture_reset_view(self) -> None:
+        self._active_capture_chart().reset_view()
+
+    def _reset_capture_visualization(self) -> None:
+        if getattr(self, "scatter", None) is not None:
+            self.scatter.reset_view()
+        if getattr(self, "interval_chart", None) is not None:
+            self.interval_chart.reset_view()
+        self._set_capture_view("stability")
 
     # ── Capture lifecycle ───────────────────────────────────────────
     def _reset_live_values_for_listen(self):
@@ -3295,6 +3421,7 @@ class MainWindow(QMainWindow):
         self.alert_label.setText("")
         self.scatter.set_points([])
         self.interval_chart.set_series([])
+        self._reset_capture_visualization()
         self._editing_next_run = False
         self.results_next_run_note.hide()
         self.enter_listen()
@@ -3322,6 +3449,7 @@ class MainWindow(QMainWindow):
         self.alert_label.setText("")
         self.scatter.set_points([])
         self.interval_chart.set_series([])
+        self._reset_capture_visualization()
         self.profile_locked_settings = None
         self.profile_locked_target = ""
         self._profile_validation_error_key = None
@@ -3821,6 +3949,7 @@ class MainWindow(QMainWindow):
             self.btn_lock_profile,
             self.btn_arm,
             self.btn_edit_profile,
+            self.capture_viz_toolbar,
             self.btn_capture_new_run,
             self.btn_capture_goto_results,
             self.btn_capture_edit_setup,
@@ -3993,22 +4122,27 @@ class MainWindow(QMainWindow):
         beat = cadence_ms(settings)
         overlay_ann = annotate_events(list(self.overlay_events), settings) if self.overlay_events else []
         ov_pts, ov_series = self._chart_points(overlay_ann)
-
-        if _is_manual_profile(settings):
-            scatter_title = self._tr("chart_scatter_manual")
+        fixture = not _is_manual_profile(settings)
+        reference = beat if fixture else None
+        association = self._fixture_association_half_width_ms(settings) if fixture else None
+        if fixture and beat:
+            subtitle = self._tr("chart_stability_map_subtitle_fixture", beat=f"{beat:.2f}")
         else:
-            scatter_title = self._tr("chart_scatter_fixture", beat=f"{beat:.1f}" if beat else "-")
+            subtitle = self._tr("chart_stability_map_subtitle")
         self.scatter.set_points(
             pts,
-            title=scatter_title,
+            title=self._tr("chart_stability_map"),
+            subtitle=subtitle,
             overlay=ov_pts,
-            target_beat_ms=beat if not _is_manual_profile(settings) else None,
+            target_beat_ms=reference,
+            association_half_width_ms=association,
         )
         self.interval_chart.set_series(
             series,
-            title=self._tr("chart_interval"),
+            title=self._tr("chart_interval_trend"),
             overlay=ov_series,
-            target_beat_ms=beat if not _is_manual_profile(settings) else None,
+            target_beat_ms=reference,
+            association_half_width_ms=association,
         )
 
     def closeEvent(self, event):

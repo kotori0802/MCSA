@@ -133,8 +133,11 @@ class CaptureResponsiveTests(unittest.TestCase):
             self.win.val_dut, self.win.val_setup,
         ])
         self.assertGreaterEqual(self.win.test_area.height(), 280)
+        self.assertTrue(self.win.scatter.isVisible())
+        self.assertFalse(self.win.interval_chart.isVisible())
         self.assertGreaterEqual(self.win.scatter.height(), 140)
-        self.assertGreaterEqual(self.win.interval_chart.height(), 120)
+        self.assertGreaterEqual(self.win.capture_chart_stack.height(), 140)
+        self.assertFalse(self.win.test_area.isAncestorOf(self.win.capture_viz_toolbar))
         self.assertEqual(
             self.win.capture_scroll.horizontalScrollBarPolicy(),
             qt_app.Qt.ScrollBarPolicy.ScrollBarAlwaysOff,

@@ -123,6 +123,21 @@ class CaptureExclusionTests(unittest.TestCase):
         self.assertEqual(len(self.win.events), 1)
         self.assertTrue(self.win.running)
 
+    def test_fixture_click_over_visualization_controls_is_excluded(self):
+        self._setup_fixture()
+        self.win.nav_capture.click()
+        self._start_run()
+        for widget in (
+            self.win.btn_view_stability, self.win.btn_view_interval,
+            self.win.btn_chart_fit, self.win.btn_chart_zoom_in,
+            self.win.btn_chart_zoom_out, self.win.btn_chart_reset,
+            self.win.capture_viz_toolbar,
+        ):
+            with self.subTest(widget=widget.objectName() or widget.text()):
+                self._assert_click_excluded(widget)
+        self.assertEqual(len(self.win.events), 1)
+        self.assertTrue(self.win.running)
+
     def test_fixture_click_outside_test_area_not_over_ui_still_records(self):
         self._setup_fixture()
         self.win.nav_capture.click()

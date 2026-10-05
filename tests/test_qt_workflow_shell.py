@@ -181,6 +181,13 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.test_area,
             self.win.scatter,
             self.win.interval_chart,
+            self.win.capture_viz_toolbar,
+            self.win.btn_view_stability,
+            self.win.btn_view_interval,
+            self.win.btn_chart_fit,
+            self.win.btn_chart_zoom_in,
+            self.win.btn_chart_zoom_out,
+            self.win.btn_chart_reset,
             self.win.review_text,
             self.win.btn_stop,
             self.win.btn_arm,
@@ -191,6 +198,10 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.btn_capture_edit_setup,
         ):
             self.assertTrue(_under(widget, self.win.page_capture), widget)
+        self.assertFalse(_under(self.win.capture_viz_toolbar, self.win.test_area))
+        self.assertFalse(_under(self.win.btn_view_stability, self.win.test_area))
+        self.assertTrue(_under(self.win.scatter, self.win.test_area))
+        self.assertTrue(_under(self.win.interval_chart, self.win.test_area))
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.page_setup))
         self.assertTrue(_under(self.win.btn_new, self.win.page_results))
         self.assertTrue(_under(self.win.btn_generate_excel, self.win.page_results))
