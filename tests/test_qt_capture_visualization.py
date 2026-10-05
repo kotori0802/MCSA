@@ -9,7 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
@@ -20,8 +23,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
 from mouse_click_stability_analyzer.qt_shell.charts import (
+    AXIS_CONTEXT,
+    AXIS_ELAPSED,
     IntervalChart,
+    NAV_CONTEXT_FACTOR,
     ScatterChart,
+    WHEEL_ANGLE_NOTCH,
+    WHEEL_MAX_STEPS_PER_EVENT,
+    ZOOM_IN_FACTOR,
+    axis_navigation_envelope,
     fitted_range,
 )
 
@@ -68,6 +78,43 @@ def _finite_tuple(values) -> bool:
     return all(isinstance(v, (int, float)) and math.isfinite(float(v)) for v in values)
 
 
+def _wheel_event(widget, local, *, angle=0, pixel=0):
+    pos = QPointF(local)
+    global_pos = QPointF(widget.mapToGlobal(pos.toPoint()))
+    return QWheelEvent(
+        pos,
+        global_pos,
+        QPoint(0, int(pixel)),
+        QPoint(0, int(angle)),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+def _send_wheel(widget, local, *, angle=0, pixel=0):
+    event = _wheel_event(widget, local, angle=angle, pixel=pixel)
+    QApplication.sendEvent(widget, event)
+    return event
+
+
+def _plot_anchor_pixel(chart, *, fx=0.25, fy=0.3):
+    plot = chart._plot_rect()
+    return QPointF(
+        plot.left() + plot.width() * fx,
+        plot.top() + plot.height() * fy,
+    )
+
+
+def _drag(chart, start, end):
+    sp = QPoint(int(QPointF(start).x()), int(QPointF(start).y()))
+    ep = QPoint(int(QPointF(end).x()), int(QPointF(end).y()))
+    QTest.mousePress(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, sp)
+    QTest.mouseMove(chart, ep)
+    QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, ep)
+
+
 class FittedRangeTests(unittest.TestCase):
     def test_empty_is_finite(self):
         lo, hi = fitted_range([])
@@ -90,6 +137,26 @@ class FittedRangeTests(unittest.TestCase):
         self.assertGreater(lo, 50.0)
         self.assertLessEqual(lo, 162.0)
         self.assertGreaterEqual(hi, 190.0)
+
+
+class NavigationEnvelopeTests(unittest.TestCase):
+    def test_context_envelope_contains_content_and_stays_near_zero_floor(self):
+        lo, hi = axis_navigation_envelope(150.0, 200.0, min_span=8.0, kind=AXIS_CONTEXT)
+        self.assertLessEqual(lo, 150.0)
+        self.assertGreaterEqual(hi, 200.0)
+        self.assertGreaterEqual(lo, 0.0)
+        self.assertLessEqual(hi - lo, (50.0 * NAV_CONTEXT_FACTOR) + 1e-6)
+
+    def test_elapsed_envelope_uses_duration_not_context_factor(self):
+        lo, hi = axis_navigation_envelope(-4.0, 400.0, min_span=500.0, kind=AXIS_ELAPSED, duration_ms=10000.0)
+        self.assertEqual(lo, -4.0)
+        self.assertGreaterEqual(hi, 10000.0)
+        self.assertLess(hi, 10000.0 * NAV_CONTEXT_FACTOR)
+
+    def test_negative_factual_content_is_not_clipped(self):
+        lo, hi = axis_navigation_envelope(-40.0, 10.0, min_span=8.0, kind=AXIS_CONTEXT)
+        self.assertLessEqual(lo, -40.0)
+        self.assertGreaterEqual(hi, 10.0)
 
 
 class ChartWidgetTests(unittest.TestCase):
@@ -208,9 +275,255 @@ class ChartWidgetTests(unittest.TestCase):
         self.assertEqual(self.scatter.visible_bounds(), auto)
         self.scatter.zoom_in()
         self.scatter.reset_view()
-        self.assertFalse(self.scatter.zoom_locked)
+        self.assertTrue(self.scatter.zoom_locked)
         self.assertEqual(self.scatter.visible_bounds(), auto)
         self.assertEqual(self.scatter.points, source)
+
+    def test_wheel_inside_plot_zooms_and_accepts(self):
+        self.scatter.show()
+        self._qapp.processEvents()
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        before = self.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.scatter)
+        event = _send_wheel(self.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
+        self.assertTrue(event.isAccepted())
+        after = self.scatter.visible_bounds()
+        self.assertTrue(self.scatter.zoom_locked)
+        self.assertAlmostEqual((after[1] - after[0]) / (before[1] - before[0]), ZOOM_IN_FACTOR, places=6)
+        self.assertEqual(self.scatter.points, list(_CLUSTER))
+
+    def test_wheel_outside_plot_does_not_zoom_and_ignores(self):
+        self.scatter.show()
+        self._qapp.processEvents()
+        self.scatter.set_points(_CLUSTER)
+        before = self.scatter.visible_bounds()
+        title = QPointF(self.scatter.width() / 2.0, 8.0)
+        self.assertFalse(self.scatter._plot_rect().contains(title))
+        event = _send_wheel(self.scatter, title, angle=WHEEL_ANGLE_NOTCH)
+        self.assertFalse(event.isAccepted())
+        self.assertEqual(self.scatter.visible_bounds(), before)
+        self.assertFalse(self.scatter.zoom_locked)
+
+    def test_wheel_keeps_cursor_data_under_pixel(self):
+        for chart, load in (
+            (self.scatter, lambda: self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)),
+            (self.interval, lambda: self.interval.set_series(_CLUSTER_SERIES, target_beat_ms=166.67, association_half_width_ms=2.0)),
+        ):
+            with self.subTest(chart=type(chart).__name__):
+                chart.show()
+                self._qapp.processEvents()
+                load()
+                pos = _plot_anchor_pixel(chart, fx=0.22, fy=0.28)
+                data = chart.data_at_pixel(pos)
+                self.assertIsNotNone(data)
+                _send_wheel(chart, pos, angle=WHEEL_ANGLE_NOTCH)
+                mapped = chart.pixel_at_data(*data)
+                self.assertIsNotNone(mapped)
+                self.assertLess(abs(mapped.x() - pos.x()), 1.5)
+                self.assertLess(abs(mapped.y() - pos.y()), 1.5)
+
+    def test_wheel_up_zooms_in_and_down_zooms_out(self):
+        self.scatter.set_points(_CLUSTER)
+        auto = self.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.scatter)
+        _send_wheel(self.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
+        zoomed = self.scatter.visible_bounds()
+        self.assertLess(zoomed[1] - zoomed[0], auto[1] - auto[0])
+        self.assertLess(zoomed[3] - zoomed[2], auto[3] - auto[2])
+        _send_wheel(self.scatter, pos, angle=-WHEEL_ANGLE_NOTCH)
+        out = self.scatter.visible_bounds()
+        self.assertGreater(out[1] - out[0], zoomed[1] - zoomed[0])
+        self.assertGreater(out[3] - out[2], zoomed[3] - zoomed[2])
+
+    def test_button_and_wheel_share_scale_with_different_anchors(self):
+        self.scatter.set_points(_CLUSTER, target_beat_ms=166.67, association_half_width_ms=2.0)
+        auto = self.scatter.visible_bounds()
+        self.scatter.zoom_in()
+        button = self.scatter.visible_bounds()
+        self.assertAlmostEqual((button[1] - button[0]) / (auto[1] - auto[0]), ZOOM_IN_FACTOR, places=6)
+        mid_x = (auto[0] + auto[1]) / 2.0
+        self.assertAlmostEqual((button[0] + button[1]) / 2.0, mid_x, places=6)
+        self.scatter.fit_data()
+        pos = _plot_anchor_pixel(self.scatter, fx=0.2, fy=0.3)
+        _send_wheel(self.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
+        wheeled = self.scatter.visible_bounds()
+        self.assertAlmostEqual((wheeled[1] - wheeled[0]) / (auto[1] - auto[0]), ZOOM_IN_FACTOR, places=6)
+        self.assertGreater(abs(((wheeled[0] + wheeled[1]) / 2.0) - mid_x), 0.2)
+
+    def test_high_resolution_delta_is_one_notch(self):
+        self.scatter.set_points(_CLUSTER)
+        auto = self.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.scatter)
+        for _ in range(7):
+            event = _send_wheel(self.scatter, pos, angle=15)
+            self.assertTrue(event.isAccepted())
+            self.assertEqual(self.scatter.visible_bounds(), auto)
+        _send_wheel(self.scatter, pos, angle=15)
+        one = self.scatter.visible_bounds()
+        self.assertAlmostEqual((one[1] - one[0]) / (auto[1] - auto[0]), ZOOM_IN_FACTOR, places=6)
+        self.scatter.fit_data()
+        huge = _send_wheel(self.scatter, pos, pixel=400)
+        self.assertTrue(huge.isAccepted())
+        burst = self.scatter.visible_bounds()
+        expected = auto[1] - auto[0]
+        for _ in range(WHEEL_MAX_STEPS_PER_EVENT):
+            expected *= ZOOM_IN_FACTOR
+        self.assertAlmostEqual(burst[1] - burst[0], expected, places=4)
+
+    def test_wheel_keeps_partial_notch_remainder(self):
+        self.scatter.set_points(_CLUSTER)
+        auto = self.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.scatter)
+        _send_wheel(self.scatter, pos, angle=50)
+        _send_wheel(self.scatter, pos, angle=50)
+        self.assertEqual(self.scatter.visible_bounds(), auto)
+        self.assertEqual(self.scatter._wheel_accum, 100)
+        _send_wheel(self.scatter, pos, angle=20)
+        after = self.scatter.visible_bounds()
+        self.assertAlmostEqual((after[1] - after[0]) / (auto[1] - auto[0]), ZOOM_IN_FACTOR, places=6)
+        self.assertEqual(self.scatter._wheel_accum, 0)
+
+    def test_multi_notch_wheel_event_is_capped(self):
+        self.scatter.set_points(_CLUSTER)
+        auto = self.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.scatter)
+        _send_wheel(self.scatter, pos, angle=WHEEL_ANGLE_NOTCH * 2)
+        two = self.scatter.visible_bounds()
+        self.assertAlmostEqual(
+            (two[1] - two[0]) / (auto[1] - auto[0]),
+            ZOOM_IN_FACTOR ** 2,
+            places=6,
+        )
+
+    def test_repeated_zoom_stays_finite(self):
+        for chart, load in (
+            (self.scatter, lambda: self.scatter.set_points(_CLUSTER)),
+            (self.interval, lambda: self.interval.set_series(_CLUSTER_SERIES)),
+        ):
+            with self.subTest(chart=type(chart).__name__):
+                load()
+                for _ in range(40):
+                    chart.zoom_in()
+                inn = chart.visible_bounds()
+                self.assertTrue(_finite_tuple(inn))
+                self.assertGreater(inn[1], inn[0])
+                self.assertGreater(inn[3], inn[2])
+                self.assertGreaterEqual(inn[1] - inn[0], chart._min_spans()[0] - 1e-9)
+                for _ in range(40):
+                    chart.zoom_out()
+                out = chart.visible_bounds()
+                env = chart.navigation_envelope()
+                self.assertTrue(_finite_tuple(out))
+                self.assertGreater(out[1], out[0])
+                self.assertGreater(out[3], out[2])
+                self.assertGreaterEqual(out[1] - out[0], inn[1] - inn[0] - 1e-9)
+                self.assertGreater(out[3] - out[2], inn[3] - inn[2])
+                self.assertGreaterEqual(out[0], env[0] - 1e-6)
+                self.assertLessEqual(out[1], env[1] + 1e-6)
+                self.assertGreaterEqual(out[2], env[2] - 1e-6)
+                self.assertLessEqual(out[3], env[3] + 1e-6)
+                self.assertGreater(out[0], -500.0)
+                self.assertLess(out[1], 5000.0)
+
+    def test_repeated_zoom_out_does_not_create_huge_negative_space(self):
+        self.scatter.set_points(_CLUSTER)
+        self.interval.set_series(_CLUSTER_SERIES)
+        for _ in range(40):
+            self.scatter.zoom_out()
+            self.interval.zoom_out()
+        sx = self.scatter.visible_bounds()
+        iy = self.interval.visible_bounds()
+        self.assertGreater(sx[0], -200.0)
+        self.assertGreater(sx[2], -200.0)
+        self.assertGreater(iy[2], -200.0)
+        self.assertLess(sx[1], 2000.0)
+
+    def test_synthetic_negative_observations_remain_visible(self):
+        points = [(-25.0, -12.0, "ON_CADENCE", 1), (10.0, 8.0, "ON_CADENCE", 2)]
+        self.scatter.set_points(points)
+        auto = self.scatter.visible_bounds()
+        self.assertLessEqual(auto[0], -25.0)
+        self.assertLessEqual(auto[2], -12.0)
+        env = self.scatter.navigation_envelope()
+        self.assertLessEqual(env[0], -25.0)
+        self.assertLessEqual(env[2], -12.0)
+        for _ in range(20):
+            self.scatter.zoom_out()
+        out = self.scatter.visible_bounds()
+        self.assertLessEqual(out[0], -25.0)
+        self.assertLessEqual(out[2], -12.0)
+
+    def test_fit_data_frames_latest_reset_restores_home(self):
+        self.scatter.set_points(_CLUSTER)
+        auto = self.scatter.visible_bounds()
+        self.scatter.zoom_in()
+        zoomed = self.scatter.visible_bounds()
+        self.scatter.set_points(_CLUSTER + [(800.0, 400.0, "ON_CADENCE", 9)])
+        self.assertEqual(self.scatter.visible_bounds(), zoomed)
+        self.scatter.reset_view()
+        restored = self.scatter.visible_bounds()
+        self.assertAlmostEqual(restored[0], auto[0], places=4)
+        self.assertLess(restored[1], 400.0)
+        self.scatter.fit_data()
+        fitted = self.scatter.visible_bounds()
+        self.assertGreaterEqual(fitted[1], 800.0)
+        self.assertGreaterEqual(fitted[3], 400.0)
+        self.assertFalse(self.scatter.zoom_locked)
+
+    def test_pan_moves_viewport_and_clamps(self):
+        self.scatter.show()
+        self._qapp.processEvents()
+        self.scatter.set_points(_CLUSTER)
+        self.scatter.set_pan_enabled(True)
+        self.scatter.zoom_in()
+        before = self.scatter.visible_bounds()
+        source = list(self.scatter.points)
+        start = _plot_anchor_pixel(self.scatter, fx=0.5, fy=0.5)
+        end = _plot_anchor_pixel(self.scatter, fx=0.2, fy=0.2)
+        _drag(self.scatter, start, end)
+        after = self.scatter.visible_bounds()
+        self.assertNotEqual(after, before)
+        self.assertEqual(self.scatter.points, source)
+        self.assertTrue(self.scatter.zoom_locked)
+        env = self.scatter.navigation_envelope()
+        start = _plot_anchor_pixel(self.scatter, fx=0.5, fy=0.5)
+        edges = (
+            (3000, 0, 0, env[0]),
+            (-3000, 0, 1, env[1]),
+            (0, -3000, 2, env[2]),
+            (0, 3000, 3, env[3]),
+        )
+        for dx, dy, index, expected in edges:
+            self.scatter.fit_data()
+            self.scatter.zoom_in()
+            _drag(self.scatter, start, QPointF(start.x() + dx, start.y() + dy))
+            panned = self.scatter.visible_bounds()
+            self.assertGreaterEqual(panned[0], env[0] - 1e-6)
+            self.assertLessEqual(panned[1], env[1] + 1e-6)
+            self.assertGreaterEqual(panned[2], env[2] - 1e-6)
+            self.assertLessEqual(panned[3], env[3] + 1e-6)
+            self.assertAlmostEqual(panned[index], expected, places=4)
+        for _ in range(30):
+            self.scatter.zoom_out()
+        at_env = self.scatter.visible_bounds()
+        _drag(self.scatter, start, QPointF(start.x() + 400, start.y() + 400))
+        panned = self.scatter.visible_bounds()
+        self.assertGreaterEqual(panned[0], env[0] - 1e-6)
+        self.assertLessEqual(panned[1], env[1] + 1e-6)
+        self.assertGreaterEqual(panned[2], env[2] - 1e-6)
+        self.assertLessEqual(panned[3], env[3] + 1e-6)
+        self.assertGreaterEqual(at_env[0], env[0] - 1e-6)
+
+    def test_pan_disabled_does_not_move_view(self):
+        self.scatter.show()
+        self._qapp.processEvents()
+        self.scatter.set_points(_CLUSTER)
+        self.scatter.set_pan_enabled(False)
+        self.scatter.zoom_in()
+        before = self.scatter.visible_bounds()
+        start = _plot_anchor_pixel(self.scatter, fx=0.5, fy=0.5)
+        _drag(self.scatter, start, QPointF(start.x() + 80, start.y() + 80))
+        self.assertEqual(self.scatter.visible_bounds(), before)
 
     def test_hover_inspection_is_factual(self):
         self.scatter.show()
@@ -349,18 +662,27 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.win._refresh_metrics(final=False)
         before = self._snapshot()
         scatter_zoom = self.win.scatter.visible_bounds()
+        self.win.scatter.zoom_in()
+        scatter_zoomed = self.win.scatter.visible_bounds()
         self.win.btn_view_interval.click()
         self._settle()
         self.assertEqual(self.win._capture_view, "interval")
         self.assertTrue(self.win.interval_chart.isVisible())
         self.assertFalse(self.win.scatter.isVisible())
         self.assertEqual(self._snapshot(), before)
-        self.assertEqual(self.win.scatter.visible_bounds(), scatter_zoom)
+        self.assertEqual(self.win.scatter.visible_bounds(), scatter_zoomed)
+        self.win.interval_chart.zoom_out()
+        interval_view = self.win.interval_chart.visible_bounds()
         self.win.btn_view_stability.click()
         self._settle()
         self.assertEqual(self.win._capture_view, "stability")
-        self.assertTrue(self.win.scatter.isVisible())
-        self.assertFalse(self.win.interval_chart.isVisible())
+        self.assertEqual(self.win.scatter.visible_bounds(), scatter_zoomed)
+        self.assertNotEqual(scatter_zoomed, scatter_zoom)
+        self.win.btn_view_interval.click()
+        self._settle()
+        self.assertEqual(self.win.interval_chart.visible_bounds(), interval_view)
+        self.win.btn_view_stability.click()
+        self._settle()
         self.assertEqual(self._snapshot(), before)
 
     def test_results_charts_remain_legacy_and_multi_view(self):
@@ -399,6 +721,9 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertEqual(self.win.interval_chart.series, [])
         self.assertFalse(self.win.scatter.zoom_locked)
         self.assertFalse(self.win.interval_chart.zoom_locked)
+        self.assertIsNone(self.win.scatter._nav_home)
+        self.assertIsNone(self.win.interval_chart._nav_home)
+        self.assertFalse(self.win.scatter.pan_enabled)
         self.assertEqual(self.win._lifecycle_state(), "ready")
         self.assertIsNotNone(self.win.profile_locked_settings)
 
@@ -503,6 +828,168 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.win.btn_chart_fit.click()
         self.win.btn_chart_reset.click()
         self.assertEqual(self._snapshot(), before)
+
+    def test_wheel_inside_plot_does_not_scroll_capture(self):
+        self._start_run()
+        self._raw_click()
+        self._raw_click()
+        self.win._refresh_metrics(final=False)
+        self._show_capture()
+        self.win.resize(1024, 640)
+        self.win.setMinimumSize(1, 1)
+        self.win.resize(1024, 640)
+        self._settle()
+        bar = self.win.capture_scroll.verticalScrollBar()
+        if bar.maximum() > 0:
+            bar.setValue(min(40, bar.maximum()))
+            self._settle()
+        before = bar.value()
+        bounds = self.win.scatter.visible_bounds()
+        pos = _plot_anchor_pixel(self.win.scatter)
+        event = _send_wheel(self.win.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
+        self._settle()
+        self.assertTrue(event.isAccepted())
+        self.assertNotEqual(self.win.scatter.visible_bounds(), bounds)
+        self.assertEqual(bar.value(), before)
+
+    def test_wheel_outside_plot_leaves_page_scroll_available(self):
+        self._show_capture()
+        self.win.setMinimumSize(1, 1)
+        self.win.resize(1024, 640)
+        self._settle()
+        bar = self.win.capture_scroll.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        title = QPointF(self.win.scatter.width() / 2.0, 8.0)
+        self.assertFalse(self.win.scatter._plot_rect().contains(title))
+        before_bounds = self.win.scatter.visible_bounds()
+        event = _send_wheel(self.win.scatter, title, angle=-WHEEL_ANGLE_NOTCH)
+        self.assertFalse(event.isAccepted())
+        self.assertEqual(self.win.scatter.visible_bounds(), before_bounds)
+        self.assertTrue(bar.isEnabled())
+        self.assertGreater(bar.maximum(), 0)
+        bar.setValue(min(bar.maximum(), 30))
+        self._settle()
+        self.assertGreater(bar.value(), 0)
+
+    def test_wheel_and_buttons_at_supported_sizes_do_not_move_page_over_plot(self):
+        self._start_run()
+        for _ in range(3):
+            self._raw_click()
+        self.win._refresh_metrics(final=False)
+        for width, height in ((1280, 720), (1600, 900)):
+            with self.subTest(size=(width, height)):
+                self.win.resize(width, height)
+                self._show_capture()
+                bar = self.win.capture_scroll.verticalScrollBar()
+                before = bar.value()
+                for chart in (self.win.scatter, self.win.interval_chart):
+                    self.win.btn_view_stability.click() if chart is self.win.scatter else self.win.btn_view_interval.click()
+                    self._settle()
+                    pos = _plot_anchor_pixel(chart)
+                    event = _send_wheel(chart, pos, angle=WHEEL_ANGLE_NOTCH)
+                    self._settle()
+                    self.assertTrue(event.isAccepted())
+                    self.assertTrue(chart.zoom_locked)
+                    self.assertEqual(bar.value(), before)
+                    self.win.btn_chart_zoom_out.click()
+                    self.win.btn_chart_fit.click()
+                    self.assertFalse(chart.zoom_locked)
+                    self.win.btn_chart_reset.click()
+                    self.assertEqual(bar.value(), before)
+
+    def test_wheel_does_not_become_a_host_click(self):
+        self.win.radio_manual.setChecked(True)
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self._show_capture()
+        before = self._snapshot()
+        pos = _plot_anchor_pixel(self.win.scatter)
+        _send_wheel(self.win.scatter, pos, angle=WHEEL_ANGLE_NOTCH)
+        self._settle()
+        self.assertEqual(self.win.events, before[4])
+        self.assertFalse(self.win.running)
+        self.assertIsNone(self.win.start_time)
+        self.assertEqual(self.win._lifecycle_state(), "armed")
+
+    def test_pan_disabled_until_review(self):
+        self.win.radio_manual.setChecked(True)
+        self._show_capture()
+        self.assertTrue(self.win.lock_profile())
+        self.win._update_controls()
+        self.assertEqual(self.win._lifecycle_state(), "ready")
+        self.assertFalse(self.win.scatter.pan_enabled)
+        self.assertFalse(self.win.interval_chart.pan_enabled)
+        self.assertTrue(self.win.arm_capture())
+        self.win._update_controls()
+        self.assertEqual(self.win._lifecycle_state(), "armed")
+        self.assertFalse(self.win.scatter.pan_enabled)
+        self._start_run()
+        self._raw_click()
+        self.win._refresh_metrics(final=False)
+        self.assertEqual(self.win._lifecycle_state(), "running")
+        self.assertFalse(self.win.scatter.pan_enabled)
+        events_before = copy.deepcopy(self.win.events)
+        start = _plot_anchor_pixel(self.win.scatter)
+        _drag(self.win.scatter, start, QPointF(start.x() + 40, start.y() + 40))
+        self.assertEqual(self.win.events, events_before)
+        self.win.stop_run()
+        self._settle()
+        self.assertTrue(self.win._post_run_input_guard_active)
+        self.assertFalse(self.win.scatter.pan_enabled)
+        self.assertFalse(self.win.interval_chart.pan_enabled)
+        self.win._release_post_run_input_guard()
+        self.win._show_workflow_page("capture")
+        self._settle()
+        self.assertEqual(self.win._lifecycle_state(), "completed")
+        self.assertFalse(self.win._post_run_input_guard_active)
+        self.assertTrue(self.win.scatter.pan_enabled)
+        self.assertTrue(self.win.interval_chart.pan_enabled)
+        self.win.scatter.zoom_in()
+        before = self.win.scatter.visible_bounds()
+        measured = copy.deepcopy(self.win.events)
+        _drag(self.win.scatter, start, QPointF(start.x() + 60, start.y() + 30))
+        self.assertNotEqual(self.win.scatter.visible_bounds(), before)
+        self.assertEqual(self.win.events, measured)
+
+    def test_review_smoke_clamps_and_does_not_scroll_plot_wheel(self):
+        self._start_run()
+        for _ in range(4):
+            self._raw_click()
+        self.win._refresh_metrics(final=False)
+        self.win.stop_run()
+        if self.win._post_run_input_guard_active:
+            self.win._release_post_run_input_guard()
+        for width, height in ((1280, 720), (1600, 900)):
+            with self.subTest(size=(width, height)):
+                self.win.resize(width, height)
+                self._show_capture()
+                bar = self.win.capture_scroll.verticalScrollBar()
+                before_bar = bar.value()
+                for chart in (self.win.scatter, self.win.interval_chart):
+                    if chart is self.win.scatter:
+                        self.win.btn_view_stability.click()
+                    else:
+                        self.win.btn_view_interval.click()
+                    self._settle()
+                    self.assertTrue(chart.pan_enabled)
+                    self.win.btn_chart_fit.click()
+                    for fx, fy in ((0.15, 0.5), (0.85, 0.5), (0.5, 0.2), (0.5, 0.8)):
+                        pos = _plot_anchor_pixel(chart, fx=fx, fy=fy)
+                        event = _send_wheel(chart, pos, angle=WHEEL_ANGLE_NOTCH)
+                        self.assertTrue(event.isAccepted())
+                    self.win.btn_chart_zoom_out.click()
+                    for _ in range(20):
+                        chart.zoom_out()
+                    bounds = chart.visible_bounds()
+                    self.assertGreater(bounds[0], -400.0)
+                    self.assertGreater(bounds[2], -400.0)
+                    start = _plot_anchor_pixel(chart, fx=0.5, fy=0.5)
+                    _drag(chart, start, QPointF(start.x() + 50, start.y() + 40))
+                    self.win.btn_chart_reset.click()
+                    self.assertEqual(bar.value(), before_bar)
+                title = QPointF(self.win.scatter.width() / 2.0, 8.0)
+                outside = _send_wheel(self.win.scatter, title, angle=-WHEEL_ANGLE_NOTCH)
+                self.assertFalse(outside.isAccepted())
 
     def test_i18n_keys_exist(self):
         for lang in SUPPORTED_LANGS:

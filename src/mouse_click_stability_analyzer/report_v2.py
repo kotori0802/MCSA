@@ -16,6 +16,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mouse_click_stability_analyzer.presentation import (
+    matched_observations_used_text,
+    screening_presentation_label,
+    screening_presentation_labels,
+)
+
 REPORT_TITLE = "MCSA — Test Report"
 _CHART_POINT_LIMIT = 1500
 _NONE = "—"
@@ -23,34 +29,18 @@ _NONE = "—"
 # Canonical tags that record a run property rather than a WARN/FAIL finding.
 _NON_FINDING_RESULT_CODES = frozenset({"MANUAL_PROFILE_NO_EXPECTED_COUNT"})
 
-# Report-only names for canonical codes whose names assert an unproven physical
-# DUT event or a fixture/setup cause. Canonical/core tags are unchanged.
-_REPORT_CODE_ALIASES = {
-    "MISS_OR_SLOW": "LONG_INTERVAL",
-    "HIGH_PROBABILITY_DOUBLE_CLICK": "SHORT_INTERVAL",
-    "TRUE_EXTRA_CLICK": "SHORT_INTERVAL",
-    "INCOMPLETE_REBOUND": "SHORT_HOLD",
-    "FIXTURE_ACTUATION_TOO_SHORT": "SHORT_HOLD",
-    "SETUP_ALIGNMENT_SUSPECT": "HOLD_VARIATION",
-    "FIXTURE_HZ_MISMATCH": "REFERENCE_RATE_MISMATCH",
-}
 # A canonical code dropped from the report when the listed code already records the same finding.
 _REPORT_CODE_SUBSUMED_BY = {"MISS_OR_SLOW": "LONG_INTERVAL_SPIKE_WARN"}
-_REPORT_STATE_ALIASES = {
-    "MISS_OR_SLOW": "LONG_INTERVAL",
-    "TRUE_EXTRA_CLICK": "SHORT_INTERVAL",
-    "INCOMPLETE_REBOUND": "SHORT_HOLD",
-}
 
 _RUN_STATUS_FILLS = {"COMPLETE": "DDEBF7", "NO_DATA": "D9D9D9", "INVALID": "FCE4D6"}
-_HE_COUNT_DELTA_LABEL = "Host observations - schedule windows"
+_HE_COUNT_DELTA_LABEL = "Host observations − schedule windows"
 _XLSX_TEXT_LABELS = frozenset({
-    "Run ID", "Validation Profile", "Device", "HID device name", "Operator", "VID", "PID", "bcdDevice",
+    "Run ID", "Run Profile", "Device", "HID device name", "Operator", "VID", "PID", "bcdDevice",
     _HE_COUNT_DELTA_LABEL,
 })
 _LEGEND_HOST = "Host observation"
 _LEGEND_REFERENCE = "Configured reference"
-_LEGEND_TOLERANCE = "Configured tolerance"
+_LEGEND_TOLERANCE = "Association window"
 
 
 def _finite(value: Any) -> float | None:
@@ -79,19 +69,17 @@ def _fmt_signed_count(value: Any) -> str:
 def report_codes(tags: list[str]) -> list[str]:
     """Report-presentation names for canonical codes: neutral aliases, subsumed codes dropped, deduplicated."""
     present = {str(t) for t in tags}
-    out: list[str] = []
+    kept: list[str] = []
     for tag in tags:
         name = str(tag)
         if name in _NON_FINDING_RESULT_CODES or _REPORT_CODE_SUBSUMED_BY.get(name) in present:
             continue
-        name = _REPORT_CODE_ALIASES.get(name, name)
-        if name not in out:
-            out.append(name)
-    return out
+        kept.append(name)
+    return screening_presentation_labels(kept)
 
 
 def report_state(state: str) -> str:
-    return _REPORT_STATE_ALIASES.get(str(state), str(state))
+    return screening_presentation_label(state)
 
 
 def report_has_host_evidence(model: dict[str, Any]) -> bool:
@@ -122,7 +110,8 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
     device = settings.get("device_under_test") or {}
     rows: list[tuple[str, Any]] = [
         ("Run ID", run.get("run_id")),
-        ("Validation Profile", settings.get("profile_name")),
+        ("Run Profile", settings.get("profile_name")),
+        ("Screening", "Measurement only"),
         ("Device", run.get("target")),
         ("HID device name", device.get("name")),
         ("VID", device.get("vid")),
@@ -170,7 +159,7 @@ def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str]]:
         ref = _finite(run.get("reference_interval_ms"))
         rows.append(("Reference interval", _fmt(ref, 2, "ms")))
         diff = avg - ref if avg is not None and ref is not None else None
-        rows.append(("Difference vs reference", _fmt(diff, 2, "ms", signed=True)))
+        rows.append(("Average interval Δ vs reference", _fmt(diff, 2, "ms", signed=True)))
     cv = _finite(metrics.get("interval_cv_pct"))
     if cv is not None:
         rows.append(("Interval CV", _fmt(cv, 2, "%")))
@@ -188,15 +177,32 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
     matching = snapshot["matching"]
     delta = snapshot["timing"]["matched_delta_stats"]
     abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
+    matched_n = int(matching["matched_host_observation_count"] or 0)
+    in_capture_n = int(counts["in_window_host_press_count"] or 0)
+    timing_rows: list[tuple[str, str]] = [
+        ("Matched observations used", matched_observations_used_text(matched_n, in_capture_n)),
+    ]
+    if matched_n == 0:
+        timing_rows.append(("Matched timing statistics", "No matched Host observations"))
+    else:
+        timing_rows.extend([
+            ("Average matched timing error", _fmt(delta["average"], 3, "ms", signed=True)),
+            ("Average absolute matched timing error", _fmt(abs_delta["average"], 3, "ms")),
+            ("Minimum matched timing error", _fmt(delta["minimum"], 3, "ms", signed=True)),
+            ("Maximum matched timing error", _fmt(delta["maximum"], 3, "ms", signed=True)),
+            ("Matched timing error stdev", _fmt(delta["stdev"], 3, "ms")),
+        ])
+        if matched_n == 1:
+            timing_rows.append(("Note", "Statistics describe a single matched observation."))
     return [
         ("Schedule", [
             ("Schedule windows", str(counts["expected_slot_count"])),
             ("Configured reference interval", _fmt(config["reference_interval_ms"], 2, "ms")),
-            ("Configured tolerance", f"±{float(config['timing_tolerance_ms']):.3f} ms"),
+            ("Configured association tolerance", f"±{float(config['timing_tolerance_ms']):.3f} ms"),
         ]),
         ("Host observations", [
             ("Host observations in capture", str(counts["in_window_host_press_count"])),
-            ("Host observations recorded (all)", str(counts["raw_host_press_count"])),
+            ("Host observations recorded", str(counts["raw_host_press_count"])),
             (_HE_COUNT_DELTA_LABEL, _fmt_signed_count(counts["host_count_delta_vs_expected_slots"])),
         ]),
         ("Schedule window occupancy", [
@@ -210,20 +216,14 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
             ("Ambiguous Host observations", str(matching["ambiguous_host_observation_count"])),
             ("Host observations outside capture", str(matching["outside_capture_window_observation_count"])),
         ]),
-        ("Matched timing (Host − schedule)", [
-            ("Average matched timing error", _fmt(delta["average"], 3, "ms", signed=True)),
-            ("Average absolute matched timing error", _fmt(abs_delta["average"], 3, "ms")),
-            ("Minimum matched timing error", _fmt(delta["minimum"], 3, "ms", signed=True)),
-            ("Maximum matched timing error", _fmt(delta["maximum"], 3, "ms", signed=True)),
-            ("Matched timing error stdev", _fmt(delta["stdev"], 3, "ms")),
-        ]),
+        ("Matched timing (Host − schedule)", timing_rows),
     ]
 
 
 def click_data_columns(manual: bool) -> list[str]:
-    cols = ["#", "Elapsed (ms)", "Button", "Interval (ms)", "Hold (ms)", "State", "Rule Code(s)"]
+    cols = ["#", "Elapsed (ms)", "Button", "Interval (ms)", "Hold (ms)", "Observation", "Observation flag(s)"]
     if not manual:
-        cols.append("Δ vs reference (ms)")
+        cols.append("Interval Δ vs ref. (ms)")
     return cols
 
 

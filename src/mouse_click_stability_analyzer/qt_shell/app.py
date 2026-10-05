@@ -85,7 +85,7 @@ from ..measurements import (
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
-from .presentation import SCREENING_PRESENTATION_KEYS, screening_presentation_label
+from .presentation import SCREENING_PRESENTATION_KEYS, screening_presentation_label, screening_presentation_labels
 from .styles import density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
@@ -527,14 +527,25 @@ def format_host_evidence_review_lines(snapshot: dict[str, Any] | None, tr) -> li
             outside=matching["outside_capture_window_observation_count"],
         ),
         tr(
-            "he_timing",
-            avg=_fmt_signed_ms(delta["average"]),
-            min=_fmt_signed_ms(delta["minimum"]),
-            max=_fmt_signed_ms(delta["maximum"]),
-            sd=_fmt_unsigned_ms(delta["stdev"]),
-            abs_avg=_fmt_unsigned_ms(abs_delta["average"]),
+            "he_matched_used",
+            matched=int(matching["matched_host_observation_count"] or 0),
+            total=int(counts["in_window_host_press_count"] or 0),
         ),
     ]
+    matched_n = int(matching["matched_host_observation_count"] or 0)
+    if matched_n == 0:
+        lines.append(tr("he_timing_empty"))
+    else:
+        lines.append(
+            tr(
+                "he_timing",
+                avg=_fmt_signed_ms(delta["average"]),
+                min=_fmt_signed_ms(delta["minimum"]),
+                max=_fmt_signed_ms(delta["maximum"]),
+                sd=_fmt_unsigned_ms(delta["stdev"]),
+                abs_avg=_fmt_unsigned_ms(abs_delta["average"]),
+            )
+        )
     if config.get("matching_windows_can_overlap"):
         lines.append(tr("he_overlap"))
     return lines
@@ -1416,7 +1427,7 @@ class MainWindow(QMainWindow):
         )
         live_l.addWidget(self.capture_stats_grid)
 
-        self.issue_title = QLabel("ISSUES")
+        self.issue_title = QLabel("OBSERVATIONS")
         self.issue_title.setObjectName("StatLabel")
         live_l.addWidget(self.issue_title)
         extra_cell, self.val_extra = self._stat_cell("EXTRA", "extra")
@@ -1424,9 +1435,13 @@ class MainWindow(QMainWindow):
         delay_cell, self.val_delay = self._stat_cell("DELAY", "delay")
         dut_cell, self.val_dut = self._stat_cell("DUT", "dut")
         setup_cell, self.val_setup = self._stat_cell("SETUP", "setup_score")
+        self._hidden_score_cells = (dut_cell, setup_cell)
+        for cell in self._hidden_score_cells:
+            cell.setParent(self)
+            cell.hide()
         self.capture_issues_grid = ResponsiveItemGrid(
-            [extra_cell, rebound_cell, delay_cell, dut_cell, setup_cell],
-            wide_columns=5,
+            [extra_cell, rebound_cell, delay_cell],
+            wide_columns=3,
             medium_columns=3,
             compact_columns=2,
             wide_min_width=940,
@@ -1730,9 +1745,9 @@ class MainWindow(QMainWindow):
         body_l.addWidget(self.results_occupancy_bar)
         self._results_evidence_cells: list[tuple[QLabel, QLabel]] = []
         # Row counts per group (header + values) must match _populate_evidence_tab's row order:
-        # Schedule, Host observations, Occupancy, Association, Timing (+1 spare, hidden).
+        # Schedule, Host observations, Occupancy, Association, Matched timing.
         self.results_evidence_groups: list[QWidget] = []
-        for size in (4, 4, 4, 5, 7):
+        for size in (4, 4, 4, 5, 9):
             group = QWidget()
             group.setObjectName("Workspace")
             group_grid = QGridLayout(group)
@@ -2533,6 +2548,9 @@ class MainWindow(QMainWindow):
             self._tr("col_ref_delta"),
         ]
         self.results_click_table.setHorizontalHeaderLabels(headers)
+        header_item = self.results_click_table.horizontalHeaderItem(7)
+        if header_item is not None:
+            header_item.setToolTip(self._tr("col_ref_delta_tooltip"))
         self.btn_new.setText(self._tr("run_again"))
         self.btn_edit_setup_new_run.setText(self._tr("edit_setup_new_run"))
         self.btn_capture_new_run.setText(self._tr("new_run"))
@@ -2798,10 +2816,15 @@ class MainWindow(QMainWindow):
 
     def _format_run_context(self, model: dict[str, Any]) -> str:
         run = model["run"]
+        settings = run.get("settings") or {}
         parts = [
-            (run["target"] or self._tr("dut")).strip() or self._tr("dut"),
+            (run["target"] or "").strip() or "—",
             run["button"],
         ]
+        profile = str(settings.get("profile_name") or "").strip()
+        if profile:
+            parts.append(f"{self._tr('run_profile')}: {profile}")
+        parts.append(f"{self._tr('screening')}: {self._tr('screening_measurement_only')}")
         if run["manual"]:
             parts.append(self._tr("manual"))
         else:
@@ -2820,7 +2843,7 @@ class MainWindow(QMainWindow):
         findings = model["observations"]
         if not findings:
             return self._tr("observations_none")
-        blocks: list[str] = []
+        blocks: list[str] = [self._tr("informational_observation")]
         for finding in findings:
             lines = [self._tr(finding["title_key"])]
             for row in finding.get("rows") or []:
@@ -2833,7 +2856,6 @@ class MainWindow(QMainWindow):
                 if unit:
                     rendered = f"{rendered} {unit}"
                 lines.append(f"{self._tr(row['label_key'])}    {rendered}")
-            lines.append(f"{self._tr('existing_rule')}    {finding['rule']}")
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 
@@ -2871,8 +2893,9 @@ class MainWindow(QMainWindow):
         self.results_context_label.setText(self._format_run_context(model))
         visible_tags = model["assessment"]["tags"]
         self.results_verdict_label.setText(self._run_status_display(model["run"]["run_status"]))
+        visible_aliases = screening_presentation_labels(visible_tags, self._tr)
         self.results_tags_label.setText(
-            ", ".join(visible_tags) if visible_tags else self._tr("review_tags_none")
+            ", ".join(visible_aliases) if visible_aliases else self._tr("review_tags_none")
         )
         self.results_observations_text.setText(self._format_observation_text(model))
         self._populate_evidence_tab(model)
@@ -2907,6 +2930,29 @@ class MainWindow(QMainWindow):
         matching = snapshot["matching"]
         delta = snapshot["timing"]["matched_delta_stats"]
         abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
+        matched_n = int(matching["matched_host_observation_count"] or 0)
+        in_capture_n = int(counts["in_window_host_press_count"] or 0)
+        timing_rows: list[tuple[str, str]] = [
+            (self._tr("timing_group").upper(), ""),
+            (
+                self._tr("matched_observations_used"),
+                self._tr("matched_observations_used_value", matched=matched_n, total=in_capture_n),
+            ),
+        ]
+        if matched_n == 0:
+            timing_rows.append((self._tr("matched_timing_empty"), ""))
+        else:
+            timing_rows.extend(
+                [
+                    (self._tr("average_error"), f"{_fmt_signed_ms(delta['average'])} ms"),
+                    (self._tr("average_abs_error"), f"{_fmt_unsigned_ms(abs_delta['average'])} ms"),
+                    (self._tr("min_error"), f"{_fmt_signed_ms(delta['minimum'])} ms"),
+                    (self._tr("max_error"), f"{_fmt_signed_ms(delta['maximum'])} ms"),
+                    (self._tr("stdev"), f"{_fmt_unsigned_ms(delta['stdev'])} ms"),
+                ]
+            )
+            if matched_n == 1:
+                timing_rows.append((self._tr("matched_timing_single"), ""))
         rows = [
             (self._tr("schedule").upper(), ""),
             (self._tr("expected_windows"), str(counts["expected_slot_count"])),
@@ -2925,12 +2971,7 @@ class MainWindow(QMainWindow):
             (self._tr("unmatched"), str(matching["unmatched_host_observation_count"])),
             (self._tr("ambiguous"), str(matching["ambiguous_host_observation_count"])),
             (self._tr("outside_capture"), str(matching["outside_capture_window_observation_count"])),
-            (self._tr("timing_group").upper(), ""),
-            (self._tr("average_error"), f"{_fmt_signed_ms(delta['average'])} ms"),
-            (self._tr("average_abs_error"), f"{_fmt_unsigned_ms(abs_delta['average'])} ms"),
-            (self._tr("min_error"), f"{_fmt_signed_ms(delta['minimum'])} ms"),
-            (self._tr("max_error"), f"{_fmt_signed_ms(delta['maximum'])} ms"),
-            (self._tr("stdev"), f"{_fmt_unsigned_ms(delta['stdev'])} ms"),
+            *timing_rows,
         ]
         self.results_occupancy_bar.set_counts(
             int(matching["empty_expected_slot_count"]),
@@ -2944,6 +2985,8 @@ class MainWindow(QMainWindow):
                 key_lab.show()
                 val_lab.show()
             else:
+                key_lab.setText("")
+                val_lab.setText("")
                 key_lab.hide()
                 val_lab.hide()
         self.results_evidence_note.setText(self._tr("neutral_host_evidence_note"))
@@ -2963,8 +3006,8 @@ class MainWindow(QMainWindow):
                 str(row.get("button") or ""),
                 "" if row.get("interval_ms") is None else f"{row['interval_ms']:.2f}",
                 "" if row.get("hold_ms") is None else f"{row['hold_ms']:.2f}",
-                str(row.get("state") or ""),
-                ", ".join(row.get("tags") or []),
+                screening_presentation_label(row.get("state"), self._tr),
+                ", ".join(screening_presentation_labels(row.get("tags") or [], self._tr)),
                 "" if row.get("reference_delta_ms") is None else f"{row['reference_delta_ms']:.2f}",
             )
             for c, value in enumerate(values):
@@ -3034,16 +3077,32 @@ class MainWindow(QMainWindow):
         if snapshot is None:
             text = self._tr("not_applicable_manual") if model["run"]["manual"] else self._tr("not_applicable_no_duration")
         else:
-            delta = snapshot["timing"]["matched_delta_stats"]
-            abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
-            text = (
-                f"{self._tr('timing_error_unavailable')}\n\n"
-                f"{self._tr('average_error')}: {_fmt_signed_ms(delta['average'])} ms\n"
-                f"{self._tr('average_abs_error')}: {_fmt_unsigned_ms(abs_delta['average'])} ms\n"
-                f"{self._tr('min_error')}: {_fmt_signed_ms(delta['minimum'])} ms\n"
-                f"{self._tr('max_error')}: {_fmt_signed_ms(delta['maximum'])} ms\n"
-                f"{self._tr('stdev')}: {_fmt_unsigned_ms(delta['stdev'])} ms"
+            matching = snapshot["matching"]
+            counts = snapshot["counts"]
+            matched_n = int(matching["matched_host_observation_count"] or 0)
+            in_capture_n = int(counts["in_window_host_press_count"] or 0)
+            used = (
+                f"{self._tr('matched_observations_used')}: "
+                f"{self._tr('matched_observations_used_value', matched=matched_n, total=in_capture_n)}"
             )
+            if matched_n == 0:
+                text = f"{self._tr('timing_error_unavailable')}\n\n{used}\n{self._tr('matched_timing_empty')}"
+            else:
+                delta = snapshot["timing"]["matched_delta_stats"]
+                abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
+                lines = [
+                    self._tr("timing_error_unavailable"),
+                    "",
+                    used,
+                    f"{self._tr('average_error')}: {_fmt_signed_ms(delta['average'])} ms",
+                    f"{self._tr('average_abs_error')}: {_fmt_unsigned_ms(abs_delta['average'])} ms",
+                    f"{self._tr('min_error')}: {_fmt_signed_ms(delta['minimum'])} ms",
+                    f"{self._tr('max_error')}: {_fmt_signed_ms(delta['maximum'])} ms",
+                    f"{self._tr('stdev')}: {_fmt_unsigned_ms(delta['stdev'])} ms",
+                ]
+                if matched_n == 1:
+                    lines.append(self._tr("matched_timing_single"))
+                text = "\n".join(lines)
         self.results_timing_text.setText(text)
 
     def lock_profile(self) -> bool:
@@ -3438,10 +3497,21 @@ class MainWindow(QMainWindow):
 
     def _reset_capture_visualization(self) -> None:
         if getattr(self, "scatter", None) is not None:
-            self.scatter.reset_view()
+            self.scatter.clear_navigation()
         if getattr(self, "interval_chart", None) is not None:
-            self.interval_chart.reset_view()
+            self.interval_chart.clear_navigation()
         self._set_capture_view("stability")
+        self._sync_capture_chart_pan()
+
+    def _sync_capture_chart_pan(self) -> None:
+        enabled = (
+            self._lifecycle_state() == "completed"
+            and not self._post_run_input_guard_active
+        )
+        if getattr(self, "scatter", None) is not None:
+            self.scatter.set_pan_enabled(enabled)
+        if getattr(self, "interval_chart", None) is not None:
+            self.interval_chart.set_pan_enabled(enabled)
 
     # ── Capture lifecycle ───────────────────────────────────────────
     def _reset_live_values_for_listen(self):
@@ -3841,6 +3911,7 @@ class MainWindow(QMainWindow):
         ):
             w.setEnabled(editable)
         self._refresh_lifecycle_presentation()
+        self._sync_capture_chart_pan()
         if self._post_run_input_guard_active:
             self._apply_post_run_input_guard_disable()
         else:
@@ -3903,6 +3974,7 @@ class MainWindow(QMainWindow):
         self._apply_post_run_input_guard_disable()
         self._set_post_run_input_guard_status_visible(True)
         self._restart_post_run_quiet_timer()
+        self._sync_capture_chart_pan()
 
     def _restart_post_run_quiet_timer(self) -> None:
         self._post_run_quiet_ready = False
@@ -4244,12 +4316,8 @@ class MainWindow(QMainWindow):
         self.val_extra.setText(str(extra))
         self.val_rebound.setText(str(int(m.get("incomplete_rebound_count") or 0)))
         self.val_delay.setText(str(int(m.get("miss_or_slow_count") or 0)))
-        if _is_manual_profile(settings):
-            self.val_dut.setText(self._tr("na"))
-            self.val_setup.setText(self._tr("na"))
-        else:
-            self.val_dut.setText(str(m.get("dut_score", "--")))
-            self.val_setup.setText(str(m.get("setup_score", "--")))
+        self.val_dut.setText(self._tr("na"))
+        self.val_setup.setText(self._tr("na"))
         self.val_verdict.setText(self._run_status_display(run_status))
         if final or self.completed:
             alert = []
@@ -4274,6 +4342,10 @@ class MainWindow(QMainWindow):
         reference = beat if fixture else None
         association = self._fixture_association_half_width_ms(settings) if fixture else None
         subtitle = self._capture_chart_subtitle(settings)
+        duration_s = settings.get("duration_sec")
+        capture_duration_ms = None
+        if isinstance(duration_s, (int, float)) and not isinstance(duration_s, bool) and duration_s > 0:
+            capture_duration_ms = float(duration_s) * 1000.0
         self.scatter.set_points(
             pts,
             title=self._tr("chart_stability_map"),
@@ -4288,6 +4360,7 @@ class MainWindow(QMainWindow):
             overlay=ov_series,
             target_beat_ms=reference,
             association_half_width_ms=association,
+            capture_duration_ms=capture_duration_ms,
         )
 
     def closeEvent(self, event):

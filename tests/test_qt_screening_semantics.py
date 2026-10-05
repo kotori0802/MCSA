@@ -38,8 +38,8 @@ _VISIBLE_MAP = {
     "ON_CADENCE": {"en": "Observation", "zh": "觀測"},
     "CHATTER_BOUNCE": {"en": "Very short interval", "zh": "極短間隔"},
     "CHATTER_HARD": {"en": "Very short interval", "zh": "極短間隔"},
-    "TRUE_EXTRA_CLICK": {"en": "Extra observation", "zh": "額外觀測"},
-    "HIGH_PROBABILITY_DOUBLE_CLICK": {"en": "Extra observation", "zh": "額外觀測"},
+    "TRUE_EXTRA_CLICK": {"en": "Short interval", "zh": "短間隔"},
+    "HIGH_PROBABILITY_DOUBLE_CLICK": {"en": "Short interval", "zh": "短間隔"},
     "INCOMPLETE_REBOUND": {"en": "Short hold", "zh": "短按住"},
     "FIXTURE_ACTUATION_TOO_SHORT": {"en": "Short hold", "zh": "短按住"},
     "LOW_HOLD_WARNING": {"en": "Short hold", "zh": "短按住"},
@@ -217,13 +217,17 @@ class SetupScreeningPresentationTests(unittest.TestCase):
         extra = self.win._stat_name_labels["extra"].text()
         rebound = self.win._stat_name_labels["rebound"].text()
         delay = self.win._stat_name_labels["delay"].text()
-        self.assertEqual(extra, "EXTRA OBSERVATION")
+        self.assertEqual(self.win.issue_title.text(), "OBSERVATIONS")
+        self.assertEqual(extra, "SHORT INTERVAL")
         self.assertEqual(rebound, "SHORT HOLD")
         self.assertEqual(delay, "LONG INTERVAL")
         self.assertNotIn("DOUBLE", extra)
+        self.assertNotIn("EXTRA", extra)
         self.assertNotIn("REBOUND", rebound)
         self.assertNotIn("DELAY", delay)
         self.assertNotIn("CHATTER", extra)
+        self.assertTrue(self.win.val_dut.parentWidget().isHidden())
+        self.assertTrue(self.win.val_setup.parentWidget().isHidden())
 
 
 class MeasurementContainmentTests(unittest.TestCase):

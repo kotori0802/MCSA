@@ -99,8 +99,6 @@ class CaptureResponsiveTests(unittest.TestCase):
             self.win.val_extra.parentWidget(),
             self.win.val_rebound.parentWidget(),
             self.win.val_delay.parentWidget(),
-            self.win.val_dut.parentWidget(),
-            self.win.val_setup.parentWidget(),
         ]
 
     def _action_buttons(self):
@@ -132,7 +130,6 @@ class CaptureResponsiveTests(unittest.TestCase):
             self.win.val_phase, self.win.val_time, self.win.val_clicks,
             self.win.val_interval, self.win.val_hold, self.win.val_verdict,
             self.win.val_extra, self.win.val_rebound, self.win.val_delay,
-            self.win.val_dut, self.win.val_setup,
         ])
         self.assertGreaterEqual(self.win.test_area.height(), 280)
         self.assertTrue(self.win.scatter.isVisible())
@@ -192,7 +189,7 @@ class CaptureResponsiveTests(unittest.TestCase):
     # 1
     def test_wide_1600_is_single_row_metrics(self):
         self._show_capture_at(1600, 900)
-        self._assert_capture_usable(stats_cols=6, issues_cols=5)
+        self._assert_capture_usable(stats_cols=6, issues_cols=3)
         ys = {c.y() for c in self._stat_cells()}
         self.assertEqual(len(ys), 1)
         self.assertEqual(len({c.y() for c in self._issue_cells()}), 1)
@@ -212,7 +209,7 @@ class CaptureResponsiveTests(unittest.TestCase):
     def test_compact_1280_keeps_single_row_summary_without_clipping(self):
         self._show_capture_at(1280, 720)
         self.assertEqual(self.win.density, "compact")
-        self._assert_capture_usable(stats_cols=6, issues_cols=5)
+        self._assert_capture_usable(stats_cols=6, issues_cols=3)
         self.assertGreaterEqual(self.win.capture_live.height(), self.win.capture_live.minimumSizeHint().height() - 8)
         self.assertGreaterEqual(self.win.val_phase.height(), 16)
 
@@ -230,7 +227,7 @@ class CaptureResponsiveTests(unittest.TestCase):
         self._show_capture_at(*_OVERFLOW_SIZE)
         self.assertLess(self.win.capture_stats_grid.columns(), 6)
         self._show_capture_at(1600, 900)
-        self._assert_capture_usable(stats_cols=6, issues_cols=5)
+        self._assert_capture_usable(stats_cols=6, issues_cols=3)
 
     # 5
     def test_live_resize_wide_to_compact_reflows_down(self):
@@ -370,7 +367,7 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.assertEqual((self.win.width(), self.win.height()), (1728, 972))
         self._assert_capture_usable_here()
         self.assertEqual(self.win.capture_stats_grid.columns(), 6)
-        self.assertEqual(self.win.capture_issues_grid.columns(), 5)
+        self.assertEqual(self.win.capture_issues_grid.columns(), 3)
         self._assert_setup_usable()
         self.assertEqual(self.win.setup_card_grid.columns(), 3)
 
@@ -453,7 +450,7 @@ class CaptureResponsiveTests(unittest.TestCase):
                 self._show_capture_at(1280, 720)
                 self.assertEqual(self.win.density, "compact")
                 self._assert_initial_view_shows_capture_essentials(min_chart_px=180)
-                self._assert_capture_usable(stats_cols=6, issues_cols=5)
+                self._assert_capture_usable(stats_cols=6, issues_cols=3)
 
     def test_1600x900_stays_spacious_with_full_test_area_in_view(self):
         self._setup_fixture()

@@ -314,8 +314,8 @@ class WorkflowShellTests(unittest.TestCase):
         self.assertIs(self.win.page_stack.currentWidget(), self.win.page_results)
         text = self.win.results_evidence_text.toPlainText()
         self.assertIn("HOST EVIDENCE", text)
-        self.assertIn("Expected Slots", text)
-        self.assertIn("Outside Capture Window", text)
+        self.assertIn("Schedule windows", text)
+        self.assertIn("Host observations outside capture", text)
         self.win.nav_capture.click()
         self.assertNotIn("HOST EVIDENCE", self.win.review_text.toPlainText())
 

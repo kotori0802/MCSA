@@ -67,10 +67,10 @@ _LEGACY = (
 _HOST_EVIDENCE_LABELS = (
     "Schedule windows",
     "Configured reference interval",
-    "Configured tolerance",
+    "Configured association tolerance",
     "Host observations in capture",
-    "Host observations recorded (all)",
-    "Host observations - schedule windows",
+    "Host observations recorded",
+    "Host observations − schedule windows",
     "Schedule windows without matched Host observation",
     "Schedule windows with 1 matched Host observation",
     "Schedule windows with >1 matched Host observations",
@@ -78,6 +78,7 @@ _HOST_EVIDENCE_LABELS = (
     "Host observations not matched to schedule",
     "Ambiguous Host observations",
     "Host observations outside capture",
+    "Matched observations used",
     "Average matched timing error",
     "Average absolute matched timing error",
     "Minimum matched timing error",
@@ -87,7 +88,8 @@ _HOST_EVIDENCE_LABELS = (
 _RETIRED_HOST_EVIDENCE_LABELS = (
     "Unoccupied windows", "Single-occupancy windows", "Multi-occupancy windows", "Matched", "Unmatched",
     "Ambiguous", "Outside capture", "Observation count delta", "Raw Host observations", "Stdev",
-    "Average matched error", "Tolerance", "Reference interval",
+    "Average matched error", "Tolerance", "Reference interval", "Configured tolerance",
+    "Host observations recorded (all)", "Host observations - schedule windows",
 )
 _PHYSICAL_CLAIM_CODES = (
     "MISS_OR_SLOW", "HIGH_PROBABILITY_DOUBLE_CLICK", "TRUE_EXTRA_CLICK", "INCOMPLETE_REBOUND",
@@ -333,7 +335,8 @@ class ReportV2QtTests(unittest.TestCase):
             self.assertNotIn("MISS_CLICK", text)
         info = _html_kv(html_text, "test-information")
         self.assertEqual(info["Device"], "123")
-        self.assertEqual(info["Validation Profile"], "Fixture_Custom")
+        self.assertEqual(info["Run Profile"], "Fixture_Custom")
+        self.assertEqual(info["Screening"], "Measurement only")
         self.assertEqual(info["Reference Rate"], "5.6 Hz")
         self.assertEqual(info["Mode"], "Fixture")
 
@@ -372,10 +375,13 @@ class ReportV2QtTests(unittest.TestCase):
         facts, paths = self._golden()
         metrics = facts["model"]["assessment"]["metrics"]
         html_text, xlsx = self._artifacts(paths)
+        avg = metrics["interval_avg_ms"]
+        delta = avg - _REF_MS
         expected = {
-            "Host-observed average interval": f"{metrics['interval_avg_ms']:.2f} ms",
-            "Host-observed cadence": f"{1000.0 / metrics['interval_avg_ms']:.2f} Hz",
+            "Host-observed average interval": f"{avg:.2f} ms",
+            "Host-observed cadence": f"{1000.0 / avg:.2f} Hz",
             "Reference interval": f"{_REF_MS:.2f} ms",
+            "Average interval Δ vs reference": f"{delta:+.2f} ms" if delta else f"{delta:.2f} ms",
             "Interval CV": f"{metrics['interval_cv_pct']:.2f} %",
             "Average hold": f"{metrics['hold_avg_ms']:.2f} ms",
         }
@@ -398,8 +404,8 @@ class ReportV2QtTests(unittest.TestCase):
         expected = {
             "Schedule windows": str(counts["expected_slot_count"]),
             "Host observations in capture": str(counts["in_window_host_press_count"]),
-            "Host observations recorded (all)": str(counts["raw_host_press_count"]),
-            "Host observations - schedule windows": f"{counts['host_count_delta_vs_expected_slots']:+d}",
+            "Host observations recorded": str(counts["raw_host_press_count"]),
+            "Host observations − schedule windows": f"{counts['host_count_delta_vs_expected_slots']:+d}",
             "Schedule windows without matched Host observation": str(matching["empty_expected_slot_count"]),
             "Schedule windows with 1 matched Host observation": str(matching["single_occupancy_slot_count"]),
             "Schedule windows with >1 matched Host observations": str(matching["multi_occupancy_slot_count"]),
@@ -407,10 +413,11 @@ class ReportV2QtTests(unittest.TestCase):
             "Host observations not matched to schedule": str(matching["unmatched_host_observation_count"]),
             "Ambiguous Host observations": str(matching["ambiguous_host_observation_count"]),
             "Host observations outside capture": str(matching["outside_capture_window_observation_count"]),
+            "Matched observations used": f"{matching['matched_host_observation_count']} of {counts['in_window_host_press_count']} in capture",
         }
-        self.assertEqual(expected["Host observations - schedule windows"], "+2")
+        self.assertEqual(expected["Host observations − schedule windows"], "+2")
         self.assertEqual(
-            int(expected["Host observations - schedule windows"]),
+            int(expected["Host observations − schedule windows"]),
             counts["in_window_host_press_count"] - counts["expected_slot_count"],
         )
         html_kv = _html_kv(html_text, "host-evidence")
@@ -450,7 +457,7 @@ class ReportV2QtTests(unittest.TestCase):
                 legend = re.findall(r"<span class='li'>.*?</span>", body)
                 self.assertEqual(
                     [re.sub(r"<[^>]+>", "", item) for item in legend],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Configured tolerance ±2 ms"],
+                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Association window ±2 ms"],
                 )
 
     def test_manual_html_charts_have_no_configured_reference_marker(self):
@@ -466,6 +473,7 @@ class ReportV2QtTests(unittest.TestCase):
                 self.assertNotIn("class='legend'", body)
         self.assertNotIn("Configured reference", html_text)
         self.assertNotIn("Configured tolerance", html_text)
+        self.assertNotIn("Association window", html_text)
         for title, series in _xlsx_charts(xlsx).items():
             with self.subTest(xlsx_chart=title):
                 self.assertEqual(len(series), 1)
@@ -487,7 +495,7 @@ class ReportV2QtTests(unittest.TestCase):
             with self.subTest(chart=title):
                 self.assertEqual(
                     [s["title"] for s in charts[title]],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Configured tolerance ±2 ms"],
+                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms", "Association window ±2 ms"],
                 )
         wb = load_workbook(paths["engineering_xlsx"])
         try:
@@ -535,7 +543,7 @@ class ReportV2QtTests(unittest.TestCase):
             _assert_no_verdict_words(self, text)
             self.assertNotIn("MANUAL_PROFILE_NO_EXPECTED_COUNT", text)
             self.assertNotIn("Host Evidence", text)
-            for absent in ("Schedule windows", "Reference Rate", "Fixture Timing Tolerance", "Δ vs reference"):
+            for absent in ("Schedule windows", "Reference Rate", "Fixture Timing Tolerance", "Interval Δ vs ref."):
                 self.assertNotIn(absent, text)
             for forbidden in _EXPLANATORY + _LEGACY:
                 self.assertNotIn(forbidden, text, forbidden)
@@ -564,7 +572,9 @@ class ReportV2QtTests(unittest.TestCase):
             ws = wb["Click Data"]
             headers = [c.value for c in ws[1]]
             self.assertEqual(headers, report_v2.click_data_columns(False))
-            self.assertIn("Rule Code(s)", headers)
+            self.assertIn("Observation flag(s)", headers)
+            self.assertNotIn("Rule Code(s)", headers)
+            self.assertNotIn("State", headers)
             self.assertEqual(ws.freeze_panes, "A2")
             self.assertTrue(ws.auto_filter.ref)
             self.assertEqual(ws.max_row - 1, len(facts["model"]["click_data"]))
@@ -709,25 +719,25 @@ class ReportV2ModelTests(unittest.TestCase):
         self.assertEqual(report_v2.report_codes(["MANUAL_PROFILE_NO_EXPECTED_COUNT"]), [])
         self.assertEqual(
             report_v2.report_codes(["MANUAL_PROFILE_NO_EXPECTED_COUNT", "INTERVAL_JITTER_WARN"]),
-            ["INTERVAL_JITTER_WARN"],
+            ["Interval variation"],
         )
         self.assertFalse(hasattr(report_v2, "report_result_codes"))
 
     def test_report_codes_use_neutral_names_without_physical_claims(self):
         codes = report_v2.report_codes
-        self.assertEqual(codes(["MISS_OR_SLOW", "LONG_INTERVAL_SPIKE_WARN"]), ["LONG_INTERVAL_SPIKE_WARN"])
-        self.assertEqual(codes(["LONG_INTERVAL_SPIKE_WARN", "MISS_OR_SLOW"]), ["LONG_INTERVAL_SPIKE_WARN"])
-        self.assertEqual(codes(["MISS_OR_SLOW"]), ["LONG_INTERVAL"])
-        self.assertEqual(codes(["HIGH_PROBABILITY_DOUBLE_CLICK", "TRUE_EXTRA_CLICK"]), ["SHORT_INTERVAL"])
-        self.assertEqual(codes(["INCOMPLETE_REBOUND", "FIXTURE_ACTUATION_TOO_SHORT"]), ["SHORT_HOLD"])
-        self.assertEqual(codes(["SETUP_ALIGNMENT_SUSPECT"]), ["HOLD_VARIATION"])
-        self.assertEqual(codes(["FIXTURE_HZ_MISMATCH"]), ["REFERENCE_RATE_MISMATCH"])
-        self.assertEqual(codes(["CHATTER_HARD", "TIMING_JITTER_PAIR"]), ["CHATTER_HARD", "TIMING_JITTER_PAIR"])
+        self.assertEqual(codes(["MISS_OR_SLOW", "LONG_INTERVAL_SPIKE_WARN"]), ["Long interval"])
+        self.assertEqual(codes(["LONG_INTERVAL_SPIKE_WARN", "MISS_OR_SLOW"]), ["Long interval"])
+        self.assertEqual(codes(["MISS_OR_SLOW"]), ["Long interval"])
+        self.assertEqual(codes(["HIGH_PROBABILITY_DOUBLE_CLICK", "TRUE_EXTRA_CLICK"]), ["Short interval"])
+        self.assertEqual(codes(["INCOMPLETE_REBOUND", "FIXTURE_ACTUATION_TOO_SHORT"]), ["Short hold"])
+        self.assertEqual(codes(["SETUP_ALIGNMENT_SUSPECT"]), ["Hold variation"])
+        self.assertEqual(codes(["FIXTURE_HZ_MISMATCH"]), ["Cadence vs reference"])
+        self.assertEqual(codes(["CHATTER_HARD", "TIMING_JITTER_PAIR"]), ["Very short interval", "Timing variation"])
         for tag in _PHYSICAL_CLAIM_CODES:
             self.assertNotIn(tag, report_v2.report_codes([tag, "LONG_INTERVAL_SPIKE_WARN"]), tag)
-        self.assertEqual(report_v2.report_state("MISS_OR_SLOW"), "LONG_INTERVAL")
-        self.assertEqual(report_v2.report_state("TRUE_EXTRA_CLICK"), "SHORT_INTERVAL")
-        self.assertEqual(report_v2.report_state("ON_CADENCE"), "ON_CADENCE")
+        self.assertEqual(report_v2.report_state("MISS_OR_SLOW"), "Long interval")
+        self.assertEqual(report_v2.report_state("TRUE_EXTRA_CLICK"), "Short interval")
+        self.assertEqual(report_v2.report_state("ON_CADENCE"), "Observation")
 
     def test_long_interval_run_is_complete_and_keeps_canonical_tag(self):
         intervals = [100.0] * 40
@@ -754,7 +764,9 @@ class ReportV2ModelTests(unittest.TestCase):
                 states = [row[5] for row in wb["Click Data"].iter_rows(min_row=2, values_only=True)]
             finally:
                 wb.close()
-            self.assertIn("LONG_INTERVAL", states)
+            self.assertIn("Long interval", states)
+            self.assertNotIn("LONG_INTERVAL", states)
+            self.assertNotIn("MISS_OR_SLOW", states)
         self.assertEqual(model, before)
         self.assertIn("MISS_OR_SLOW", model["assessment"]["tags"])
 
@@ -763,7 +775,8 @@ class ReportV2ModelTests(unittest.TestCase):
         model = build_completed_result_model(locked=self._settings(device_under_test=device),
                                              events=self._events([100.0] * 25), run_id="ident", target="SAMPLE-07")
         info = dict(report_v2.build_report_view(model)["test_information"])
-        self.assertEqual(info["Validation Profile"], "Fixture_Custom")
+        self.assertEqual(info["Run Profile"], "Fixture_Custom")
+        self.assertEqual(info["Screening"], "Measurement only")
         self.assertEqual(info["Device"], "SAMPLE-07")
         self.assertEqual(info["HID device name"], "HP Mouse 9000")
         self.assertEqual((info["VID"], info["PID"], info["bcdDevice"]), ("03F0", "0A4B", "0102"))

@@ -71,6 +71,11 @@ _RESULT_KEYS = (
     "observed_average",
     "difference",
     "expected_windows",
+    "matched_observations_used",
+    "matched_timing_empty",
+    "run_profile",
+    "informational_observation",
+    "col_ref_delta_tooltip",
     "host_observations",
     "occupancy",
     "association",
@@ -359,7 +364,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.win.results_evidence_card.isVisibleTo(self.win))
         self.assertEqual(self.win.results_evidence_na.text(), self.win._tr("not_applicable_manual"))
         self.assertNotIn("HOST EVIDENCE", self.win.results_evidence_text.toPlainText())
-        self.assertNotIn("Expected Slots", self.win.results_evidence_text.toPlainText())
+        self.assertNotIn("Schedule windows", self.win.results_evidence_text.toPlainText())
         self.assertTrue(self.win.results_workspace.isVisibleTo(self.win))
 
     def test_fixture_auto_stop_off_has_no_host_evidence(self):
@@ -368,7 +373,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertIsNone(self.win.host_evidence_snapshot)
         self._show_results_tab(1)
         self.assertEqual(self.win.results_evidence_na.text(), self.win._tr("not_applicable_no_duration"))
-        self.assertNotIn("Expected Slots", self.win.results_evidence_text.toPlainText())
+        self.assertNotIn("Schedule windows", self.win.results_evidence_text.toPlainText())
 
     def test_language_switch_retranslates_without_rebuild(self):
         self._setup_fixture()
@@ -874,7 +879,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertIn(self.win._tr("observed_average"), text)
         self.assertIn(self.win._tr("configured_reference"), text)
         self.assertIn(self.win._tr("difference"), text)
-        self.assertIn("FIXTURE_HZ_MISMATCH", text)
+        self.assertNotIn("FIXTURE_HZ_MISMATCH", text)
         self.assertNotIn("DUT", text)
         body = "\n".join(text.splitlines()[1:])
         self.assertNotIn(self.win.results_context_label.text().split(" · ")[0], body)
@@ -1308,7 +1313,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(seen[1024], 2)
         self.assertEqual(seen[760], 1)
         self.assertEqual(len(self.win.results_evidence_groups), 5)
-        self.assertEqual(len(self.win._results_evidence_cells), 24)
+        self.assertEqual(len(self.win._results_evidence_cells), 26)
 
     def test_click_data_uses_available_results_width(self):
         self._setup_fixture()

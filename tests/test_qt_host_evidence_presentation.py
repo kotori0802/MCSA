@@ -22,7 +22,7 @@ from mouse_click_stability_analyzer.qt_shell import app as qt_app
 from mouse_click_stability_analyzer.qt_shell.app import format_host_evidence_review_lines
 
 _T0 = 1000.0
-_HE_KEYS = ("he_title", "he_config", "he_counts", "he_windows", "he_observations", "he_timing", "he_overlap")
+_HE_KEYS = ("he_title", "he_config", "he_counts", "he_windows", "he_observations", "he_matched_used", "he_timing", "he_timing_empty", "he_overlap")
 _FORBIDDEN_EN = (
     "missing click", "double click", "double-click", "extra click", "bounce", "chatter",
     "debounce", "hardware failure", "pass", "fail", "warning", "warn", "verdict", "root cause",
@@ -85,24 +85,25 @@ class FormatterTests(unittest.TestCase):
         for fragment in (
             "Fixture Frequency 40 Hz",
             "Capture Duration 10.000 s",
-            "Timing Tolerance ±2.000 ms",
-            "Reference Interval 25.000 ms",
-            "Expected Slots 400",
-            "In-window Host Presses 399",
-            "Host Count Delta -1",
-            "Raw Host Presses 401",
-            "Unoccupied Expected Windows 3",
-            "Single-observation Windows 395",
-            "Multi-observation Expected Windows 2",
-            "Matched Host Observations 397",
-            "Unmatched Host Observations 1",
-            "Ambiguous Host Observations 1",
-            "Outside Capture Window 2",
+            "Configured association tolerance ±2.000 ms",
+            "Configured reference interval 25.000 ms",
+            "Schedule windows 400",
+            "Host observations in capture 399",
+            "Host observations − schedule windows -1",
+            "Host observations recorded 401",
+            "Schedule windows without matched Host observation 3",
+            "Schedule windows with 1 matched Host observation 395",
+            "Schedule windows with >1 matched Host observations 2",
+            "Host observations matched to schedule 397",
+            "Host observations not matched to schedule 1",
+            "Ambiguous Host observations 1",
+            "Host observations outside capture 2",
+            "Matched observations used 397 of 399 in capture",
             "Average +0.125",
             "Minimum -1.200",
             "Maximum +1.850",
-            "Std Dev 0.620",
-            "Average Absolute Timing Error 0.500",
+            "Stdev 0.620",
+            "Average absolute 0.500",
         ):
             self.assertIn(fragment, text)
 
@@ -118,20 +119,20 @@ class FormatterTests(unittest.TestCase):
 
     def test_negative_delta_stays_negative(self):
         text = "\n".join(format_host_evidence_review_lines(_snapshot(), _en))
-        self.assertIn("Host Count Delta -1", text)
+        self.assertIn("Host observations − schedule windows -1", text)
         self.assertNotIn("missing", text.lower())
 
     def test_positive_delta_stays_positive(self):
         snap = _snapshot(counts={"host_count_delta_vs_expected_slots": 1})
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
-        self.assertIn("Host Count Delta +1", text)
+        self.assertIn("Host observations − schedule windows +1", text)
         self.assertNotIn("extra click", text.lower())
         self.assertNotIn("double click", text.lower())
 
     def test_zero_delta_unsigned(self):
         snap = _snapshot(counts={"host_count_delta_vs_expected_slots": 0})
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
-        self.assertIn("Host Count Delta 0 ", text)
+        self.assertIn("Host observations − schedule windows 0 ", text)
 
     def test_compensating_case_shows_all_facts(self):
         snap = _snapshot(
@@ -139,9 +140,9 @@ class FormatterTests(unittest.TestCase):
             matching={"empty_expected_slot_count": 1, "multi_occupancy_slot_count": 1},
         )
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
-        self.assertIn("Host Count Delta 0", text)
-        self.assertIn("Unoccupied Expected Windows 1", text)
-        self.assertIn("Multi-observation Expected Windows 1", text)
+        self.assertIn("Host observations − schedule windows 0", text)
+        self.assertIn("Schedule windows without matched Host observation 1", text)
+        self.assertIn("Schedule windows with >1 matched Host observations 1", text)
         for word in ("clean", "ok", "pass"):
             self.assertNotIn(f" {word} ", f" {text.lower()} ")
 
@@ -149,24 +150,24 @@ class FormatterTests(unittest.TestCase):
         none_stats = {"count": 0, "average": None, "minimum": None, "maximum": None, "stdev": None}
         snap = _snapshot()
         snap["timing"] = {"matched_delta_stats": dict(none_stats), "matched_absolute_delta_stats": dict(none_stats)}
-        timing_line = format_host_evidence_review_lines(snap, _en)[5]
+        timing_line = format_host_evidence_review_lines(snap, _en)[-1]
         self.assertIn("Average — ", timing_line)
-        self.assertIn("Std Dev —", timing_line)
+        self.assertIn("Stdev —", timing_line)
         self.assertNotIn("0.000", timing_line)
 
     def test_zero_stat_is_not_dash(self):
         zero = {"count": 4, "average": 0.0, "minimum": 0.0, "maximum": 0.0, "stdev": 0.0}
         snap = _snapshot()
         snap["timing"] = {"matched_delta_stats": dict(zero), "matched_absolute_delta_stats": dict(zero)}
-        timing_line = format_host_evidence_review_lines(snap, _en)[5]
+        timing_line = format_host_evidence_review_lines(snap, _en)[-1]
         self.assertIn("Average 0.000", timing_line)
         self.assertNotIn("—", timing_line)
 
     def test_ambiguity_and_outside_visible_without_verdict(self):
         snap = _snapshot(matching={"ambiguous_host_observation_count": 7, "outside_capture_window_observation_count": 5})
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
-        self.assertIn("Ambiguous Host Observations 7", text)
-        self.assertIn("Outside Capture Window 5", text)
+        self.assertIn("Ambiguous Host observations 7", text)
+        self.assertIn("Host observations outside capture 5", text)
 
     def test_snapshot_not_mutated(self):
         snap = _snapshot()
@@ -178,7 +179,7 @@ class FormatterTests(unittest.TestCase):
         snap = _snapshot(configuration={"fixture_frequency_hz": 7.5, "reference_interval_ms": 1000.0 / 7.5})
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
         self.assertIn("Fixture Frequency 7.5 Hz", text)
-        self.assertIn("Reference Interval 133.333 ms", text)
+        self.assertIn("Configured reference interval 133.333 ms", text)
 
     def test_no_forbidden_terms_english(self):
         for snap in (
@@ -196,7 +197,7 @@ class FormatterTests(unittest.TestCase):
         for word in _FORBIDDEN_ZH:
             self.assertNotIn(word, text)
         self.assertIn("主機觀測證據", text)
-        self.assertIn("未佔用預期時間窗 3", text)
+        self.assertIn("無匹配主機觀測的排程時間窗 3", text)
 
     def test_all_languages_have_keys_and_render(self):
         for lang in SUPPORTED_LANGS:
@@ -293,10 +294,10 @@ class ReviewPresentationTests(unittest.TestCase):
         expected_lines = format_host_evidence_review_lines(snap, self.win._tr)
         for line in expected_lines:
             self.assertIn(line, text)
-        self.assertIn("Expected Slots 4", text)
-        self.assertIn("In-window Host Presses 4", text)
-        self.assertIn("Host Count Delta 0", text)
-        self.assertIn("Outside Capture Window 1", text)
+        self.assertIn("Schedule windows 4", text)
+        self.assertIn("Host observations in capture 4", text)
+        self.assertIn("Host observations − schedule windows 0", text)
+        self.assertIn("Host observations outside capture 1", text)
         self.win._show_workflow_page("results")
         self.win.results_tabs.setCurrentIndex(1)
         self.assertTrue(self.win.results_evidence_card.isVisibleTo(self.win))
@@ -317,9 +318,11 @@ class ReviewPresentationTests(unittest.TestCase):
         self.win.host_evidence_snapshot = _snapshot()
         self.win._refresh_metrics(final=True)
         text = self._review()
-        for fragment in ("Expected Slots 400", "Host Count Delta -1", "Unoccupied Expected Windows 3",
-                         "Multi-observation Expected Windows 2", "Unmatched Host Observations 1",
-                         "Ambiguous Host Observations 1", "Outside Capture Window 2", "Minimum -1.200"):
+        for fragment in ("Schedule windows 400", "Host observations − schedule windows -1",
+                         "Schedule windows without matched Host observation 3",
+                         "Schedule windows with >1 matched Host observations 2",
+                         "Host observations not matched to schedule 1",
+                         "Ambiguous Host observations 1", "Host observations outside capture 2", "Minimum -1.200"):
             self.assertIn(fragment, text)
 
     def test_manual_review_has_no_evidence(self):
@@ -328,15 +331,15 @@ class ReviewPresentationTests(unittest.TestCase):
         text = self._review()
         self.assertTrue(text.strip())
         self.assertNotIn(self.win._tr("he_title"), text)
-        self.assertNotIn("Expected Slots", text)
+        self.assertNotIn("Schedule windows", text)
 
     def test_fixture_auto_stop_off_has_no_evidence(self):
         self._setup_fixture(auto_sec=None)
         self._run([0, 25, 50, 75])
         text = self._review()
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self.assertNotIn("Expected Slots", text)
-        self.assertNotIn("Host Count Delta", text)
+        self.assertNotIn("Schedule windows", text)
+        self.assertNotIn("Host observations − schedule windows", text)
 
     def test_not_shown_while_running(self):
         self._setup_fixture(auto_sec="3600")
@@ -350,13 +353,13 @@ class ReviewPresentationTests(unittest.TestCase):
             self._run([0, 25, 50, 75])
             snap = self.win.host_evidence_snapshot
             before = copy.deepcopy(snap)
-            self.assertIn("Expected Slots 4", self._review())
+            self.assertIn("Schedule windows 4", self._review())
             self._set_lang("zh")
             zh_text = self._review()
             self.assertIn("主機觀測證據", zh_text)
-            self.assertIn("預期時間窗 4", zh_text)
+            self.assertIn("排程時間窗 4", zh_text)
             self._set_lang("en")
-            self.assertIn("Expected Slots 4", self._review())
+            self.assertIn("Schedule windows 4", self._review())
             self.win._refresh_metrics(final=True)
             self.win.repaint()
         self.assertEqual(builder.call_count, 1)

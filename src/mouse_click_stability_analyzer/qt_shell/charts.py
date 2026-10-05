@@ -18,6 +18,12 @@ INTERVAL_Y_MIN_SPAN_MS = 8.0
 INTERVAL_X_MIN_SPAN_MS = 500.0
 ZOOM_IN_FACTOR = 0.8
 ZOOM_OUT_FACTOR = 1.25
+WHEEL_ANGLE_NOTCH = 120
+WHEEL_PIXELS_PER_NOTCH = 40.0
+WHEEL_MAX_STEPS_PER_EVENT = 4
+NAV_CONTEXT_FACTOR = 4.0
+AXIS_CONTEXT = "context"
+AXIS_ELAPSED = "elapsed"
 HOVER_HIT_PX = 12.0
 
 
@@ -141,6 +147,73 @@ def _association_anchors(center: float | None, half_width: float | None) -> list
     return anchors
 
 
+def _valid_axis(lo: float, hi: float) -> bool:
+    return math.isfinite(lo) and math.isfinite(hi) and hi > lo
+
+
+def axis_navigation_envelope(
+    content_lo: float,
+    content_hi: float,
+    *,
+    min_span: float,
+    kind: str,
+    duration_ms: float | None = None,
+) -> tuple[float, float]:
+    """Presentation-only axis envelope. Always contains the content range.
+
+    ``NAV_CONTEXT_FACTOR`` is a UX/navigation constant, not an acceptance limit.
+    """
+    span_floor = float(min_span) if math.isfinite(float(min_span)) and float(min_span) > 0 else 1.0
+    if not _valid_axis(content_lo, content_hi):
+        return 0.0, span_floor
+    lo, hi = float(content_lo), float(content_hi)
+    if kind == AXIS_ELAPSED:
+        if duration_ms is not None:
+            try:
+                dur = float(duration_ms)
+            except (TypeError, ValueError):
+                dur = None
+            else:
+                if math.isfinite(dur) and dur > 0:
+                    pad = max((max(hi, dur) - lo) * FIT_MARGIN_FRAC, span_floor * 0.1)
+                    hi = max(hi, dur + pad)
+        if hi <= lo:
+            hi = lo + span_floor
+        return lo, hi
+    span = hi - lo
+    mid = (lo + hi) / 2.0
+    env_span = max(span * NAV_CONTEXT_FACTOR, span_floor)
+    env_lo = min(lo, mid - env_span / 2.0)
+    env_hi = max(hi, mid + env_span / 2.0)
+    floor = min(0.0, lo)
+    env_lo = max(env_lo, floor)
+    if env_lo > lo:
+        env_lo = lo
+    if env_hi <= env_lo:
+        env_hi = env_lo + max(span, span_floor)
+    return env_lo, env_hi
+
+
+def _clamp_axis(lo: float, hi: float, env_lo: float, env_hi: float, min_span: float) -> tuple[float, float]:
+    if not _valid_axis(env_lo, env_hi):
+        return lo, hi
+    env_span = env_hi - env_lo
+    span = hi - lo
+    span_floor = float(min_span) if math.isfinite(float(min_span)) and float(min_span) > 0 else 1.0
+    if not math.isfinite(span) or span <= 0:
+        span = min(span_floor, env_span)
+    span = min(max(span, min(span_floor, env_span)), env_span)
+    if lo < env_lo:
+        lo = env_lo
+        hi = lo + span
+    if hi > env_hi:
+        hi = env_hi
+        lo = hi - span
+    if lo < env_lo:
+        return env_lo, env_hi
+    return lo, hi
+
+
 class _ChartBase(QWidget):
     TITLE_H = 22
     LEGEND_H = 28
@@ -161,8 +234,18 @@ class _ChartBase(QWidget):
         self.association_half_width_ms: float | None = None
         self.zoom_locked = False
         self._user_view: tuple[float, float, float, float] | None = None
+        self._nav_home: tuple[float, float, float, float] | None = None
+        self._wheel_accum = 0
+        self._pan_enabled = False
+        self._panning = False
+        self._pan_last: QPointF | None = None
+        self.capture_duration_ms: float | None = None
         self.setMinimumHeight(200)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+
+    @property
+    def pan_enabled(self) -> bool:
+        return self._pan_enabled
 
     def set_theme(self, palette: ChartPalette, labels: dict[str, str] | None = None):
         self.palette = palette
@@ -204,12 +287,48 @@ class _ChartBase(QWidget):
         )
 
     def fit_data(self) -> None:
+        self._panning = False
+        self._pan_last = None
         self.zoom_locked = False
         self._user_view = None
+        self._wheel_accum = 0
+        home = self.autofit_bounds()
+        self._nav_home = home if home is not None and _valid_axis(home[0], home[1]) and _valid_axis(home[2], home[3]) else None
+        self.unsetCursor()
         self.update()
 
     def reset_view(self) -> None:
-        self.fit_data()
+        if self._nav_home is None:
+            self.fit_data()
+            return
+        home = self._nav_home
+        if not (_valid_axis(home[0], home[1]) and _valid_axis(home[2], home[3])):
+            self.fit_data()
+            return
+        self._panning = False
+        self._pan_last = None
+        self._user_view = home
+        self.zoom_locked = True
+        self._wheel_accum = 0
+        self.update()
+
+    def clear_navigation(self) -> None:
+        self.zoom_locked = False
+        self._user_view = None
+        self._nav_home = None
+        self._wheel_accum = 0
+        self._panning = False
+        self._pan_last = None
+        self.set_pan_enabled(False)
+        self.update()
+
+    def set_pan_enabled(self, enabled: bool) -> None:
+        self._pan_enabled = bool(enabled)
+        if not self._pan_enabled:
+            self._panning = False
+            self._pan_last = None
+            self.unsetCursor()
+        self.update()
 
     def zoom_in(self) -> None:
         self._zoom_by(ZOOM_IN_FACTOR)
@@ -230,44 +349,274 @@ class _ChartBase(QWidget):
     def _min_spans(self) -> tuple[float, float]:
         return SCATTER_X_MIN_SPAN_MS, SCATTER_Y_MIN_SPAN_MS
 
+    def _axis_kinds(self) -> tuple[str, str]:
+        return AXIS_CONTEXT, AXIS_CONTEXT
+
+    def navigation_envelope(self) -> tuple[float, float, float, float] | None:
+        content = self.autofit_bounds()
+        if content is None:
+            return None
+        xmin, xmax, ymin, ymax = content
+        min_x, min_y = self._min_spans()
+        x_kind, y_kind = self._axis_kinds()
+        x_lo, x_hi = axis_navigation_envelope(
+            xmin, xmax, min_span=min_x, kind=x_kind, duration_ms=self.capture_duration_ms,
+        )
+        y_lo, y_hi = axis_navigation_envelope(
+            ymin, ymax, min_span=min_y, kind=y_kind, duration_ms=None,
+        )
+        if not (_valid_axis(x_lo, x_hi) and _valid_axis(y_lo, y_hi)):
+            return None
+        return x_lo, x_hi, y_lo, y_hi
+
+    def _clamp_view(self, view: tuple[float, float, float, float]) -> tuple[float, float, float, float] | None:
+        xmin, xmax, ymin, ymax = view
+        env = self.navigation_envelope()
+        min_x, min_y = self._min_spans()
+        if env is not None:
+            xmin, xmax = _clamp_axis(xmin, xmax, env[0], env[1], min_x)
+            ymin, ymax = _clamp_axis(ymin, ymax, env[2], env[3], min_y)
+        clamped = (xmin, xmax, ymin, ymax)
+        if not (_valid_axis(xmin, xmax) and _valid_axis(ymin, ymax)):
+            return None
+        if not all(math.isfinite(v) for v in clamped):
+            return None
+        return clamped
+
+    def _commit_view(self, view: tuple[float, float, float, float]) -> None:
+        clamped = self._clamp_view(view)
+        if clamped is None:
+            return
+        self._ensure_nav_home()
+        self._user_view = clamped
+        self.zoom_locked = True
+        self.update()
+
+    def _ensure_nav_home(self) -> None:
+        if self._nav_home is not None:
+            return
+        home = self.autofit_bounds()
+        if home is not None and _valid_axis(home[0], home[1]) and _valid_axis(home[2], home[3]):
+            self._nav_home = home
+
+    def _event_local_pos(self, event) -> QPointF:
+        if hasattr(event, "position"):
+            return QPointF(event.position())
+        return QPointF(event.pos())
+
+    def data_at_pixel(self, pos) -> tuple[float, float] | None:
+        """Map a widget pixel through the plot rect to current visible data coordinates."""
+        bounds = self.visible_bounds()
+        plot = self._plot_rect()
+        pt = QPointF(pos)
+        if bounds is None or plot.width() <= 0 or plot.height() <= 0:
+            return None
+        if not plot.contains(pt):
+            return None
+        xmin, xmax, ymin, ymax = bounds
+        dx = xmax - xmin
+        dy = ymax - ymin
+        if dx <= 0 or dy <= 0 or not all(math.isfinite(v) for v in bounds):
+            return None
+        cx = xmin + (pt.x() - plot.left()) / plot.width() * dx
+        cy = ymin + (plot.bottom() - pt.y()) / plot.height() * dy
+        if not (math.isfinite(cx) and math.isfinite(cy)):
+            return None
+        return cx, cy
+
+    def pixel_at_data(self, cx: float, cy: float) -> QPointF | None:
+        """Inverse of data_at_pixel: visible data coordinate → widget pixel in the plot rect."""
+        bounds = self.visible_bounds()
+        plot = self._plot_rect()
+        if bounds is None or plot.width() <= 0 or plot.height() <= 0:
+            return None
+        xmin, xmax, ymin, ymax = bounds
+        dx = xmax - xmin
+        dy = ymax - ymin
+        if dx <= 0 or dy <= 0 or not all(math.isfinite(v) for v in bounds):
+            return None
+        if not (math.isfinite(cx) and math.isfinite(cy)):
+            return None
+        x = plot.left() + (cx - xmin) / dx * plot.width()
+        y = plot.bottom() - (cy - ymin) / dy * plot.height()
+        if not (math.isfinite(x) and math.isfinite(y)):
+            return None
+        return QPointF(x, y)
+
     def _zoom_by(self, factor: float, cx: float | None = None, cy: float | None = None) -> None:
+        """Scale the visible range around an anchor in data coordinates.
+
+        The anchor keeps its fractional position in the new range, so a wheel
+        cursor stays under the pointer and a button zoom (range center) stays
+        centered. Presentation-only; never mutates observations.
+        """
         bounds = self.visible_bounds()
         if bounds is None:
             return
         xmin, xmax, ymin, ymax = bounds
+        xspan0 = xmax - xmin
+        yspan0 = ymax - ymin
+        if not (math.isfinite(xspan0) and math.isfinite(yspan0) and xspan0 > 0 and yspan0 > 0):
+            return
         if cx is None:
-            cx = (xmin + xmax) / 2.0
+            cx = xmin + xspan0 / 2.0
         if cy is None:
-            cy = (ymin + ymax) / 2.0
+            cy = ymin + yspan0 / 2.0
+        if not (math.isfinite(cx) and math.isfinite(cy)):
+            return
+        try:
+            scale = float(factor)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(scale) or scale <= 0:
+            return
         min_x, min_y = self._min_spans()
-        xspan = max((xmax - xmin) * factor, min_x)
-        yspan = max((ymax - ymin) * factor, min_y)
+        xspan = max(xspan0 * scale, min_x)
+        yspan = max(yspan0 * scale, min_y)
         if not (math.isfinite(xspan) and math.isfinite(yspan) and xspan > 0 and yspan > 0):
             return
-        self._user_view = (cx - xspan / 2.0, cx + xspan / 2.0, cy - yspan / 2.0, cy + yspan / 2.0)
-        self.zoom_locked = True
-        self.update()
+        frac_x = min(1.0, max(0.0, (cx - xmin) / xspan0))
+        frac_y = min(1.0, max(0.0, (cy - ymin) / yspan0))
+        xmin_n = cx - frac_x * xspan
+        xmax_n = xmin_n + xspan
+        ymin_n = cy - frac_y * yspan
+        ymax_n = ymin_n + yspan
+        view = (xmin_n, xmax_n, ymin_n, ymax_n)
+        if xmax_n <= xmin_n or ymax_n <= ymin_n or not all(math.isfinite(v) for v in view):
+            return
+        self._commit_view(view)
+
+    def _wheel_notch_steps(self, event) -> int:
+        """Map a wheel event to deterministic ±120 notch steps. Remainder is kept."""
+        angle = 0
+        if hasattr(event, "angleDelta"):
+            angle = int(event.angleDelta().y())
+        if angle == 0 and hasattr(event, "pixelDelta"):
+            pixels = int(event.pixelDelta().y())
+            if pixels != 0:
+                angle = int(round(pixels * (WHEEL_ANGLE_NOTCH / WHEEL_PIXELS_PER_NOTCH)))
+        if angle == 0:
+            return 0
+        self._wheel_accum += angle
+        steps = 0
+        while self._wheel_accum >= WHEEL_ANGLE_NOTCH:
+            self._wheel_accum -= WHEEL_ANGLE_NOTCH
+            steps += 1
+        while self._wheel_accum <= -WHEEL_ANGLE_NOTCH:
+            self._wheel_accum += WHEEL_ANGLE_NOTCH
+            steps -= 1
+        if steps > WHEEL_MAX_STEPS_PER_EVENT:
+            steps = WHEEL_MAX_STEPS_PER_EVENT
+        elif steps < -WHEEL_MAX_STEPS_PER_EVENT:
+            steps = -WHEEL_MAX_STEPS_PER_EVENT
+        return steps
 
     def wheelEvent(self, event):
         if not self.data_aware_fit:
             super().wheelEvent(event)
             return
-        delta = event.angleDelta().y()
-        if delta == 0:
+        pos = self._event_local_pos(event)
+        plot = self._plot_rect()
+        if not plot.contains(pos):
+            self._wheel_accum = 0
             event.ignore()
             return
-        factor = ZOOM_IN_FACTOR if delta > 0 else ZOOM_OUT_FACTOR
+        steps = self._wheel_notch_steps(event)
+        if steps != 0:
+            for _ in range(abs(steps)):
+                data = self.data_at_pixel(pos)
+                if data is None:
+                    break
+                cx, cy = data
+                factor = ZOOM_IN_FACTOR if steps > 0 else ZOOM_OUT_FACTOR
+                self._zoom_by(factor, cx=cx, cy=cy)
+        event.accept()
+
+    def _begin_pan(self, event) -> bool:
+        if not (self.data_aware_fit and self._pan_enabled):
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        pos = self._event_local_pos(event)
+        if not self._plot_rect().contains(pos):
+            return False
+        if self.visible_bounds() is None:
+            return False
+        self._ensure_nav_home()
+        self._panning = True
+        self._pan_last = QPointF(pos)
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.grabMouse()
+        return True
+
+    def _update_pan(self, event) -> bool:
+        if not self._panning or self._pan_last is None:
+            return False
+        pos = self._event_local_pos(event)
         bounds = self.visible_bounds()
         plot = self._plot_rect()
-        cx = cy = None
-        if bounds is not None and plot.width() > 0 and plot.height() > 0:
-            pos = event.position() if hasattr(event, "position") else QPointF(event.pos())
-            if plot.contains(pos):
-                xmin, xmax, ymin, ymax = bounds
-                cx = xmin + (pos.x() - plot.left()) / plot.width() * (xmax - xmin)
-                cy = ymin + (plot.bottom() - pos.y()) / plot.height() * (ymax - ymin)
-        self._zoom_by(factor, cx=cx, cy=cy)
-        event.accept()
+        if bounds is None or plot.width() <= 0 or plot.height() <= 0:
+            return True
+        xmin, xmax, ymin, ymax = bounds
+        xspan = xmax - xmin
+        yspan = ymax - ymin
+        dx_px = pos.x() - self._pan_last.x()
+        dy_px = pos.y() - self._pan_last.y()
+        xmin_n = xmin - dx_px / plot.width() * xspan
+        xmax_n = xmin_n + xspan
+        ymin_n = ymin + dy_px / plot.height() * yspan
+        ymax_n = ymin_n + yspan
+        self._commit_view((xmin_n, xmax_n, ymin_n, ymax_n))
+        self._pan_last = QPointF(pos)
+        return True
+
+    def _end_pan(self, event) -> bool:
+        if not self._panning:
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        self._panning = False
+        self._pan_last = None
+        self.releaseMouse()
+        pos = self._event_local_pos(event)
+        if self._pan_enabled and self._plot_rect().contains(pos):
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+        return True
+
+    def _sync_pan_cursor(self, event) -> None:
+        if self._panning or not self._pan_enabled or not self.data_aware_fit:
+            return
+        pos = self._event_local_pos(event)
+        if self._plot_rect().contains(pos):
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def mousePressEvent(self, event):
+        if self._begin_pan(event):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._update_pan(event):
+            event.accept()
+            return
+        self._sync_pan_cursor(event)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._end_pan(event):
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        if not self._panning:
+            self.unsetCursor()
+        super().leaveEvent(event)
 
     def association_window(self) -> tuple[float, float] | None:
         if self.target_beat_ms is None or self.association_half_width_ms is None:
@@ -555,7 +904,7 @@ class ScatterChart(_ChartBase):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        if not self.data_aware_fit:
+        if not self.data_aware_fit or self._panning:
             return
         pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
         info = self.nearest_observation(pos)
@@ -595,7 +944,7 @@ class ScatterChart(_ChartBase):
 
         legend = [
             (pal.on_cadence, self._screening_label("ON_CADENCE", "Observation")),
-            (pal.extra, self._screening_label("TRUE_EXTRA_CLICK", "Extra observation")),
+            (pal.extra, self._screening_label("TRUE_EXTRA_CLICK", "Short interval")),
             (pal.chatter, self._screening_label("CHATTER_BOUNCE", "Very short interval")),
             (pal.miss, self._screening_label("MISS_OR_SLOW", "Long interval")),
         ]
@@ -665,6 +1014,7 @@ class IntervalChart(_ChartBase):
         overlay: list[tuple[float, float]] | None = None,
         target_beat_ms: float | None = None,
         association_half_width_ms: float | None = None,
+        capture_duration_ms: float | None = None,
     ):
         self.series = list(series or [])
         self.overlay_series = list(overlay or [])
@@ -672,10 +1022,14 @@ class IntervalChart(_ChartBase):
             self.title = title
         self.target_beat_ms = target_beat_ms
         self.association_half_width_ms = association_half_width_ms
+        self.capture_duration_ms = capture_duration_ms
         self.update()
 
     def _min_spans(self) -> tuple[float, float]:
         return INTERVAL_X_MIN_SPAN_MS, INTERVAL_Y_MIN_SPAN_MS
+
+    def _axis_kinds(self) -> tuple[str, str]:
+        return AXIS_ELAPSED, AXIS_CONTEXT
 
     def autofit_bounds(self) -> tuple[float, float, float, float] | None:
         all_pts = list(self.series) + list(self.overlay_series)
