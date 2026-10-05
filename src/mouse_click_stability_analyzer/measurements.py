@@ -49,6 +49,18 @@ def reference_interval_ms(reference_rate_hz: Any) -> float | None:
     return _MS_PER_SECOND / hz
 
 
+def reference_interval_ms_or_none(reference_rate_hz: Any) -> float | None:
+    """Same conversion as ``reference_interval_ms`` but None instead of raising.
+
+    For display and runtime paths that must never surface inf/nan or crash on
+    missing, non-numeric, non-finite, or non-positive rates.
+    """
+    try:
+        return reference_interval_ms(reference_rate_hz)
+    except ValueError:
+        return None
+
+
 def interval_delta_ms(
     observed_interval_ms: Any,
     reference_interval_ms_value: Any,

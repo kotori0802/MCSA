@@ -434,15 +434,16 @@ class WindowPreferencesUiTests(unittest.TestCase):
 
     # 14
     def test_language_retranslates_window_controls(self):
-        self.win.lang_combo.setCurrentIndex(SUPPORTED_LANGS.index("de"))
-        self.assertEqual(self.win.lang, "de")
-        de = STRINGS["de"]
-        self.assertEqual(self.win.lbl_pref_window.text(), de["pref_window_section"].upper())
-        self.assertEqual(self.win.startup_window_combo.currentText(), de["window_mode_auto"])
-        self.assertEqual(self.win.remember_window_size_checkbox.text(), de["remember_window_size"])
-        self.assertEqual(self.win.remember_window_size_note.text(), de["remember_window_size_note"])
-        self.assertEqual(self.win.reset_window_geometry_button.text(), de["reset_window_geometry"])
+        self.win.lang_combo.setCurrentIndex(SUPPORTED_LANGS.index("zh"))
+        self.assertEqual(self.win.lang, "zh")
+        zh = STRINGS["zh"]
+        self.assertEqual(self.win.lbl_pref_window.text(), zh["pref_window_section"].upper())
+        self.assertEqual(self.win.startup_window_combo.currentText(), zh["window_mode_auto"])
+        self.assertEqual(self.win.remember_window_size_checkbox.text(), zh["remember_window_size"])
+        self.assertEqual(self.win.remember_window_size_note.text(), zh["remember_window_size_note"])
+        self.assertEqual(self.win.reset_window_geometry_button.text(), zh["reset_window_geometry"])
         self.assertEqual(self.win.startup_window_combo.currentData(), "auto")
+        self.assertEqual(list(SUPPORTED_LANGS), ["en", "zh"])
 
     # 15, 16
     def test_window_controls_owned_by_preferences_without_duplicates(self):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import statistics
 from typing import Any
 
+from .measurements import reference_interval_ms_or_none
+
 HIGH_SPEED_HZ_FLOOR = 30.0
 # 25Hz beat is 40ms. Typed 25/28Hz would miss hz>=30; treat cad<=40ms as extreme.
 EXTREME_CADENCE_MS = 40.0
@@ -36,7 +38,7 @@ def is_extreme_cadence(settings: dict[str, Any] | None) -> bool:
 def cadence_ms(settings: dict[str, Any] | None) -> float | None:
     hz = fixture_hz(settings)
     if hz > 0:
-        return 1000.0 / hz
+        return reference_interval_ms_or_none(hz)
     return None
 
 

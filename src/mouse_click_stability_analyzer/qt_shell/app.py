@@ -62,7 +62,7 @@ from ..app import (
     _now_run_id,
     _verify_artifacts,
 )
-from ..cadence import cadence_ms, ranking_metrics
+from ..cadence import cadence_ms, fixture_hz as fixture_rate_hz, ranking_metrics
 from ..completed_result import (
     RUN_STATUSES,
     accepted_host_press_count,
@@ -76,12 +76,16 @@ from ..completed_result import (
 )
 from ..core import now_iso
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
-from ..i18n import LANG_LABELS, SUPPORTED_LANGS, t
-from ..measurements import actual_run_duration_s
+from ..i18n import LANG_LABELS, STRINGS, SUPPORTED_LANGS, normalize_lang, t
+from ..measurements import (
+    actual_run_duration_s,
+    reference_interval_ms,
+    reference_interval_ms_or_none,
+)
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
-from .styles import get_palette, get_style
+from .styles import density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
 
@@ -117,7 +121,7 @@ def post_run_quiet_ms(settings: dict[str, Any] | None) -> int:
         return floor
     if not math.isfinite(hz_f) or hz_f <= 0.0:
         return floor
-    interval_ms = 1000.0 / hz_f
+    interval_ms = reference_interval_ms(hz_f)
     scaled = float(POST_RUN_QUIET_INTERVALS) * interval_ms
     return max(floor, int(round(scaled)))
 
@@ -199,6 +203,39 @@ def parse_reference_rate_hz(raw: Any) -> float:
     if not math.isfinite(hz) or hz <= 0.0:
         raise ValueError("Reference Rate must be a finite positive number")
     return hz
+
+
+def format_reference_interval_ms(interval_ms: Any) -> str:
+    """Two-decimal display of a reference interval; stored values keep full precision."""
+    if interval_ms is None or isinstance(interval_ms, bool):
+        return "—"
+    try:
+        value = float(interval_ms)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(value):
+        return "—"
+    return f"{value:.2f}"
+
+
+def format_reference_rate_hz(rate_hz: Any) -> str:
+    if rate_hz is None or isinstance(rate_hz, bool):
+        return "—"
+    try:
+        value = float(rate_hz)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(value) or value <= 0.0:
+        return "—"
+    return f"{value:g}"
+
+
+def setup_reference_interval_ms(raw_rate: Any) -> float | None:
+    """Derived Setup interval for the typed Reference Rate, or None if the rate is invalid."""
+    try:
+        return reference_interval_ms_or_none(parse_reference_rate_hz(raw_rate))
+    except ValueError:
+        return None
 
 
 def stamp_qt_reference_rate(
@@ -814,7 +851,7 @@ class MainWindow(QMainWindow):
         window_settings: QSettings | None = None,
     ):
         super().__init__()
-        self.lang = lang if lang in SUPPORTED_LANGS else "en"
+        self.lang = normalize_lang(lang)
         self.theme = theme if theme in ("light", "dark") else "light"
         self.setWindowTitle(t(self.lang, "app_title"))
         self.setMinimumSize(1024, 640)
@@ -880,7 +917,10 @@ class MainWindow(QMainWindow):
         self._post_run_quiet_timer.setSingleShot(True)
         self._post_run_quiet_timer.timeout.connect(self._on_post_run_quiet_timeout)
 
+        self._density = density_for_size(self.width(), self.height())
+        self._density_sync_active = False
         self._build_ui()
+        self._apply_density_layout()
         self._apply_theme()
         self._retranslate_ui()
         self._apply_mode_fields()
@@ -917,6 +957,25 @@ class MainWindow(QMainWindow):
     def _report_lang(self) -> str:
         return "zh" if self.lang == "zh" else "en"
 
+    def _capture_chart_subtitle(self, settings: dict[str, Any] | None) -> str:
+        """Fixture: reference interval in ms first, configured rate second. Manual: no reference."""
+        beat = cadence_ms(settings) if settings and not _is_manual_profile(settings) else None
+        if not beat:
+            return self._tr("chart_stability_map_subtitle")
+        return self._tr(
+            "chart_stability_map_subtitle_fixture",
+            beat=format_reference_interval_ms(beat),
+            hz=format_reference_rate_hz(fixture_rate_hz(settings)),
+        )
+
+    def _run_status_display(self, status: Any) -> str:
+        """Localized label for an authoritative Run Status token; the token itself is unchanged."""
+        token = str(status)
+        key = f"run_status_{token.lower()}"
+        if token in ("COMPLETE", "NO_DATA", "INVALID") and key in STRINGS["en"]:
+            return self._tr(key)
+        return token
+
     # ── UI ──────────────────────────────────────────────────────────
     def _card(self) -> QFrame:
         f = QFrame()
@@ -936,6 +995,7 @@ class MainWindow(QMainWindow):
         work_l = QVBoxLayout(workspace)
         work_l.setContentsMargins(4, 4, 8, 4)
         work_l.setSpacing(12)
+        self._workspace_layout = work_l
         work_l.addLayout(self._build_workspace_header())
 
         self._workflow_pages = ("setup", "capture", "results", "preferences")
@@ -1005,6 +1065,8 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 2, 0, 6)
         titles = QVBoxLayout()
         titles.setSpacing(4)
+        self._workspace_header_layout = header
+        self._workspace_titles_layout = titles
         self.page_title = QLabel("Setup")
         self.page_title.setObjectName("PageTitle")
         self.page_subtitle = QLabel("")
@@ -1118,6 +1180,11 @@ class MainWindow(QMainWindow):
         self.hz_combo.setCurrentText("10")
         self._setup_field(self.hz_combo)
         config_l.addWidget(self.hz_combo)
+        self.hz_interval_label = QLabel("")
+        self.hz_interval_label.setObjectName("DerivedValue")
+        self.hz_interval_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.hz_interval_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        config_l.addWidget(self.hz_interval_label)
         self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         config_l.addSpacing(10)
@@ -1283,12 +1350,14 @@ class MainWindow(QMainWindow):
         inner_l = QVBoxLayout(inner)
         inner_l.setContentsMargins(0, 0, 4, 8)
         inner_l.setSpacing(12)
+        self._capture_layout = inner_l
 
         actions = self._card()
         actions.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         actions_l = QVBoxLayout(actions)
         actions_l.setContentsMargins(16, 12, 16, 12)
         actions_l.setSpacing(8)
+        self._capture_actions_layout = actions_l
         self.lbl_controls = self._section("CONTROLS")
         actions_l.addWidget(self.lbl_controls)
         self.btn_stop = QPushButton("Stop (F5 / Esc)")
@@ -1327,6 +1396,7 @@ class MainWindow(QMainWindow):
         live_l = QVBoxLayout(live)
         live_l.setContentsMargins(16, 14, 16, 14)
         live_l.setSpacing(8)
+        self._capture_live_layout = live_l
         self.mode_label = QLabel("Manual · Observation")
         self.mode_label.setObjectName("Subtitle")
         live_l.addWidget(self.mode_label)
@@ -1337,13 +1407,13 @@ class MainWindow(QMainWindow):
         interval_cell, self.val_interval = self._stat_cell("INTERVAL", "interval")
         hold_cell, self.val_hold = self._stat_cell("HOLD", "hold")
         verdict_cell, self.val_verdict = self._stat_cell("RUN STATUS", "run_status")
-        # 1100 / 760 chosen from 6× ~155 px cells at 1280 (content ~1032) vs 6× ~180 px at 1440 (~1192).
+        # 960 keeps one row at 1280 wide (content ~1014, 6× ~159 px cells) so the chart gets the height.
         self.capture_stats_grid = ResponsiveItemGrid(
             [phase_cell, time_cell, clicks_cell, interval_cell, hold_cell, verdict_cell],
             wide_columns=6,
             medium_columns=3,
             compact_columns=2,
-            wide_min_width=1100,
+            wide_min_width=960,
             medium_min_width=760,
         )
         live_l.addWidget(self.capture_stats_grid)
@@ -1361,7 +1431,7 @@ class MainWindow(QMainWindow):
             wide_columns=5,
             medium_columns=3,
             compact_columns=2,
-            wide_min_width=1080,
+            wide_min_width=940,
             medium_min_width=760,
         )
         live_l.addWidget(self.capture_issues_grid)
@@ -1391,6 +1461,7 @@ class MainWindow(QMainWindow):
         viz_l = QHBoxLayout(viz)
         viz_l.setContentsMargins(8, 4, 8, 4)
         viz_l.setSpacing(6)
+        self._capture_viz_layout = viz_l
         self.btn_view_stability = QPushButton("Stability Map")
         self.btn_view_stability.setObjectName("Segment")
         self.btn_view_stability.setCheckable(True)
@@ -1439,6 +1510,8 @@ class MainWindow(QMainWindow):
         self.test_area.setMinimumHeight(320)
         self.test_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ta_l = QVBoxLayout(self.test_area)
+        self._test_area_layout = ta_l
+        self._test_area_default_margins = ta_l.contentsMargins()
         self.hint = QLabel("TEST AREA\nLock the Setup profile, then Start Capture.\nStop with F5 or Esc")
         self.hint.setObjectName("Hint")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2044,10 +2117,72 @@ class MainWindow(QMainWindow):
         cell.setMinimumHeight(48)
         return cell, val
 
+    @property
+    def density(self) -> str:
+        return self._density
+
+    def _sync_density(self) -> None:
+        """Switch the compact/normal tier only when the window crosses a tier boundary."""
+        if getattr(self, "_density_sync_active", True) or not hasattr(self, "test_area"):
+            return
+        density = density_for_size(self.width(), self.height())
+        if density == self._density:
+            return
+        self._density_sync_active = True
+        try:
+            self._density = density
+            self._apply_density_layout()
+            self._apply_theme()
+        finally:
+            self._density_sync_active = False
+
+    def _apply_density_layout(self) -> None:
+        """Presentation-only spacing; never touches run data or Test Area acceptance rules."""
+        d = self._density
+
+        def margins(layout, name):
+            layout.setContentsMargins(*layout_metric(name, d))
+
+        self._workspace_layout.setSpacing(layout_metric("workspace_gap", d))
+        margins(self._workspace_header_layout, "header_margins")
+        self._workspace_titles_layout.setSpacing(layout_metric("header_gap", d))
+        self._capture_layout.setSpacing(layout_metric("capture_gap", d))
+        margins(self._capture_actions_layout, "actions_margins")
+        margins(self._capture_live_layout, "live_margins")
+        self._capture_actions_layout.setSpacing(layout_metric("card_gap", d))
+        self._capture_live_layout.setSpacing(layout_metric("card_gap", d))
+        margins(self._capture_viz_layout, "toolbar_margins")
+        ta_margins = layout_metric("test_area_margins", d)
+        if ta_margins is None:
+            self._test_area_layout.setContentsMargins(self._test_area_default_margins)
+        else:
+            self._test_area_layout.setContentsMargins(*ta_margins)
+        action_h = layout_metric("action_button_min_h", d)
+        for btn in (*self.capture_action_bar._buttons, *self.capture_completed_bar._buttons):
+            btn.setMinimumHeight(action_h)
+        toolbar_h = layout_metric("toolbar_button_min_h", d)
+        for btn in (
+            self.btn_view_stability, self.btn_view_interval,
+            self.btn_chart_fit, self.btn_chart_zoom_in,
+            self.btn_chart_zoom_out, self.btn_chart_reset,
+        ):
+            btn.setMinimumHeight(toolbar_h)
+        cell_h = layout_metric("stat_cell_min_h", d)
+        for lab in self._stat_name_labels.values():
+            cell = lab.parentWidget()
+            if cell is not None and cell.objectName() == "StatCell":
+                cell.setMinimumHeight(cell_h)
+        test_area_h = layout_metric("test_area_min_h", d)
+        self.test_area.setMinimumHeight(test_area_h)
+        self.capture_splitter.setMinimumHeight(test_area_h)
+        chart_h = layout_metric("chart_min_h", d)
+        self.scatter.setMinimumHeight(chart_h)
+        self.interval_chart.setMinimumHeight(chart_h)
+
     def _apply_theme(self):
         app = QApplication.instance()
         if app:
-            app.setStyleSheet(get_style(self.theme))
+            app.setStyleSheet(get_style(self.theme, self._density))
         pal = get_palette(self.theme)
         labels = self._chart_labels()
         self.scatter.set_theme(pal, labels)
@@ -2065,7 +2200,7 @@ class MainWindow(QMainWindow):
         self._update_controls()
 
     def _on_lang_changed(self):
-        self.lang = self.lang_combo.currentData() or "en"
+        self.lang = normalize_lang(self.lang_combo.currentData())
         self._retranslate_ui()
         self._apply_mode_fields()
         self._apply_theme()
@@ -2127,6 +2262,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._sync_density()
         self._sync_results_analysis_split()
         self._schedule_results_layout_sync()
 
@@ -2411,6 +2547,11 @@ class MainWindow(QMainWindow):
         self.btn_chart_zoom_in.setText(self._tr("viz_zoom_in"))
         self.btn_chart_zoom_out.setText(self._tr("viz_zoom_out"))
         self.btn_chart_reset.setText(self._tr("viz_reset_view"))
+        self.scatter.title = self._tr("chart_stability_map")
+        self.scatter.subtitle = self._capture_chart_subtitle(self.locked or self.profile_locked_settings)
+        self.interval_chart.title = self._tr("chart_interval_trend")
+        self.scatter.update()
+        self.interval_chart.update()
         self.preferences_note.setText(self._tr("preferences_more_note"))
         self.radio_manual.setText(self._tr("manual"))
         self.radio_fixture.setText(self._tr("fixture"))
@@ -2418,6 +2559,7 @@ class MainWindow(QMainWindow):
         self.device_edit.setPlaceholderText(self._tr("device_placeholder"))
         self.lbl_button.setText(self._tr("button"))
         self.hz_label.setText(self._tr("reference_rate_hz"))
+        self._refresh_fixture_mode_label()
         self.timing_tol_label.setText(self._tr("fixture_timing_tolerance_ms"))
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
@@ -2490,6 +2632,7 @@ class MainWindow(QMainWindow):
         manual = self._ui_is_manual()
         self.hz_label.setVisible(not manual)
         self.hz_combo.setVisible(not manual)
+        self.hz_interval_label.setVisible(not manual)
         self.timing_tol_label.setVisible(not manual)
         self.timing_tol_edit.setVisible(not manual)
         self.auto_stop_label.setVisible(not manual)
@@ -2504,14 +2647,16 @@ class MainWindow(QMainWindow):
             self._refresh_lifecycle_presentation()
 
     def _refresh_fixture_mode_label(self, _text: str = ""):
+        raw = self.hz_combo.currentText()
+        interval_text = format_reference_interval_ms(setup_reference_interval_ms(raw))
+        self.hz_interval_label.setText(self._tr("reference_interval_derived", ms=interval_text))
         if self._ui_is_manual():
             return
-        raw = self.hz_combo.currentText()
         try:
             hz_text = f"{parse_reference_rate_hz(raw):g}"
         except ValueError:
             hz_text = (raw or "").strip() or "—"
-        self.mode_label.setText(self._tr("mode_fixture", hz=hz_text))
+        self.mode_label.setText(self._tr("mode_fixture", hz=hz_text, ms=interval_text))
 
     def _sync_auto_stop_widgets(self):
         fixture = not self._ui_is_manual()
@@ -2728,7 +2873,7 @@ class MainWindow(QMainWindow):
         self.val_clicks.setText(str(int(model["run"]["host_press_count"])))
         self.results_context_label.setText(self._format_run_context(model))
         visible_tags = model["assessment"]["tags"]
-        self.results_verdict_label.setText(str(model["run"]["run_status"]))
+        self.results_verdict_label.setText(self._run_status_display(model["run"]["run_status"]))
         self.results_tags_label.setText(
             ", ".join(visible_tags) if visible_tags else self._tr("review_tags_none")
         )
@@ -4109,7 +4254,7 @@ class MainWindow(QMainWindow):
         else:
             self.val_dut.setText(str(m.get("dut_score", "--")))
             self.val_setup.setText(str(m.get("setup_score", "--")))
-        self.val_verdict.setText(str(run_status))
+        self.val_verdict.setText(self._run_status_display(run_status))
         if final or self.completed:
             alert = [tag for tag in _QT_ALERT_TAGS if tag in tags]
             self.alert_label.setText(" · ".join(alert))
@@ -4125,10 +4270,7 @@ class MainWindow(QMainWindow):
         fixture = not _is_manual_profile(settings)
         reference = beat if fixture else None
         association = self._fixture_association_half_width_ms(settings) if fixture else None
-        if fixture and beat:
-            subtitle = self._tr("chart_stability_map_subtitle_fixture", beat=f"{beat:.2f}")
-        else:
-            subtitle = self._tr("chart_stability_map_subtitle")
+        subtitle = self._capture_chart_subtitle(settings)
         self.scatter.set_points(
             pts,
             title=self._tr("chart_stability_map"),

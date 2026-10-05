@@ -5,6 +5,139 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from PySide6.QtGui import QFont
+
+# System fonts only; JhengHei covers Traditional Chinese glyphs on Windows.
+UI_FONT_FAMILIES: tuple[str, ...] = (
+    "Segoe UI Variable",
+    "Segoe UI",
+    "Microsoft JhengHei UI",
+    "Microsoft JhengHei",
+    "PingFang TC",
+    "SF Pro Text",
+)
+UI_FONT_STACK = ", ".join(f'"{name}"' for name in UI_FONT_FAMILIES) + ", sans-serif"
+MONO_FONT_STACK = 'Consolas, "Cascadia Mono", monospace'
+
+DENSITY_NORMAL = "normal"
+DENSITY_COMPACT = "compact"
+DENSITIES: tuple[str, ...] = (DENSITY_NORMAL, DENSITY_COMPACT)
+# Windows below 800 px tall (the 1280×720 and 1366×768 presets) or 1100 px wide use the compact tier.
+COMPACT_MAX_HEIGHT = 800
+COMPACT_MAX_WIDTH = 1100
+
+# Pixel sizes per typography role. Compact trims headings and metrics; body text stays readable.
+TYPE_SCALE: dict[str, dict[str, int]] = {
+    DENSITY_NORMAL: {
+        "page_title": 24,
+        "section_title": 20,
+        "metric": 17,
+        "emphasis": 15,
+        "hint": 14,
+        "body": 13,
+        "label": 12,
+        "caption": 11,
+        "micro": 10,
+    },
+    DENSITY_COMPACT: {
+        "page_title": 20,
+        "section_title": 18,
+        "metric": 15,
+        "emphasis": 14,
+        "hint": 13,
+        "body": 13,
+        "label": 12,
+        "caption": 11,
+        "micro": 10,
+    },
+}
+
+CONTROL_PADDING: dict[str, dict[str, str]] = {
+    DENSITY_NORMAL: {
+        "button": "10px 14px",
+        "secondary": "10px 16px",
+        "segment": "8px 14px",
+        "tool": "10px 22px 10px 16px",
+        "input": "8px 10px",
+        "combo": "8px 32px 8px 12px",
+    },
+    DENSITY_COMPACT: {
+        "button": "6px 12px",
+        "secondary": "6px 12px",
+        "segment": "5px 10px",
+        "tool": "6px 20px 6px 12px",
+        "input": "5px 8px",
+        "combo": "5px 30px 5px 10px",
+    },
+}
+
+# Layout spacing applied in code (QSS cannot set layout margins).
+LAYOUT_METRICS: dict[str, dict[str, object]] = {
+    DENSITY_NORMAL: {
+        "workspace_gap": 12,
+        "header_margins": (0, 2, 0, 6),
+        "header_gap": 4,
+        "capture_gap": 12,
+        "actions_margins": (16, 12, 16, 12),
+        "live_margins": (16, 14, 16, 14),
+        "card_gap": 8,
+        "toolbar_margins": (8, 4, 8, 4),
+        "action_button_min_h": 38,
+        "toolbar_button_min_h": 28,
+        "stat_cell_min_h": 48,
+        "test_area_margins": None,
+        "test_area_min_h": 320,
+        "chart_min_h": 220,
+    },
+    DENSITY_COMPACT: {
+        "workspace_gap": 6,
+        "header_margins": (0, 0, 0, 2),
+        "header_gap": 0,
+        "capture_gap": 6,
+        "actions_margins": (12, 6, 12, 6),
+        "live_margins": (12, 6, 12, 6),
+        "card_gap": 4,
+        "toolbar_margins": (6, 2, 6, 2),
+        "action_button_min_h": 30,
+        "toolbar_button_min_h": 24,
+        "stat_cell_min_h": 40,
+        "test_area_margins": (8, 4, 8, 6),
+        "test_area_min_h": 300,
+        "chart_min_h": 180,
+    },
+}
+
+CHART_FONT_PT: dict[str, int] = {
+    "title": 10,
+    "subtitle": 8,
+    "tick": 8,
+    "placeholder": 11,
+}
+
+
+def density_for_size(width: int, height: int) -> str:
+    """Deterministic two-tier density from the window's client size."""
+    if int(height) < COMPACT_MAX_HEIGHT or int(width) < COMPACT_MAX_WIDTH:
+        return DENSITY_COMPACT
+    return DENSITY_NORMAL
+
+
+def type_px(role: str, density: str = DENSITY_NORMAL) -> int:
+    return TYPE_SCALE[density if density in DENSITIES else DENSITY_NORMAL][role]
+
+
+def layout_metric(name: str, density: str = DENSITY_NORMAL):
+    return LAYOUT_METRICS[density if density in DENSITIES else DENSITY_NORMAL][name]
+
+
+def chart_font(role: str, *, bold: bool = False) -> QFont:
+    font = QFont()
+    font.setFamilies(list(UI_FONT_FAMILIES))
+    font.setPointSize(CHART_FONT_PT[role])
+    if bold:
+        font.setWeight(QFont.Weight.DemiBold)
+    return font
+
 
 @dataclass(frozen=True)
 class ChartPalette:
@@ -66,8 +199,8 @@ DARK_PALETTE = ChartPalette(
 
 LIGHT_STYLE = """
 QWidget {
-    font-family: "Segoe UI Variable", "Segoe UI", "SF Pro Text", sans-serif;
-    font-size: 13px;
+    font-family: @FONT_UI@;
+    font-size: @FS_BODY@px;
     color: #1d1d1f;
     background: #f5f5f7;
 }
@@ -93,13 +226,13 @@ QScrollArea#PageScroll > QWidget > QWidget {
     background: transparent;
 }
 QLabel#PageTitle {
-    font-size: 28px;
+    font-size: @FS_PAGE_TITLE@px;
     font-weight: 700;
     color: #1d1d1f;
     background: transparent;
 }
 QLabel#PageSubtitle {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #6e6e73;
     background: transparent;
 }
@@ -107,7 +240,7 @@ QPushButton#NavButton {
     text-align: left;
     border: none;
     border-radius: 10px;
-    padding: 10px 14px;
+    padding: @PAD_BUTTON@;
     min-height: 20px;
     background: transparent;
     font-weight: 600;
@@ -134,13 +267,13 @@ QFrame#TestArea[active="true"] {
     background: #f7fff9;
 }
 QLabel#Title {
-    font-size: 22px;
+    font-size: @FS_SECTION_TITLE@px;
     font-weight: 700;
     color: #1d1d1f;
     background: transparent;
 }
 QLabel#Subtitle {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #007aff;
     font-weight: 600;
     background: transparent;
@@ -148,17 +281,17 @@ QLabel#Subtitle {
 QLabel#Muted {
     color: #6e6e73;
     background: transparent;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QLabel#StatLabel {
     color: #6e6e73;
-    font-size: 10px;
+    font-size: @FS_MICRO@px;
     font-weight: 600;
     letter-spacing: 0.4px;
     background: transparent;
 }
 QLabel#StatValue {
-    font-size: 17px;
+    font-size: @FS_METRIC@px;
     font-weight: 700;
     color: #1d1d1f;
     background: transparent;
@@ -166,26 +299,31 @@ QLabel#StatValue {
 QLabel#Alert {
     color: #c0392b;
     font-weight: 600;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     background: transparent;
 }
 QLabel#Hint {
     color: #6e6e73;
-    font-size: 14px;
+    font-size: @FS_HINT@px;
     font-weight: 600;
     background: transparent;
 }
 QLabel#OverlayDelta {
     color: #5856d6;
-    font-size: 11px;
+    font-size: @FS_CAPTION@px;
     font-weight: 600;
+    background: transparent;
+}
+QLabel#DerivedValue {
+    color: #6e6e73;
+    font-size: @FS_LABEL@px;
     background: transparent;
 }
 QPushButton {
     background: #ffffff;
     border: 1px solid #d2d2d7;
     border-radius: 12px;
-    padding: 10px 14px;
+    padding: @PAD_BUTTON@;
     font-weight: 600;
 }
 QPushButton:hover {
@@ -219,7 +357,7 @@ QPushButton#Secondary, QToolButton#Secondary {
     background: #ffffff;
     border: 1px solid #c7c7cc;
     min-height: 20px;
-    padding: 10px 16px;
+    padding: @PAD_SECONDARY@;
 }
 QPushButton#Secondary:hover, QToolButton#Secondary:hover {
     background: #f2f2f7;
@@ -240,7 +378,7 @@ QPushButton#Segment {
     background: #ffffff;
     border: 1px solid #c7c7cc;
     min-height: 20px;
-    padding: 8px 14px;
+    padding: @PAD_SEGMENT@;
     font-weight: 600;
 }
 QPushButton#Segment:hover {
@@ -255,7 +393,7 @@ QPushButton#Segment:checked {
 QToolButton#Secondary {
     border-radius: 12px;
     font-weight: 600;
-    padding: 10px 22px 10px 16px;
+    padding: @PAD_TOOL@;
 }
 QToolButton#Secondary::menu-indicator {
     subcontrol-origin: padding;
@@ -305,11 +443,11 @@ QComboBox, QLineEdit, QSpinBox {
     background: #ffffff;
     border: 1px solid #d2d2d7;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: @PAD_INPUT@;
     min-height: 18px;
 }
 QComboBox {
-    padding: 8px 32px 8px 12px;
+    padding: @PAD_COMBO@;
 }
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
     border-color: #8e8e93;
@@ -334,11 +472,11 @@ QTextEdit {
     border: 1px solid #e5e5ea;
     border-radius: 12px;
     padding: 8px;
-    font-family: Consolas, "Cascadia Mono", monospace;
-    font-size: 11px;
+    font-family: @FONT_MONO@;
+    font-size: @FS_CAPTION@px;
 }
 QTextEdit#ResultsEvidence {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QListWidget {
     background: #ffffff;
@@ -358,7 +496,7 @@ QTabWidget#ResultsTabs QTabBar::tab {
     border-bottom: none;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-    padding: 8px 14px;
+    padding: @PAD_SEGMENT@;
     margin-right: 4px;
     font-weight: 600;
 }
@@ -371,7 +509,7 @@ QTableWidget#ResultsClickTable {
     border: 1px solid #e5e5ea;
     border-radius: 10px;
     gridline-color: #e5e5ea;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QTableWidget#ResultsClickTable::item:selected {
     background: #e8f1ff;
@@ -386,32 +524,32 @@ QTableWidget#ResultsClickTable QHeaderView::section {
     font-weight: 600;
 }
 QLabel#RailBrand {
-    font-size: 22px;
+    font-size: @FS_SECTION_TITLE@px;
     font-weight: 700;
     letter-spacing: 1px;
     color: #007aff;
     background: transparent;
 }
 QLabel#RailProduct {
-    font-size: 11px;
+    font-size: @FS_CAPTION@px;
     color: #6e6e73;
     background: transparent;
 }
 QLabel#CardTitle {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     font-weight: 700;
     letter-spacing: 0.6px;
     color: #3a3a3c;
     background: transparent;
 }
 QLabel#FieldLabel {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     font-weight: 600;
     color: #48484a;
     background: transparent;
 }
 QLabel#ProfileStatus {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #6e6e73;
     background: transparent;
 }
@@ -424,7 +562,7 @@ QLabel#ProfileStatus[state="locked"] {
     font-weight: 600;
 }
 QLabel#PreviewValue {
-    font-size: 15px;
+    font-size: @FS_EMPHASIS@px;
     font-weight: 600;
     color: #1d1d1f;
     background: transparent;
@@ -441,8 +579,8 @@ QWidget#SetupPage QLineEdit:disabled, QWidget#SetupPage QComboBox:disabled {
 
 DARK_STYLE = """
 QWidget {
-    font-family: "Segoe UI Variable", "Segoe UI", "SF Pro Text", sans-serif;
-    font-size: 13px;
+    font-family: @FONT_UI@;
+    font-size: @FS_BODY@px;
     color: #f5f5f7;
     background: #000000;
 }
@@ -468,13 +606,13 @@ QScrollArea#PageScroll > QWidget > QWidget {
     background: transparent;
 }
 QLabel#PageTitle {
-    font-size: 28px;
+    font-size: @FS_PAGE_TITLE@px;
     font-weight: 700;
     color: #f5f5f7;
     background: transparent;
 }
 QLabel#PageSubtitle {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #98989d;
     background: transparent;
 }
@@ -482,7 +620,7 @@ QPushButton#NavButton {
     text-align: left;
     border: none;
     border-radius: 10px;
-    padding: 10px 14px;
+    padding: @PAD_BUTTON@;
     min-height: 20px;
     background: transparent;
     font-weight: 600;
@@ -510,13 +648,13 @@ QFrame#TestArea[active="true"] {
     background: #1a2e1f;
 }
 QLabel#Title {
-    font-size: 22px;
+    font-size: @FS_SECTION_TITLE@px;
     font-weight: 700;
     color: #f5f5f7;
     background: transparent;
 }
 QLabel#Subtitle {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #0a84ff;
     font-weight: 600;
     background: transparent;
@@ -524,17 +662,17 @@ QLabel#Subtitle {
 QLabel#Muted {
     color: #98989d;
     background: transparent;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QLabel#StatLabel {
     color: #98989d;
-    font-size: 10px;
+    font-size: @FS_MICRO@px;
     font-weight: 600;
     letter-spacing: 0.4px;
     background: transparent;
 }
 QLabel#StatValue {
-    font-size: 17px;
+    font-size: @FS_METRIC@px;
     font-weight: 700;
     color: #f5f5f7;
     background: transparent;
@@ -542,26 +680,31 @@ QLabel#StatValue {
 QLabel#Alert {
     color: #ff6961;
     font-weight: 600;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     background: transparent;
 }
 QLabel#Hint {
     color: #98989d;
-    font-size: 14px;
+    font-size: @FS_HINT@px;
     font-weight: 600;
     background: transparent;
 }
 QLabel#OverlayDelta {
     color: #5e5ce6;
-    font-size: 11px;
+    font-size: @FS_CAPTION@px;
     font-weight: 600;
+    background: transparent;
+}
+QLabel#DerivedValue {
+    color: #98989d;
+    font-size: @FS_LABEL@px;
     background: transparent;
 }
 QPushButton {
     background: #2c2c2e;
     border: 1px solid #48484a;
     border-radius: 12px;
-    padding: 10px 14px;
+    padding: @PAD_BUTTON@;
     font-weight: 600;
     color: #f5f5f7;
 }
@@ -596,7 +739,7 @@ QPushButton#Secondary, QToolButton#Secondary {
     background: #2c2c2e;
     border: 1px solid #636366;
     min-height: 20px;
-    padding: 10px 16px;
+    padding: @PAD_SECONDARY@;
     color: #f5f5f7;
 }
 QPushButton#Secondary:hover, QToolButton#Secondary:hover {
@@ -618,7 +761,7 @@ QPushButton#Segment {
     background: #2c2c2e;
     border: 1px solid #636366;
     min-height: 20px;
-    padding: 8px 14px;
+    padding: @PAD_SEGMENT@;
     font-weight: 600;
     color: #f5f5f7;
 }
@@ -634,7 +777,7 @@ QPushButton#Segment:checked {
 QToolButton#Secondary {
     border-radius: 12px;
     font-weight: 600;
-    padding: 10px 22px 10px 16px;
+    padding: @PAD_TOOL@;
 }
 QToolButton#Secondary::menu-indicator {
     subcontrol-origin: padding;
@@ -685,12 +828,12 @@ QComboBox, QLineEdit, QSpinBox {
     background: #2c2c2e;
     border: 1px solid #48484a;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: @PAD_INPUT@;
     min-height: 18px;
     color: #f5f5f7;
 }
 QComboBox {
-    padding: 8px 32px 8px 12px;
+    padding: @PAD_COMBO@;
 }
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
     border-color: #8e8e93;
@@ -715,12 +858,12 @@ QTextEdit {
     border: 1px solid #3a3a3c;
     border-radius: 12px;
     padding: 8px;
-    font-family: Consolas, "Cascadia Mono", monospace;
-    font-size: 11px;
+    font-family: @FONT_MONO@;
+    font-size: @FS_CAPTION@px;
     color: #f5f5f7;
 }
 QTextEdit#ResultsEvidence {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QListWidget {
     background: #2c2c2e;
@@ -741,7 +884,7 @@ QTabWidget#ResultsTabs QTabBar::tab {
     border-bottom: none;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-    padding: 8px 14px;
+    padding: @PAD_SEGMENT@;
     margin-right: 4px;
     font-weight: 600;
 }
@@ -755,7 +898,7 @@ QTableWidget#ResultsClickTable {
     border-radius: 10px;
     gridline-color: #3a3a3c;
     color: #f5f5f7;
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
 }
 QTableWidget#ResultsClickTable::item:selected {
     background: #1a3a5c;
@@ -770,32 +913,32 @@ QTableWidget#ResultsClickTable QHeaderView::section {
     font-weight: 600;
 }
 QLabel#RailBrand {
-    font-size: 22px;
+    font-size: @FS_SECTION_TITLE@px;
     font-weight: 700;
     letter-spacing: 1px;
     color: #0a84ff;
     background: transparent;
 }
 QLabel#RailProduct {
-    font-size: 11px;
+    font-size: @FS_CAPTION@px;
     color: #98989d;
     background: transparent;
 }
 QLabel#CardTitle {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     font-weight: 700;
     letter-spacing: 0.6px;
     color: #d1d1d6;
     background: transparent;
 }
 QLabel#FieldLabel {
-    font-size: 12px;
+    font-size: @FS_LABEL@px;
     font-weight: 600;
     color: #c7c7cc;
     background: transparent;
 }
 QLabel#ProfileStatus {
-    font-size: 13px;
+    font-size: @FS_BODY@px;
     color: #98989d;
     background: transparent;
 }
@@ -808,7 +951,7 @@ QLabel#ProfileStatus[state="locked"] {
     font-weight: 600;
 }
 QLabel#PreviewValue {
-    font-size: 15px;
+    font-size: @FS_EMPHASIS@px;
     font-weight: 600;
     color: #f5f5f7;
     background: transparent;
@@ -823,9 +966,6 @@ QWidget#SetupPage QLineEdit:disabled, QWidget#SetupPage QComboBox:disabled {
 }
 """
 
-APP_STYLE = LIGHT_STYLE  # backward compat
-
-
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 # Qt style sheets cannot load data: URIs, so indicator images come from package files.
 STYLE_ASSETS: dict[str, dict[str, str]] = {
@@ -838,13 +978,28 @@ def style_asset_path(name: str) -> Path:
     return ASSET_DIR / name
 
 
-def get_style(theme: str) -> str:
+def density_tokens(density: str = DENSITY_NORMAL) -> dict[str, str]:
+    key = density if density in DENSITIES else DENSITY_NORMAL
+    tokens = {"@FONT_UI@": UI_FONT_STACK, "@FONT_MONO@": MONO_FONT_STACK}
+    for role, px in TYPE_SCALE[key].items():
+        tokens[f"@FS_{role.upper()}@"] = str(px)
+    for role, value in CONTROL_PADDING[key].items():
+        tokens[f"@PAD_{role.upper()}@"] = value
+    return tokens
+
+
+def get_style(theme: str, density: str = DENSITY_NORMAL) -> str:
     key = "dark" if theme == "dark" else "light"
     sheet = DARK_STYLE if key == "dark" else LIGHT_STYLE
     for token, name in STYLE_ASSETS[key].items():
         sheet = sheet.replace(token, style_asset_path(name).as_posix())
+    for token, value in density_tokens(density).items():
+        sheet = sheet.replace(token, value)
     return sheet
 
 
 def get_palette(theme: str) -> ChartPalette:
     return DARK_PALETTE if theme == "dark" else LIGHT_PALETTE
+
+
+APP_STYLE = get_style("light")  # backward compat

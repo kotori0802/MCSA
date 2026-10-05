@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", default="", help="Optional run id for self-test output")
     parser.add_argument("--target", default="", help="Device under test label (optional)")
     parser.add_argument("--operator", default="", help="Operator name (optional, not auto-filled)")
-    parser.add_argument("--lang", default="en", help="UI language: en, fr, it, de, es, zh, ja, ko")
+    parser.add_argument("--lang", default="en", help="UI language: en (English) or zh (Traditional Chinese); others fall back to en")
     parser.add_argument("--theme", default="light", choices=["light", "dark"], help="UI theme (Qt shell)")
     args = parser.parse_args(argv)
 

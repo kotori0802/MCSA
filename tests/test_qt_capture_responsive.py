@@ -19,6 +19,8 @@ from mouse_click_stability_analyzer.qt_shell import app as qt_app
 from mouse_click_stability_analyzer.qt_shell.app import WINDOW_MODES
 
 _T0 = 1000.0
+# Smallest supported window; Capture still overflows here, so scroll-clipping paths stay covered.
+_OVERFLOW_SIZE = (1024, 640)
 
 
 def _make_qapp():
@@ -207,21 +209,26 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.assertGreaterEqual(self.win.test_area.height(), 280)
 
     # 3
-    def test_compact_1280_reflows_without_clipping(self):
+    def test_compact_1280_keeps_single_row_summary_without_clipping(self):
         self._show_capture_at(1280, 720)
+        self.assertEqual(self.win.density, "compact")
+        self._assert_capture_usable(stats_cols=6, issues_cols=5)
+        self.assertGreaterEqual(self.win.capture_live.height(), self.win.capture_live.minimumSizeHint().height() - 8)
+        self.assertGreaterEqual(self.win.val_phase.height(), 16)
+
+    def test_minimum_size_reflows_metrics_without_clipping(self):
+        self._show_capture_at(*_OVERFLOW_SIZE)
         self.assertLess(self.win.capture_stats_grid.columns(), 6)
         self.assertLess(self.win.capture_issues_grid.columns(), 5)
         self._assert_capture_usable(
             stats_cols=self.win.capture_stats_grid.columns(),
             issues_cols=self.win.capture_issues_grid.columns(),
         )
-        self.assertGreaterEqual(self.win.capture_live.height(), self.win.capture_live.minimumSizeHint().height() - 8)
-        self.assertGreaterEqual(self.win.val_phase.height(), 16)
 
     # 4
     def test_live_resize_compact_to_wide_reflows_up(self):
-        self._show_capture_at(1280, 720)
-        self.assertEqual(self.win.capture_stats_grid.columns(), 3)
+        self._show_capture_at(*_OVERFLOW_SIZE)
+        self.assertLess(self.win.capture_stats_grid.columns(), 6)
         self._show_capture_at(1600, 900)
         self._assert_capture_usable(stats_cols=6, issues_cols=5)
 
@@ -229,12 +236,16 @@ class CaptureResponsiveTests(unittest.TestCase):
     def test_live_resize_wide_to_compact_reflows_down(self):
         self._show_capture_at(1600, 900)
         self.assertEqual(self.win.capture_stats_grid.columns(), 6)
-        self._show_capture_at(1280, 720)
-        self.assertEqual(self.win.capture_stats_grid.columns(), 3)
-        self._assert_capture_usable(stats_cols=3, issues_cols=3)
+        self._show_capture_at(*_OVERFLOW_SIZE)
+        self.assertLess(self.win.capture_stats_grid.columns(), 6)
+        self._assert_capture_usable(
+            stats_cols=self.win.capture_stats_grid.columns(),
+            issues_cols=self.win.capture_issues_grid.columns(),
+        )
 
     def _resize_preserves(self, before):
         self._show_capture_at(1280, 720)
+        self._show_capture_at(*_OVERFLOW_SIZE)
         self._show_capture_at(1600, 900)
         self.assertEqual(self._lifecycle_tuple(), before)
 
@@ -305,10 +316,11 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.win.startup_window_combo.setCurrentIndex(WINDOW_MODES.index("compact"))
         self._settle()
         self.assertEqual(self.win.size().width(), 1280)
-        self.assertLess(self.win.capture_stats_grid.columns(), 6)
+        self.assertEqual(self.win.density, "compact")
         self.win.startup_window_combo.setCurrentIndex(WINDOW_MODES.index("large"))
         self._settle()
         self.assertEqual(self.win.size().width(), 1600)
+        self.assertEqual(self.win.density, "normal")
         self.assertEqual(self.win.capture_stats_grid.columns(), 6)
         self.assertEqual(self._lifecycle_tuple(), before)
 
@@ -345,14 +357,15 @@ class CaptureResponsiveTests(unittest.TestCase):
         self._select_preset("laptop")
         self.assertEqual((self.win.width(), self.win.height()), (1366, 768))
         self._assert_capture_usable_here()
-        self.assertLess(self.win.capture_stats_grid.columns(), 6)
+        self.assertEqual(self.win.density, "compact")
+        self.assertEqual(self.win.capture_stats_grid.columns(), 6)
         self._assert_setup_usable()
 
     def test_large_plus_1728_preset_returns_to_wide_layout(self):
         self.win._available_geometry = lambda: QRect(0, 0, 1920, 1040)
         self.win._show_workflow_page("capture")
         self._select_preset("compact")
-        self.assertEqual(self.win.capture_stats_grid.columns(), 3)
+        self.assertEqual(self.win.density, "compact")
         self._select_preset("large_plus")
         self.assertEqual((self.win.width(), self.win.height()), (1728, 972))
         self._assert_capture_usable_here()
@@ -393,6 +406,99 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.assertTrue(work.contains(self.win.frameGeometry()), self.win.frameGeometry())
         self._assert_capture_usable_here()
 
+    # --- Phase 4D-2g-1: chrome-first density at 1280x720 ---
+
+    def _visible_in_viewport(self, widget) -> int:
+        viewport = self.win.capture_scroll.viewport()
+        top = widget.mapTo(viewport, QPoint(0, 0)).y()
+        return max(0, min(viewport.height(), top + widget.height()) - max(0, top))
+
+    def _capture_controls(self):
+        return [
+            self.win.btn_stop, self.win.btn_arm, self.win.btn_edit_profile,
+            self.win.btn_view_stability, self.win.btn_view_interval,
+            self.win.btn_chart_fit, self.win.btn_chart_zoom_in,
+            self.win.btn_chart_zoom_out, self.win.btn_chart_reset,
+        ]
+
+    def _assert_initial_view_shows_capture_essentials(self, *, min_chart_px: int) -> None:
+        self.assertEqual(self.win.capture_scroll.verticalScrollBar().value(), 0)
+        self.assertTrue(self.win.page_title.isVisible())
+        self.assertGreater(self.win.page_title.height(), 0)
+        for widget in (
+            self.win.btn_arm, self.win.btn_stop, self.win.capture_viz_toolbar,
+            self.win.val_phase, self.win.val_verdict, self.win.val_interval,
+        ):
+            with self.subTest(widget=widget.objectName() or type(widget).__name__):
+                self.assertEqual(self._visible_in_viewport(widget), widget.height())
+        for btn in self._capture_controls():
+            with self.subTest(button=btn.text()):
+                self.assertGreaterEqual(btn.width(), btn.sizeHint().width() - 2)
+                self.assertGreaterEqual(btn.height(), 20)
+        self.assertGreaterEqual(self._visible_in_viewport(self.win.scatter), min_chart_px)
+        self.assertGreaterEqual(self.win.scatter.width(), 600)
+        self.assertFalse(self.win.test_area.isAncestorOf(self.win.capture_viz_toolbar))
+        self.assertIn(self.win.capture_viz_toolbar, self.win._capture_exclusion_widgets())
+
+    def _set_lang(self, code: str) -> None:
+        self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData(code))
+        self._settle()
+
+    def test_1280x720_shows_controls_summary_toolbar_and_chart_without_scrolling(self):
+        self._setup_fixture()
+        self.assertTrue(self.win.lock_profile())
+        for code in ("en", "zh"):
+            with self.subTest(lang=code):
+                self._set_lang(code)
+                self._show_capture_at(1280, 720)
+                self.assertEqual(self.win.density, "compact")
+                self._assert_initial_view_shows_capture_essentials(min_chart_px=180)
+                self._assert_capture_usable(stats_cols=6, issues_cols=5)
+
+    def test_1600x900_stays_spacious_with_full_test_area_in_view(self):
+        self._setup_fixture()
+        self.assertTrue(self.win.lock_profile())
+        for code in ("en", "zh"):
+            with self.subTest(lang=code):
+                self._set_lang(code)
+                self._show_capture_at(1600, 900)
+                self.assertEqual(self.win.density, "normal")
+                self._assert_initial_view_shows_capture_essentials(min_chart_px=260)
+                self.assertEqual(self._visible_in_viewport(self.win.test_area), self.win.test_area.height())
+                self.assertGreaterEqual(self.win.test_area.height(), 320)
+
+    def test_language_switch_keeps_capture_controls_usable_and_hit_test(self):
+        self.win.radio_manual.setChecked(True)
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        self._show_capture_at(1280, 720)
+        before = self._lifecycle_tuple()
+        for code in ("zh", "en", "zh"):
+            with self.subTest(lang=code):
+                self._set_lang(code)
+                self._assert_initial_view_shows_capture_essentials(min_chart_px=180)
+                self._cursor = self.win.test_area.mapToGlobal(self.win.test_area.rect().center())
+                self.assertTrue(self.win._cursor_in_test_area())
+                for widget in (self.win.capture_viz_toolbar, self.win.btn_chart_fit, self.win.btn_arm):
+                    self._cursor = widget.mapToGlobal(widget.rect().center())
+                    self.assertFalse(self.win._cursor_in_test_area())
+        self.assertEqual(self._lifecycle_tuple(), before)
+
+    def test_density_switch_preserves_test_area_identity_and_acceptance(self):
+        self.win.radio_manual.setChecked(True)
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        area = self.win.test_area
+        for size in ((1600, 900), (1280, 720), (1600, 900)):
+            with self.subTest(size=size):
+                self._show_capture_at(*size)
+                self.assertIs(self.win.test_area, area)
+                self._cursor = area.mapToGlobal(area.rect().center())
+                self.assertTrue(self.win._cursor_in_test_area())
+        self.assertTrue(self.win.capture_armed)
+        self.assertFalse(self.win.running)
+        self.assertEqual(self.win.events, [])
+
     # 12
     def test_manual_test_area_hit_test_after_reflow(self):
         self.win.radio_manual.setChecked(True)
@@ -432,9 +538,10 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.win.radio_manual.setChecked(True)
         self.assertTrue(self.win.lock_profile())
         self.assertTrue(self.win.arm_capture())
-        self._show_capture_at(1280, 720)
+        self._show_capture_at(*_OVERFLOW_SIZE)
         bar = self.win.capture_scroll.verticalScrollBar()
         self.assertIn(bar, self.win._capture_exclusion_widgets())
+        self.assertGreater(bar.maximum(), 0)
         if bar.maximum() > 0:
             bar.setValue(min(80, bar.maximum()))
             self._settle()
@@ -449,11 +556,10 @@ class CaptureResponsiveTests(unittest.TestCase):
 
     # ── Step 3d1: scroll-aware Test Area hit-test ─────────────────────
     def _scrolled_test_area_points(self, value: int = 0) -> tuple[QPoint, QPoint]:
-        """Return (clipped, visible) global points inside test_area.rect() at 1280x720."""
-        self._show_capture_at(1280, 720)
+        """Return (clipped, visible) global points inside test_area.rect() at the minimum window size."""
+        self._show_capture_at(*_OVERFLOW_SIZE)
         bar = self.win.capture_scroll.verticalScrollBar()
-        if bar.maximum() <= 0:
-            self.skipTest("Capture did not overflow vertically at 1280x720")
+        self.assertGreater(bar.maximum(), 0, "Capture must overflow at the minimum window size")
         bar.setValue(min(value, bar.maximum()))
         self._settle()
         area = self.win.test_area
@@ -489,7 +595,7 @@ class CaptureResponsiveTests(unittest.TestCase):
 
     def test_clipped_point_after_partial_scroll_is_not_in_test_area(self):
         self.assertTrue(self.win.lock_profile())
-        self._show_capture_at(1280, 720)
+        self._show_capture_at(*_OVERFLOW_SIZE)
         bar = self.win.capture_scroll.verticalScrollBar()
         if bar.maximum() < 40:
             self.skipTest("not enough vertical overflow for a partial scroll")

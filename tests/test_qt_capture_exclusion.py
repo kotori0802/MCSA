@@ -409,14 +409,15 @@ class CaptureExclusionTests(unittest.TestCase):
 
     def test_capture_scrollbar_is_excluded_when_overflowing(self):
         self._setup_fixture()
-        self.win.resize(1280, 720)
+        # 1280x720 now fits without scrolling; the 1024x640 minimum still overflows.
+        self.win.resize(1024, 640)
         self.win._show_workflow_page("capture")
         self._start_run()
         self._qapp.processEvents()
         bar = self.win.capture_scroll.verticalScrollBar()
         self.assertIn(bar, self.win._capture_exclusion_widgets())
         if bar.maximum() <= 0:
-            self.skipTest("Capture page did not overflow vertically at 1280x720")
+            self.skipTest("Capture page did not overflow vertically at 1024x640")
         self._assert_click_excluded(bar)
         self.assertTrue(self.win.running)
 

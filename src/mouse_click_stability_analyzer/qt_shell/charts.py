@@ -5,10 +5,10 @@ import math
 from typing import Callable
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtWidgets import QToolTip, QWidget
 
-from .styles import ChartPalette, LIGHT_PALETTE
+from .styles import ChartPalette, LIGHT_PALETTE, chart_font
 
 FIT_MARGIN_FRAC = 0.08
 SCATTER_X_MIN_SPAN_MS = 8.0
@@ -290,11 +290,11 @@ class _ChartBase(QWidget):
     def _draw_title(self, p: QPainter) -> None:
         pal = self.palette
         p.setPen(QColor(pal.text))
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        p.setFont(chart_font("title", bold=True))
         p.drawText(12, 16, self.title if hasattr(self, "title") else "")
         if self.subtitle:
             p.setPen(QColor(pal.muted))
-            p.setFont(QFont("Segoe UI", 8))
+            p.setFont(chart_font("subtitle"))
             p.drawText(12, 32, self.subtitle)
 
     def _draw_vertical_guides(self, p: QPainter, plot: QRectF, map_x: Callable[[float], float]) -> None:
@@ -358,7 +358,7 @@ class _ChartBase(QWidget):
             if plot.left() <= x <= plot.right():
                 p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
 
-        tick_font = QFont("Segoe UI", 8)
+        tick_font = chart_font("tick")
         p.setFont(tick_font)
         p.setPen(QColor(pal.muted))
         fm = p.fontMetrics()
@@ -398,7 +398,7 @@ class _ChartBase(QWidget):
         if not items:
             return
         pal = self.palette
-        font = QFont("Segoe UI", 8)
+        font = chart_font("tick")
         p.setFont(font)
         fm = p.fontMetrics()
         row_h = 16
@@ -599,7 +599,7 @@ class ScatterChart(_ChartBase):
 
         if not self.points and not self.overlay_points:
             p.setPen(QColor(pal.muted))
-            p.setFont(QFont("Segoe UI", 11))
+            p.setFont(chart_font("placeholder"))
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("waiting_data", "Waiting for click data"))
             return
 
@@ -736,7 +736,7 @@ class IntervalChart(_ChartBase):
         legacy_waiting = (not self.data_aware_fit) and len(self.series) < 2 and len(self.overlay_series) < 2
         if empty or legacy_waiting:
             p.setPen(QColor(pal.muted))
-            p.setFont(QFont("Segoe UI", 11))
+            p.setFont(chart_font("placeholder"))
             wait = self._label("waiting_data", "Waiting for click data") if self.data_aware_fit else legend_label
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), wait)
             return
@@ -836,7 +836,7 @@ class HistogramChart(_ChartBase):
         p.fillRect(self.rect(), QColor(pal.bg))
         plot = self._plot_rect()
         p.setPen(QColor(pal.text))
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        p.setFont(chart_font("title", bold=True))
         p.drawText(12, 16, self.title)
         legend = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
         if self.overlay_bins:
@@ -846,7 +846,7 @@ class HistogramChart(_ChartBase):
         self._draw_legend_box(p, plot, legend)
         if not self.bins:
             p.setPen(QColor(pal.muted))
-            p.setFont(QFont("Segoe UI", 11))
+            p.setFont(chart_font("placeholder"))
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("waiting_data", "Waiting for click data"))
             return
         xmin = float(self.bins[0]["lo"])
