@@ -29,6 +29,9 @@ _NEW_KEYS = (
     "pref_appearance_section",
     "display_language",
     "preferences_more_note",
+    "screening",
+    "screening_measurement_only",
+    "screening_measurement_only_note",
 )
 
 
@@ -82,7 +85,6 @@ class SetupPreferencesUiTests(unittest.TestCase):
             self.win.auto_stop_off,
             self.win.auto_stop_on,
             self.win.auto_stop_sec_combo,
-            *self.win._limit_edits.values(),
         ]
 
     def _fixture(self, *, device="DUT-1", hz="5", tol="2", auto_sec="20"):
@@ -122,7 +124,11 @@ class SetupPreferencesUiTests(unittest.TestCase):
             if [w.itemText(i) for i in range(w.count())] == ["Left", "Right", "Middle", "X1", "X2"]
         ]
         self.assertEqual(button_likes, [self.win.button_combo])
-        self.assertEqual(len(self.win._limit_edits), 5)
+        self.assertEqual(self.win._limit_edits, {})
+        screening_edits = [
+            w for w in self.win.setup_screening_card.findChildren(QLineEdit)
+        ]
+        self.assertEqual(screening_edits, [])
 
     def test_setup_cards_follow_contract_hierarchy(self):
         grid = self.win.setup_card_grid
@@ -132,8 +138,9 @@ class SetupPreferencesUiTests(unittest.TestCase):
         for widget in (self.win.radio_manual, self.win.hz_combo, self.win.timing_tol_edit,
                        self.win.auto_stop_on, self.win.auto_stop_sec_combo):
             self.assertTrue(_under(widget, self.win.setup_config_card), widget)
-        for edit in self.win._limit_edits.values():
-            self.assertTrue(_under(edit, self.win.setup_limits_card))
+        self.assertTrue(_under(self.win.lbl_screening, self.win.setup_screening_card))
+        self.assertTrue(_under(self.win.lbl_screening_status, self.win.setup_screening_card))
+        self.assertIs(self.win.setup_limits_card, self.win.setup_screening_card)
         self.assertTrue(_under(self.win.lbl_profile_status, self.win.setup_profile_card))
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.setup_profile_card))
         self.assertTrue(_under(self.win.locked_profile_card, self.win.page_setup))
@@ -142,14 +149,13 @@ class SetupPreferencesUiTests(unittest.TestCase):
     def test_settings_reads_moved_controls(self):
         self._fixture(hz="40", tol="1.5", auto_sec="30")
         self.win.button_combo.setCurrentText("Right")
-        self.win._limit_edits["chatter_threshold_ms"].setText("7")
         s = self.win.settings()
         self.assertFalse(s["manual_mode"])
         self.assertEqual(s["focus_button"], "Right")
         self.assertEqual(s["fixture_reference_hz"], 40.0)
         self.assertEqual(s[qt_app.FIXTURE_TIMING_TOLERANCE_KEY], 1.5)
         self.assertEqual(s["duration_sec"], 30.0)
-        self.assertEqual(s["chatter_threshold_ms"], 7.0)
+        self.assertEqual(s["chatter_threshold_ms"], qt_app.qt_custom_limit_defaults()["chatter_threshold_ms"])
 
     # 4
     def test_lock_profile_behavior_unchanged(self):
@@ -171,6 +177,15 @@ class SetupPreferencesUiTests(unittest.TestCase):
         self.assertEqual(self.win.lbl_profile_status.text(), self.win._tr("fixture_timing_tolerance_invalid"))
         self.assertTrue(self.win.btn_lock_profile.isEnabled())
         self.assertTrue(self.win.locked_profile_card.isHidden())
+
+    def test_screening_card_is_measurement_only(self):
+        self.win._show_workflow_page("setup")
+        self.assertEqual(self.win.lbl_screening.text(), self.win._tr("screening").upper())
+        self.assertEqual(self.win.lbl_screening_status.text(), self.win._tr("screening_measurement_only"))
+        self.assertEqual(self.win.lbl_screening_note.text(), self.win._tr("screening_measurement_only_note"))
+        for phrase in ("Chatter", "Double-click", "Actuation short", "Low hold", "Interval CV", "PASS"):
+            self.assertNotIn(phrase, self.win.lbl_screening_status.text())
+            self.assertNotIn(phrase, self.win.lbl_screening_note.text())
 
     def test_draft_presentation_is_neutral(self):
         self.assertEqual(self.win.lbl_profile_status.property("state"), "draft")
@@ -442,9 +457,6 @@ class SetupPreferencesUiTests(unittest.TestCase):
                 for field in (self.win.device_edit, self.win.hz_combo, self.win.timing_tol_edit, self.win.auto_stop_sec_combo):
                     self.assertGreaterEqual(field.width(), 160)
                     self.assertLessEqual(field.width(), 700)
-                for edit in self.win._limit_edits.values():
-                    self.assertGreaterEqual(edit.width(), 110)
-                    self.assertLessEqual(edit.width(), 500)
                 for btn in (self.win.auto_stop_off, self.win.auto_stop_on):
                     self.assertGreaterEqual(btn.width(), 80)
                 self.assertTrue(self.win.timing_tol_label.wordWrap())

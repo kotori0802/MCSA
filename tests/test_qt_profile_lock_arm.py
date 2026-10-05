@@ -211,11 +211,15 @@ class ProfileLockArmTests(unittest.TestCase):
         self._fixture(auto_sec="abc")
         self.assertFalse(self.win.lock_profile())
 
-    def test_invalid_custom_limit_blocks_lock(self):
+    def test_lock_stamps_legacy_defaults_without_custom_limit_widgets(self):
         self.win.radio_manual.setChecked(True)
-        self.win._limit_edits["chatter_threshold_ms"].setText("abc")
-        self.assertFalse(self.win.lock_profile())
-        self.assertIsNone(self.win.profile_locked_settings)
+        self.assertEqual(self.win._limit_edits, {})
+        self.assertTrue(self.win.lock_profile())
+        snap = self.win.profile_locked_settings
+        self.assertIsNotNone(snap)
+        defaults = qt_app.qt_custom_limit_defaults()
+        for key, value in defaults.items():
+            self.assertEqual(snap[key], value)
 
     def test_lock_snapshot_is_immutable(self):
         self._fixture(hz="40", tol="2")

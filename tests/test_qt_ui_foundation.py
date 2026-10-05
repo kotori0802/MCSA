@@ -72,6 +72,14 @@ _REQUIRED_UI_KEYS = (
     "reference_interval_derived",
     "mode_fixture",
     "display_language",
+    "screening",
+    "screening_measurement_only",
+    "screening_measurement_only_note",
+    "legend_on_cadence",
+    "legend_extra",
+    "legend_chatter",
+    "legend_miss",
+    "legend_rebound",
 )
 
 _CONVERSIONS = (

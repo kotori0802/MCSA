@@ -85,6 +85,7 @@ from ..measurements import (
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
+from .presentation import SCREENING_PRESENTATION_KEYS, screening_presentation_label
 from .styles import density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
@@ -302,12 +303,20 @@ QT_CUSTOM_LIMIT_KEYS: tuple[str, ...] = (
     "interval_cv_limit_pct",
 )
 
+# i18n keys for the retired Setup editors. Kept so serialized/legacy tables
+# remain discoverable; normal Setup no longer renders these as product limits.
 _QT_CUSTOM_LIMIT_LABEL_KEYS: dict[str, str] = {
     "chatter_threshold_ms": "limit_chatter_ms",
     "duplicate_click_threshold_ms": "limit_double_click_ms",
     "fixture_actuation_too_short_ms": "limit_actuation_short_ms",
     "low_hold_warning_ms": "limit_low_hold_ms",
     "interval_cv_limit_pct": "limit_interval_cv_pct",
+}
+
+_CAPTURE_ISSUE_INTERNAL: dict[str, str] = {
+    "extra": "TRUE_EXTRA_CLICK",
+    "rebound": "INCOMPLETE_REBOUND",
+    "delay": "MISS_OR_SLOW",
 }
 
 
@@ -320,7 +329,11 @@ class QtCustomLimitsError(ValueError):
 
 
 def qt_custom_limit_defaults() -> dict[str, float]:
-    """Copy of RULE_PRESETS['Strict'] numeric keys. Migration default only."""
+    """Legacy classifier compatibility defaults. Not tester-configured product limits.
+
+    Copied from RULE_PRESETS['Strict'] so informational tags keep a stable
+    heuristic. Setup no longer exposes these values for editing.
+    """
     src = dict(RULE_PRESETS.get("Strict") or {})
     return {key: float(src[key]) for key in QT_CUSTOM_LIMIT_KEYS}
 
@@ -1228,41 +1241,26 @@ class MainWindow(QMainWindow):
         config_l.addWidget(self.auto_stop_sec_combo)
         config_l.addStretch(1)
 
-        limits_card, limits_l = self._setup_card()
-        self.setup_limits_card = limits_card
-        self.lbl_custom_limits = self._card_title()
-        limits_l.addWidget(self.lbl_custom_limits)
-        limits_l.addSpacing(8)
-        limits_grid = QGridLayout()
-        limits_grid.setContentsMargins(0, 0, 0, 0)
-        limits_grid.setHorizontalSpacing(14)
-        limits_grid.setVerticalSpacing(10)
-        limits_grid.setColumnStretch(0, 3)
-        limits_grid.setColumnStretch(1, 2)
+        screening_card, screening_l = self._setup_card()
+        self.setup_screening_card = screening_card
+        self.setup_limits_card = screening_card
+        self.lbl_screening = self._card_title()
+        screening_l.addWidget(self.lbl_screening)
+        screening_l.addSpacing(8)
+        self.lbl_screening_status = QLabel("Measurement only")
+        self.lbl_screening_status.setObjectName("PreviewValue")
+        self.lbl_screening_status.setWordWrap(True)
+        screening_l.addWidget(self.lbl_screening_status)
+        self.lbl_screening_note = QLabel("")
+        self.lbl_screening_note.setObjectName("Muted")
+        self.lbl_screening_note.setWordWrap(True)
+        screening_l.addWidget(self.lbl_screening_note)
+        screening_l.addStretch(1)
         self._limit_edits: dict[str, QLineEdit] = {}
         self._limit_labels: dict[str, QLabel] = {}
-        defaults = qt_custom_limit_defaults()
-        for row, key in enumerate(QT_CUSTOM_LIMIT_KEYS):
-            lab = self._field_label({
-                "chatter_threshold_ms": "Chatter (ms)",
-                "duplicate_click_threshold_ms": "Double-click (ms)",
-                "fixture_actuation_too_short_ms": "Actuation short (ms)",
-                "low_hold_warning_ms": "Low hold (ms)",
-                "interval_cv_limit_pct": "Interval CV (%)",
-            }[key])
-            edit = QLineEdit()
-            edit.setText(f"{defaults[key]:g}")
-            edit.setAlignment(Qt.AlignmentFlag.AlignRight)
-            edit.setMinimumWidth(110)
-            edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self._limit_labels[key] = lab
-            self._limit_edits[key] = edit
-            limits_grid.addWidget(lab, row, 0, Qt.AlignmentFlag.AlignVCenter)
-            limits_grid.addWidget(edit, row, 1)
-        limits_l.addLayout(limits_grid)
-        limits_l.addStretch(1)
+        self.lbl_custom_limits = self.lbl_screening
 
-        self.setup_card_grid = ResponsiveCardGrid([device_card, config_card, limits_card])
+        self.setup_card_grid = ResponsiveCardGrid([device_card, config_card, screening_card])
         inner_l.addWidget(self.setup_card_grid)
 
         profile_card, profile_l = self._setup_card()
@@ -2564,9 +2562,10 @@ class MainWindow(QMainWindow):
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
-        self.lbl_custom_limits.setText(self._tr("custom_limits").upper())
-        for key, lab in self._limit_labels.items():
-            lab.setText(self._tr(_QT_CUSTOM_LIMIT_LABEL_KEYS[key]))
+        self.lbl_custom_limits.setText(self._tr("screening").upper())
+        self.lbl_screening.setText(self._tr("screening").upper())
+        self.lbl_screening_status.setText(self._tr("screening_measurement_only"))
+        self.lbl_screening_note.setText(self._tr("screening_measurement_only_note"))
         self.btn_stop.setText(self._tr("stop"))
         self.btn_generate_excel.setText(self._tr("generate_excel"))
         self.btn_generate_html.setText(self._tr("generate_html"))
@@ -2605,7 +2604,9 @@ class MainWindow(QMainWindow):
         self.reset_window_geometry_button.setText(self._tr("reset_window_geometry").replace("&", "&&"))
         self.issue_title.setText(self._tr("issues"))
         for key, lab in self._stat_name_labels.items():
-            lab.setText(self._tr(key).upper() if key not in ("dut", "setup_score") else self._tr(key).upper())
+            token = _CAPTURE_ISSUE_INTERNAL.get(key)
+            text = screening_presentation_label(token, self._tr) if token else self._tr(key)
+            lab.setText(text.upper())
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
         self._show_workflow_page(self._current_page)
@@ -2626,7 +2627,8 @@ class MainWindow(QMainWindow):
         return self._ui_is_manual()
 
     def _custom_limit_raw_values(self) -> dict[str, str]:
-        return {key: self._limit_edits[key].text() for key in QT_CUSTOM_LIMIT_KEYS}
+        """String form of internal compatibility defaults. Setup has no editors."""
+        return {key: f"{value:g}" for key, value in qt_custom_limit_defaults().items()}
 
     def _apply_mode_fields(self):
         manual = self._ui_is_manual()
@@ -2695,11 +2697,6 @@ class MainWindow(QMainWindow):
                 parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
             except ValueError as exc:
                 raise ProfileValidationError("fixture_timing_tolerance_invalid") from exc
-        try:
-            parse_qt_custom_limits(self._custom_limit_raw_values())
-        except QtCustomLimitsError as exc:
-            key = "custom_limits_order_invalid" if exc.code == "order" else "custom_limits_invalid"
-            raise ProfileValidationError(key) from exc
         return copy.deepcopy(self.settings())
 
     def _lifecycle_state(self) -> str:
@@ -3125,7 +3122,8 @@ class MainWindow(QMainWindow):
             hz = 0.0
         else:
             hz = parse_reference_rate_hz(self.hz_combo.currentText())
-        limits = parse_qt_custom_limits(self._custom_limit_raw_values())
+        # Compatibility stamp only: testers no longer edit these heuristics in Setup.
+        limits = qt_custom_limit_defaults()
         base = {
             "manual_mode": manual,
             "profile_name": "Manual_Left_Stable" if manual else "Fixture_Custom",
@@ -3614,9 +3612,6 @@ class MainWindow(QMainWindow):
         idx = self.button_combo.findText(button)
         if idx >= 0:
             self.button_combo.setCurrentIndex(idx)
-        for key in QT_CUSTOM_LIMIT_KEYS:
-            if settings.get(key) is not None:
-                self._limit_edits[key].setText(str(settings[key]))
         if bool(settings.get("manual_mode")):
             self.radio_manual.setChecked(True)
         else:
@@ -4092,6 +4087,7 @@ class MainWindow(QMainWindow):
             self.auto_stop_on,
             self.auto_stop_sec_combo,
             self.btn_lock_profile,
+            self.setup_screening_card,
             self.btn_arm,
             self.btn_edit_profile,
             self.capture_viz_toolbar,
@@ -4256,7 +4252,14 @@ class MainWindow(QMainWindow):
             self.val_setup.setText(str(m.get("setup_score", "--")))
         self.val_verdict.setText(self._run_status_display(run_status))
         if final or self.completed:
-            alert = [tag for tag in _QT_ALERT_TAGS if tag in tags]
+            alert = []
+            for tag in _QT_ALERT_TAGS:
+                if tag not in tags:
+                    continue
+                if tag in SCREENING_PRESENTATION_KEYS:
+                    alert.append(screening_presentation_label(tag, self._tr))
+                else:
+                    alert.append(str(tag))
             self.alert_label.setText(" · ".join(alert))
             self.review_text.clear()
             self._refresh_results_workspace()

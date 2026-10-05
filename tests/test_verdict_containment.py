@@ -318,7 +318,7 @@ class QtRunStatusContainmentTests(unittest.TestCase):
             win.auto_stop_on.setChecked(True)
             win.auto_stop_sec_combo.setCurrentText("1")
         for key, value in limits.items():
-            win._limit_edits[key].setText(value)
+            raise AssertionError(f"Setup no longer exposes custom-limit editors for {key}={value}")
         self.assertTrue(win.lock_profile())
         self.assertTrue(win.arm_capture())
         t0 = float(win._arm_boundary_perf) + 0.001
@@ -332,22 +332,21 @@ class QtRunStatusContainmentTests(unittest.TestCase):
             win._release_post_run_input_guard()
         return win
 
-    def test_custom_limit_edits_change_tags_not_visible_run_status(self):
+    def test_setup_cannot_vary_legacy_heuristic_tags(self):
         offsets = [0, 25, 30, 50, 75, 100, 125, 150]
-        loose = {"chatter_threshold_ms": "2", "duplicate_click_threshold_ms": "3",
-                 "fixture_actuation_too_short_ms": "1", "low_hold_warning_ms": "2", "interval_cv_limit_pct": "90"}
-        strict = {"chatter_threshold_ms": "8", "duplicate_click_threshold_ms": "20",
-                  "fixture_actuation_too_short_ms": "12", "low_hold_warning_ms": "15", "interval_cv_limit_pct": "5"}
+        defaults = self.qt_app.qt_custom_limit_defaults()
         for manual in (False, True):
             with self.subTest(manual=manual):
-                a = self._run(manual=manual, limits=loose, offsets_ms=offsets)
-                b = self._run(manual=manual, limits=strict, offsets_ms=offsets)
+                a = self._run(manual=manual, limits={}, offsets_ms=offsets)
+                b = self._run(manual=manual, limits={}, offsets_ms=offsets)
                 fa, fb = a._completed_run_facts(), b._completed_run_facts()
-                self.assertNotEqual(fa["model"]["assessment"]["tags_all"], fb["model"]["assessment"]["tags_all"])
+                self.assertEqual(fa["model"]["assessment"]["tags_all"], fb["model"]["assessment"]["tags_all"])
                 self.assertEqual(_raw_measurements(fa["model"]), _raw_measurements(fb["model"]))
                 for win, facts in ((a, fa), (b, fb)):
                     self.assertEqual(facts["run_status"], RUN_STATUS_COMPLETE)
                     self.assertEqual(win.val_verdict.text(), RUN_STATUS_COMPLETE)
+                    for key, value in defaults.items():
+                        self.assertEqual(win.profile_locked_settings[key], value)
                     win._refresh_results_workspace()
                     self.assertEqual(win.results_verdict_label.text(), RUN_STATUS_COMPLETE)
 

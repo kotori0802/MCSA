@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtWidgets import QToolTip, QWidget
 
+from .presentation import screening_presentation_label
 from .styles import ChartPalette, LIGHT_PALETTE, chart_font
 
 FIT_MARGIN_FRAC = 0.08
@@ -177,6 +178,12 @@ class _ChartBase(QWidget):
 
     def _label(self, key: str, fallback: str) -> str:
         return self.labels.get(key) or fallback
+
+    def _screening_label(self, internal: str, fallback: str) -> str:
+        def tr(key: str, **_kwargs: object) -> str:
+            return self._label(key, fallback)
+
+        return screening_presentation_label(internal, tr)
 
     def _title_block_h(self) -> float:
         return self.TITLE_H + (self.SUBTITLE_H if self.subtitle else 0)
@@ -587,10 +594,10 @@ class ScatterChart(_ChartBase):
         self._draw_title(p)
 
         legend = [
-            (pal.on_cadence, self._label("legend_on_cadence", "On cadence")),
-            (pal.extra, self._label("legend_extra", "Extra / double")),
-            (pal.chatter, self._label("legend_chatter", "Chatter")),
-            (pal.miss, self._label("legend_miss", "Miss / slow")),
+            (pal.on_cadence, self._screening_label("ON_CADENCE", "Observation")),
+            (pal.extra, self._screening_label("TRUE_EXTRA_CLICK", "Extra observation")),
+            (pal.chatter, self._screening_label("CHATTER_BOUNCE", "Very short interval")),
+            (pal.miss, self._screening_label("MISS_OR_SLOW", "Long interval")),
         ]
         if self.overlay_points:
             legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))

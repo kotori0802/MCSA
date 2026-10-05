@@ -36,6 +36,9 @@ _NAV_KEYS = (
     "preferences_more_note",
     "setup_device_section",
     "setup_config_section",
+    "screening",
+    "screening_measurement_only",
+    "screening_measurement_only_note",
 )
 
 
@@ -148,9 +151,7 @@ class WorkflowShellTests(unittest.TestCase):
         self.assertEqual(hz_likes, [self.win.hz_combo])
         self.assertEqual(self.win.findChildren(QLineEdit).count(self.win.timing_tol_edit), 1)
         self.assertEqual(self.win.findChildren(QLineEdit).count(self.win.device_edit), 1)
-        for key, edit in self.win._limit_edits.items():
-            with self.subTest(key=key):
-                self.assertEqual(self.win.findChildren(QLineEdit).count(edit), 1)
+        self.assertEqual(self.win._limit_edits, {})
 
     def test_setup_page_owns_settings_controls(self):
         owned = [
@@ -161,7 +162,6 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.auto_stop_off,
             self.win.auto_stop_on,
             self.win.auto_stop_sec_combo,
-            *self.win._limit_edits.values(),
         ]
         for widget in owned:
             self.assertTrue(_under(widget, self.win.page_setup), widget)
@@ -240,7 +240,6 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.hz_combo,
             self.win.timing_tol_edit,
             self.win.radio_manual,
-            *self.win._limit_edits.values(),
         ):
             self.assertFalse(widget.isEnabled(), widget)
         self.win.stop_run()
@@ -249,7 +248,6 @@ class WorkflowShellTests(unittest.TestCase):
 
     def test_values_survive_page_switching(self):
         self._setup_fixture(hz="40", tol="2", auto_sec="10")
-        self.win._limit_edits["chatter_threshold_ms"].setText("7")
         self.win.nav_capture.click()
         self.win.nav_results.click()
         self.win.nav_setup.click()
@@ -258,7 +256,6 @@ class WorkflowShellTests(unittest.TestCase):
         self.assertEqual(self.win.timing_tol_edit.text(), "2")
         self.assertTrue(self.win.auto_stop_on.isChecked())
         self.assertEqual(self.win.auto_stop_sec_combo.currentText(), "10")
-        self.assertEqual(self.win._limit_edits["chatter_threshold_ms"].text(), "7")
 
     def test_navigation_does_not_rebuild_host_evidence(self):
         self._setup_fixture()

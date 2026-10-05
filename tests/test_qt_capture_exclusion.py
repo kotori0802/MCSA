@@ -300,10 +300,8 @@ class CaptureExclusionTests(unittest.TestCase):
             with self.subTest(widget=type(widget).__name__):
                 self.win.setup_scroll.ensureWidgetVisible(widget)
                 self._assert_click_excluded(widget)
-        for key, edit in self.win._limit_edits.items():
-            with self.subTest(limit=key):
-                self.win.setup_scroll.ensureWidgetVisible(edit)
-                self._assert_click_excluded(edit)
+        self.win.setup_scroll.ensureWidgetVisible(self.win.setup_screening_card)
+        self._assert_click_excluded(self.win.setup_screening_card)
 
     def test_hidden_page_controls_do_not_exclude(self):
         self._setup_fixture()
@@ -502,7 +500,7 @@ class HiddenTestAreaGeometryTests(unittest.TestCase):
         candidates = [
             self.win.device_edit, self.win.button_combo, self.win.radio_manual,
             self.win.radio_fixture, self.win.hz_combo, self.win.timing_tol_edit,
-            self.win.auto_stop_off, self.win.auto_stop_on, *self.win._limit_edits.values(),
+            self.win.auto_stop_off, self.win.auto_stop_on, self.win.setup_screening_card,
             self.win.btn_lock_profile, self.win.setup_profile_card,
             self.win.setup_device_card, self.win.setup_config_card, self.win.setup_limits_card,
         ]

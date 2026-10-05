@@ -45,6 +45,10 @@ _I18N_KEYS = (
     "viz_reset_view",
     "legend_association_window",
     "legend_configured_reference",
+    "legend_on_cadence",
+    "legend_extra",
+    "legend_chatter",
+    "legend_miss",
     "hover_click",
     "hover_interval",
     "hover_hold",
@@ -507,6 +511,7 @@ class CaptureVisualizationTests(unittest.TestCase):
                     self.assertTrue(str(STRINGS[lang].get(key) or "").strip())
         self.assertEqual(STRINGS["en"]["chart_stability_map"], "Click Stability Map")
         self.assertEqual(STRINGS["en"]["chart_interval_trend"], "Interval Trend")
+        self.assertEqual(STRINGS["en"]["legend_on_cadence"], "Observation")
         self.assertNotIn("PASS zone", STRINGS["en"]["legend_association_window"])
 
 

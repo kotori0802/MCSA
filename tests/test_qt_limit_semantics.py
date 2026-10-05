@@ -294,8 +294,8 @@ class HighRateCadenceCharacterizationTests(unittest.TestCase):
         self.assertAlmostEqual(extra_click_ceiling_ms(s), 18.0)
         self.assertEqual(s["duplicate_click_threshold_ms"], 30.0)
         # Current behavior: a valid 25 ms / 40 Hz beat is ON_CADENCE even though
-        # 25 < the visible 30 ms Double-click Threshold. Do not treat this as
-        # the V2 Custom Limit contract.
+        # 25 < the internal 30 ms duplicate_click_threshold_ms compatibility default.
+        # That default is not a universal Fixture duplicate rule.
         self.assertEqual(classify_click(25.0, 10.0, s), "ON_CADENCE")
         self.assertEqual(classify_click(29.9, 10.0, s), "ON_CADENCE")
         self.assertEqual(classify_click(15.0, 10.0, s), "TRUE_EXTRA_CLICK")
