@@ -221,6 +221,7 @@ class _ChartBase(QWidget):
         self.subtitle = ""
         self.data_aware_fit = False
         self.factual_guides = False
+        self.measurement_only_presentation = False
         self.target_beat_ms: float | None = None
         self.zoom_locked = False
         self._user_view: tuple[float, float, float, float] | None = None
@@ -247,6 +248,11 @@ class _ChartBase(QWidget):
         self.data_aware_fit = bool(enabled)
         self.factual_guides = bool(enabled)
         self.setMouseTracking(bool(enabled))
+        self.update()
+
+    def set_measurement_only_presentation(self, enabled: bool) -> None:
+        """Results Measurement-only legend/colors. Does not enable Capture navigation."""
+        self.measurement_only_presentation = bool(enabled)
         self.update()
 
     def _label(self, key: str, fallback: str) -> str:
@@ -613,7 +619,7 @@ class _ChartBase(QWidget):
         pal = self.palette
         if not self.target_beat_ms:
             return items
-        if self.factual_guides:
+        if self.factual_guides or self.measurement_only_presentation:
             items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
         else:
             items.append((pal.target_line, self._label("legend_target", "Target beat")))
@@ -791,6 +797,29 @@ class ScatterChart(_ChartBase):
         }
         return mapping.get(cls, pal.on_cadence)
 
+    def _point_color(self, cls: str) -> str:
+        if self.measurement_only_presentation:
+            return self.palette.on_cadence
+        return self._class_color(cls)
+
+    def legend_entries(self) -> list[tuple[str, str]]:
+        pal = self.palette
+        if self.measurement_only_presentation:
+            items = [
+                (pal.on_cadence, self._label("legend_host_observation", "Host observation")),
+            ]
+        else:
+            items = [
+                (pal.on_cadence, self._screening_label("ON_CADENCE", "Observation")),
+                (pal.extra, self._screening_label("TRUE_EXTRA_CLICK", "Short interval")),
+                (pal.chatter, self._screening_label("CHATTER_BOUNCE", "Very short interval")),
+                (pal.miss, self._screening_label("MISS_OR_SLOW", "Long interval")),
+            ]
+        if self.overlay_points:
+            items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
+        items.extend(self._guide_legend_items())
+        return items
+
     def _xy_values(self) -> tuple[list[float], list[float]]:
         xs = _finite_values([row[0] for row in self.points] + [row[0] for row in self.overlay_points])
         ys = _finite_values([row[1] for row in self.points] + [row[1] for row in self.overlay_points])
@@ -900,15 +929,7 @@ class ScatterChart(_ChartBase):
         plot = self._plot_rect()
         self._draw_title(p)
 
-        legend = [
-            (pal.on_cadence, self._screening_label("ON_CADENCE", "Observation")),
-            (pal.extra, self._screening_label("TRUE_EXTRA_CLICK", "Short interval")),
-            (pal.chatter, self._screening_label("CHATTER_BOUNCE", "Very short interval")),
-            (pal.miss, self._screening_label("MISS_OR_SLOW", "Long interval")),
-        ]
-        if self.overlay_points:
-            legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
-        legend.extend(self._guide_legend_items())
+        legend = self.legend_entries()
         self._draw_legend_box(p, plot, legend)
 
         if not self.points and not self.overlay_points:
@@ -948,7 +969,7 @@ class ScatterChart(_ChartBase):
         for row in self.points[-2500:]:
             x, y = float(row[0]), float(row[1])
             cls = str(row[2]) if len(row) > 2 else "ON_CADENCE"
-            p.setBrush(QBrush(QColor(self._class_color(cls))))
+            p.setBrush(QBrush(QColor(self._point_color(cls))))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(map_x(x), map_y(y)), 3.4, 3.4)
         p.restore()
@@ -1030,6 +1051,19 @@ class IntervalChart(_ChartBase):
 
         return plot, bounds, map_x_ms, map_x_s, map_y
 
+    def _interval_legend_label(self) -> str:
+        if self.factual_guides:
+            return self._label("chart_interval_trend", "Interval Trend")
+        return self._label("chart_interval", "Interval over time")
+
+    def legend_entries(self) -> list[tuple[str, str]]:
+        pal = self.palette
+        items = [(pal.interval_line, self._interval_legend_label())]
+        if self.overlay_series:
+            items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
+        items.extend(self._guide_legend_items())
+        return items
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1038,15 +1072,7 @@ class IntervalChart(_ChartBase):
         plot = self._plot_rect()
         self._draw_title(p)
 
-        legend_label = (
-            self._label("chart_interval_trend", "Interval Trend")
-            if self.factual_guides
-            else self._label("chart_interval", "Interval over time")
-        )
-        legend = [(pal.interval_line, legend_label)]
-        if self.overlay_series:
-            legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
-        legend.extend(self._guide_legend_items())
+        legend = self.legend_entries()
         self._draw_legend_box(p, plot, legend)
 
         empty = not self.series and not self.overlay_series
@@ -1054,7 +1080,7 @@ class IntervalChart(_ChartBase):
         if empty or legacy_waiting:
             p.setPen(QColor(pal.muted))
             p.setFont(chart_font("placeholder"))
-            wait = self._label("waiting_data", "Waiting for click data") if self.data_aware_fit else legend_label
+            wait = self._label("waiting_data", "Waiting for click data") if self.data_aware_fit else self._interval_legend_label()
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), wait)
             return
 
@@ -1146,6 +1172,15 @@ class HistogramChart(_ChartBase):
         self.target_beat_ms = target_beat_ms
         self.update()
 
+    def legend_entries(self) -> list[tuple[str, str]]:
+        pal = self.palette
+        items = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
+        if self.overlay_bins:
+            items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
+        if self.target_beat_ms:
+            items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+        return items
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1155,11 +1190,7 @@ class HistogramChart(_ChartBase):
         p.setPen(QColor(pal.text))
         p.setFont(chart_font("title", bold=True))
         p.drawText(12, 16, self.title)
-        legend = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
-        if self.overlay_bins:
-            legend.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
-        if self.target_beat_ms:
-            legend.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+        legend = self.legend_entries()
         self._draw_legend_box(p, plot, legend)
         if not self.bins:
             p.setPen(QColor(pal.muted))

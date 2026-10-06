@@ -87,6 +87,14 @@ def screening_presentation_labels(
     return out
 
 
+MEASUREMENT_NEUTRAL_DISPLAY = "—"
+
+
+def measurement_only_timing_observation_label() -> str:
+    """Results Click Data in Measurement-only mode: no Screening/Validation category."""
+    return MEASUREMENT_NEUTRAL_DISPLAY
+
+
 def matched_observations_used_text(matched_n: Any, in_capture_n: Any) -> str:
     """English matched-timing denominator: matched of Host observations in capture.
 

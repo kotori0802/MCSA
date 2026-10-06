@@ -101,10 +101,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "col_button": "Button",
         "col_interval": "Interval",
         "col_hold": "Hold",
-        "col_state": "Observation",
+        "col_state": "Timing observation",
         "col_tags": "Observation flag(s)",
         "col_ref_delta": "Interval Δ vs ref.",
         "col_ref_delta_tooltip": "Observed interval − configured reference interval",
+        "col_state_tooltip": "Measurement-only: no Screening or Validation category is applied.",
         "schedule": "Schedule",
         "reference_interval": "Configured reference interval",
         "tolerance": "Schedule Association Window",
@@ -122,6 +123,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "max_error": "Maximum matched timing error",
         "stdev": "Matched timing error stdev",
         "legend_configured_reference": "Configured reference",
+        "legend_host_observation": "Host observation",
+        "results_chart_legend_help": (
+            "Host observation: an accepted button press recorded by the Host capture path. "
+            "Configured reference: the nominal interval from the configured Reference Rate. "
+            "It is not a PASS/FAIL threshold."
+        ),
         "obs_fixture_hz_mismatch": "Host-observed cadence differs from the configured reference.",
         "obs_chatter_hard": "Host-observed intervals include very short intervals.",
         "obs_double_click": "Host-observed intervals include short intervals.",
@@ -434,10 +441,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "col_button": "按鍵",
         "col_interval": "間隔",
         "col_hold": "按住",
-        "col_state": "觀測",
+        "col_state": "時序觀測",
         "col_tags": "觀測旗標",
         "col_ref_delta": "間隔 Δ 對參考值",
         "col_ref_delta_tooltip": "觀測間隔 − 設定參考間隔",
+        "col_state_tooltip": "僅量測：未套用 Screening 或 Validation 類別。",
         "schedule": "排程",
         "reference_interval": "設定參考間隔",
         "tolerance": "排程關聯範圍",
@@ -455,6 +463,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "max_error": "最大匹配時序誤差",
         "stdev": "匹配時序誤差標準差",
         "legend_configured_reference": "設定參考值",
+        "legend_host_observation": "主機觀測",
+        "results_chart_legend_help": (
+            "主機觀測：主機擷取路徑記錄到的有效按壓。"
+            "設定參考值：由設定參考速率得出的名義間隔，不是 PASS/FAIL 門檻。"
+        ),
         "obs_fixture_hz_mismatch": "主機觀測節拍與設定參考值不同。",
         "obs_chatter_hard": "主機觀測間隔含有極短間隔。",
         "obs_double_click": "主機觀測間隔含有短間隔。",

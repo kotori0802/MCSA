@@ -198,7 +198,7 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
             parts.append(val.text())
         return "\n".join(parts)
 
-    def test_click_data_and_capture_use_same_aliases(self):
+    def test_measurement_only_click_data_does_not_promote_aliases(self):
         self._setup_fixture()
         self._run([0, 40, 80])
         facts = self.win._completed_run_facts()
@@ -206,11 +206,14 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
         self.assertTrue(any(state in {"TRUE_EXTRA_CLICK", "ON_CADENCE"} for state in model_states))
         table = self.win.results_click_table
         displayed = [table.item(r, 5).text() for r in range(table.rowCount()) if table.item(r, 5)]
+        self.assertTrue(displayed)
         for text in displayed:
+            self.assertEqual(text, "—")
             self.assertNotIn("TRUE_EXTRA_CLICK", text)
             self.assertNotIn("ON_CADENCE", text)
-            self.assertNotIn("HIGH_PROBABILITY_DOUBLE_CLICK", text)
-        self.assertTrue(any(text == "Short interval" or text == "Observation" for text in displayed))
+            self.assertNotIn("Observation", text)
+            self.assertNotIn("Short interval", text)
+        self.assertEqual(table.horizontalHeaderItem(5).text(), "Timing observation")
         self.assertEqual(self.win._stat_name_labels["extra"].text(), "SHORT INTERVAL")
         self.assertEqual(self.win.issue_title.text(), "OBSERVATIONS")
 
@@ -295,7 +298,7 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
         timing = self.win.results_timing_text.text()
         self.assertIn(f"{matched} of {total} in capture", timing)
         view = report_v2.build_report_view(self.win._completed_run_facts()["model"])
-        he = dict(item for group in view["host_evidence"] for item in group[1])
+        he = {label: value for _name, rows in view["host_evidence"] for _key, label, value in rows}
         self.assertEqual(he["Matched observations used"], f"{matched} of {total} in capture")
         if raw != total:
             self.assertNotIn(f"{matched} of {raw}", evidence)
@@ -323,7 +326,7 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
         timing = self.win.results_timing_text.text()
         self.assertIn(used, timing)
         view = report_v2.build_report_view(self.win._completed_run_facts()["model"])
-        he = dict(item for group in view["host_evidence"] for item in group[1])
+        he = {label: value for _name, rows in view["host_evidence"] for _key, label, value in rows}
         self.assertEqual(he["Matched observations used"], used)
         self.assertEqual(he["Host observations in capture"], str(in_capture))
         self.assertEqual(he["Host observations recorded"], str(raw))

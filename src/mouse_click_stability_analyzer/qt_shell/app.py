@@ -87,7 +87,13 @@ from ..measurements import (
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
 from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
-from .presentation import SCREENING_PRESENTATION_KEYS, screening_presentation_label, screening_presentation_labels
+from .presentation import (
+    SCREENING_PRESENTATION_KEYS,
+    measurement_only_timing_observation_label,
+    screening_presentation_label,
+    screening_presentation_labels,
+)
+from .click_table_sort import CLICK_TABLE_NUMERIC_COLUMNS, sort_permutation
 from .styles import density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
@@ -1059,7 +1065,7 @@ class MainWindow(QMainWindow):
             "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s",
             "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
             "legend_overlay", "legend_target", "chart_interval", "chart_interval_trend",
-            "interval_distribution", "legend_configured_reference",
+            "interval_distribution", "legend_configured_reference", "legend_host_observation",
             "clicks", "hold_vs_interval",
             "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
         )
@@ -1804,6 +1810,9 @@ class MainWindow(QMainWindow):
         self.results_interval_chart = IntervalChart()
         self.results_distribution_chart = HistogramChart()
         self.results_scatter = ScatterChart()
+        self.results_interval_chart.set_measurement_only_presentation(True)
+        self.results_distribution_chart.set_measurement_only_presentation(True)
+        self.results_scatter.set_measurement_only_presentation(True)
         self.results_timing_panel = QWidget()
         timing_l = QVBoxLayout(self.results_timing_panel)
         timing_l.setContentsMargins(12, 12, 12, 12)
@@ -1820,6 +1829,10 @@ class MainWindow(QMainWindow):
         self.results_chart_stack.addWidget(self.results_scatter)
         self.results_chart_stack.addWidget(self.results_timing_panel)
         chart_l.addWidget(self.results_chart_stack, 1)
+        self.results_chart_legend_help = QLabel("")
+        self.results_chart_legend_help.setObjectName("Muted")
+        self.results_chart_legend_help.setWordWrap(True)
+        chart_l.addWidget(self.results_chart_legend_help)
         self.results_analysis_split.addWidget(chart_host)
 
         observations_card, observations_l = self._setup_card()
@@ -1918,9 +1931,14 @@ class MainWindow(QMainWindow):
         self.results_click_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.results_click_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.results_click_table.verticalHeader().setVisible(False)
-        self.results_click_table.setSortingEnabled(True)
-        self.results_click_table.horizontalHeader().setStretchLastSection(True)
-        self.results_click_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.results_click_table.setSortingEnabled(False)
+        click_header = self.results_click_table.horizontalHeader()
+        click_header.setStretchLastSection(True)
+        click_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        click_header.setSectionsClickable(True)
+        click_header.setSortIndicatorShown(True)
+        click_header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        click_header.sectionClicked.connect(self._on_click_header_clicked)
         self.results_click_table.itemSelectionChanged.connect(self._on_click_table_selection_changed)
         clicks_l.addWidget(self.results_click_table)
         self.results_tabs.addTab(clicks_page, "Click Data")
@@ -2665,9 +2683,17 @@ class MainWindow(QMainWindow):
             self._tr("col_ref_delta"),
         ]
         self.results_click_table.setHorizontalHeaderLabels(headers)
+        state_header = self.results_click_table.horizontalHeaderItem(5)
+        if state_header is not None:
+            state_header.setToolTip(self._tr("col_state_tooltip"))
         header_item = self.results_click_table.horizontalHeaderItem(7)
         if header_item is not None:
             header_item.setToolTip(self._tr("col_ref_delta_tooltip"))
+        help_text = self._tr("results_chart_legend_help")
+        self.results_chart_legend_help.setText(help_text)
+        self.results_scatter.setToolTip(help_text)
+        self.results_interval_chart.setToolTip(help_text)
+        self.results_distribution_chart.setToolTip(help_text)
         self.btn_new.setText(self._tr("run_again"))
         self.btn_edit_setup_new_run.setText(qt_button_label(self._tr("edit_setup_new_run")))
         self.btn_capture_new_run.setText(self._tr("new_run"))
@@ -3137,24 +3163,79 @@ class MainWindow(QMainWindow):
     def _populate_click_table(self, model: dict[str, Any]) -> None:
         rows = model["click_data"]
         table = self.results_click_table
-        table.setSortingEnabled(False)
         table.setRowCount(len(rows))
+        neutral = measurement_only_timing_observation_label()
         for r, row in enumerate(rows):
-            values = (
-                str(row.get("index") or ""),
-                "" if row.get("elapsed_ms") is None else f"{row['elapsed_ms']:.2f}",
-                str(row.get("button") or ""),
-                "" if row.get("interval_ms") is None else f"{row['interval_ms']:.2f}",
-                "" if row.get("hold_ms") is None else f"{row['hold_ms']:.2f}",
-                screening_presentation_label(row.get("state"), self._tr),
-                ", ".join(screening_presentation_labels(row.get("tags") or [], self._tr)),
-                "" if row.get("reference_delta_ms") is None else f"{row['reference_delta_ms']:.2f}",
+            index_val = row.get("index")
+            try:
+                index_sort: int | None = int(index_val) if index_val not in (None, "") else None
+            except (TypeError, ValueError):
+                index_sort = None
+            cells = (
+                (str(index_val or ""), index_sort),
+                ("" if row.get("elapsed_ms") is None else f"{row['elapsed_ms']:.2f}", row.get("elapsed_ms")),
+                (str(row.get("button") or ""), str(row.get("button") or "")),
+                ("" if row.get("interval_ms") is None else f"{row['interval_ms']:.2f}", row.get("interval_ms")),
+                ("" if row.get("hold_ms") is None else f"{row['hold_ms']:.2f}", row.get("hold_ms")),
+                (neutral, neutral),
+                (neutral, neutral),
+                (
+                    "" if row.get("reference_delta_ms") is None else f"{row['reference_delta_ms']:.2f}",
+                    row.get("reference_delta_ms"),
+                ),
             )
-            for c, value in enumerate(values):
-                item = QTableWidgetItem(value)
+            for c, (display, sort_value) in enumerate(cells):
+                item = QTableWidgetItem(display)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setData(Qt.ItemDataRole.UserRole, sort_value)
+                item.setData(Qt.ItemDataRole.UserRole + 1, r)
                 table.setItem(r, c, item)
-        table.setSortingEnabled(True)
+        header = table.horizontalHeader()
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        self._apply_click_table_sort()
+
+    def _on_click_header_clicked(self, section: int) -> None:
+        header = self.results_click_table.horizontalHeader()
+        if header.sortIndicatorSection() == section:
+            order = (
+                Qt.SortOrder.DescendingOrder
+                if header.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            order = Qt.SortOrder.AscendingOrder
+        header.setSortIndicator(section, order)
+        self._apply_click_table_sort()
+
+    def _apply_click_table_sort(self) -> None:
+        table = self.results_click_table
+        header = table.horizontalHeader()
+        column = header.sortIndicatorSection()
+        descending = header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+        n = table.rowCount()
+        m = table.columnCount()
+        if n <= 1 or column < 0:
+            return
+        grid = [[table.takeItem(r, c) for c in range(m)] for r in range(n)]
+        values = []
+        ties = []
+        for row_items in grid:
+            item = row_items[column] if column < len(row_items) else None
+            values.append(None if item is None else item.data(Qt.ItemDataRole.UserRole))
+            ties.append(0 if item is None else int(item.data(Qt.ItemDataRole.UserRole + 1) or 0))
+        order = sort_permutation(
+            values,
+            descending=descending,
+            numeric=column in CLICK_TABLE_NUMERIC_COLUMNS,
+            tie_breakers=ties,
+        )
+        table.blockSignals(True)
+        try:
+            for new_r, old_r in enumerate(order):
+                for c, item in enumerate(grid[old_r]):
+                    table.setItem(new_r, c, item)
+        finally:
+            table.blockSignals(False)
 
     def _on_click_table_selection_changed(self):
         return
