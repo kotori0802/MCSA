@@ -793,7 +793,7 @@ class ReportV2ModelTests(unittest.TestCase):
         device = {"name": "HP Mouse 9000", "vid": "03F0", "pid": "0A4B", "bcd_device": "0102", "instance_id": "X"}
         model = build_completed_result_model(locked=self._settings(device_under_test=device),
                                              events=self._events([100.0] * 25), run_id="ident", target="SAMPLE-07")
-        info = dict(report_v2.build_report_view(model)["test_information"])
+        info = {label: value for _id, label, value in report_v2.build_report_view(model)["test_information"]}
         self.assertEqual(info["Run Profile"], "Fixture_Custom")
         self.assertEqual(info["Screening"], "Measurement only")
         self.assertEqual(info["Device"], "SAMPLE-07")
@@ -805,8 +805,9 @@ class ReportV2ModelTests(unittest.TestCase):
             report_v2.write_report_xlsx(xlsx_path, model)
             summary = _sheet_kv(xlsx_path, "Summary")
         self.assertEqual((summary["VID"], summary["PID"], summary["bcdDevice"]), ("03F0", "0A4B", "0102"))
-        host = dict(report_v2.host_information_rows({"platform": "P", "capture_backend": "C",
-                                                     "device_under_test": device}, tool_version="1"))
+        host = {label: value for _id, label, value in report_v2.host_information_rows(
+            {"platform": "P", "capture_backend": "C", "device_under_test": device}, tool_version="1",
+        )}
         self.assertEqual(set(host), {"Host OS", "Capture backend", "Tool version"})
 
     def test_view_does_not_mutate_model_and_keeps_observations_in_model(self):
@@ -877,6 +878,54 @@ class ReportV2ModelTests(unittest.TestCase):
                 self.assertNotIn(tag, html_text)
             self.assertNotIn("EXCESS", _workbook_text(Path(paths["engineering_xlsx"])))
             self.assertTrue(legacy_app._verify_artifacts(paths)["ok"])
+
+
+class ReportXlsxRowIdTests(unittest.TestCase):
+    def test_xlsx_typing_is_keyed_by_row_id_not_visible_label(self):
+        self.assertEqual(report_v2.xlsx_kv_cell_value("bcd_device", "0102"), "0102")
+        self.assertIsInstance(report_v2.xlsx_kv_cell_value("bcd_device", "0102"), str)
+        self.assertEqual(report_v2.xlsx_kv_cell_value("host_count_delta_vs_windows", "+2"), "+2")
+        self.assertIsInstance(report_v2.xlsx_kv_cell_value("host_count_delta_vs_windows", "+2"), str)
+        self.assertEqual(report_v2.xlsx_kv_cell_value("run_id", "20261006"), "20261006")
+        self.assertEqual(report_v2.xlsx_kv_cell_value("host_press_count", "58"), 58)
+        self.assertEqual(report_v2.xlsx_kv_cell_value("host_presses", "20"), 20)
+        self.assertEqual(report_v2.xlsx_kv_cell_value("expected_slot_count", "56"), 56)
+
+    def test_renamed_visible_label_does_not_change_xlsx_cell_type(self):
+        device = {"name": "HP Mouse 9000", "vid": "03F0", "pid": "0A4B", "bcd_device": "0102"}
+        settings = legacy_app.normalize_settings({})
+        settings.update({
+            "profile_name": "Fixture_Custom", "fixture_hz": 10.0, "fixture_reference_hz": 10.0,
+            "duration_sec": 5, "focus_button": "Left", "expected_clicks": 0, "target_clicks": 0,
+            "device_under_test": device,
+        })
+        events = []
+        t = 0.0
+        for i, step in enumerate([100.0] * 20):
+            t += step if i else 0.0
+            events.append({
+                "index": i + 1, "button": "Left", "accepted": True, "event_type": "click",
+                "press_elapsed_ms": t, "release_elapsed_ms": t + 40.0, "elapsed_ms": t + 40.0,
+                "press_interval_ms": step if i else None, "hold_ms": 40.0,
+            })
+        model = build_completed_result_model(locked=settings, events=events, run_id="20261006", target="DUT")
+        original = report_v2._test_information_rows
+
+        def renamed(run, generated_at):
+            return [
+                (row_id, "Firmware rev" if row_id == "bcd_device" else label, value)
+                for row_id, label, value in original(run, generated_at)
+            ]
+
+        with mock.patch.object(report_v2, "_test_information_rows", renamed):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "r.xlsx"
+                self.assertTrue(report_v2.write_report_xlsx(path, model))
+                summary = _sheet_kv(path, "Summary")
+        self.assertEqual(summary["Firmware rev"], "0102")
+        self.assertIsInstance(summary["Firmware rev"], str)
+        self.assertNotIn("bcdDevice", summary)
+        self.assertEqual(summary["Host Presses"], 20)
 
 
 if __name__ == "__main__":

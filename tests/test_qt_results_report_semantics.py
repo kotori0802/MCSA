@@ -454,7 +454,7 @@ class ReportViewSemanticsTests(unittest.TestCase):
             locked=locked, events=events, run_id="zero", target="U", host_evidence_snapshot=snap,
         )
         groups = dict(report_v2._host_evidence_groups(model))
-        timing = dict(groups["Matched timing (Host − schedule)"])
+        timing = {label: value for _id, label, value in groups["Matched timing (Host − schedule)"]}
         self.assertTrue(timing["Matched observations used"].startswith("0 of "))
         self.assertEqual(timing["Matched timing statistics"], "No matched Host observations")
         self.assertNotIn("Average matched timing error", timing)

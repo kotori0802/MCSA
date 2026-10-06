@@ -280,8 +280,37 @@ def contain_qt_runtime_click_expectation(
 
 
 def qt_button_label(text: Any) -> str:
-    """Escape '&' so QPushButton shows a literal ampersand."""
+    """Escape '&' so Qt buttons/actions show a literal ampersand.
+
+    Source copy keeps a single '&'. This is presentation-only; do not store '&&'
+    in i18n or future string resources.
+    """
     return str(text).replace("&", "&&")
+
+
+FOCUS_BUTTON_TOKENS: tuple[str, ...] = ("Left", "Right", "Middle", "X1", "X2")
+DEFAULT_FOCUS_BUTTON = "Left"
+
+
+def populate_focus_button_combo(combo: QComboBox) -> None:
+    """Fill the Setup button selector: visible text is independent of itemData."""
+    combo.clear()
+    for token in FOCUS_BUTTON_TOKENS:
+        combo.addItem(token, token)
+
+
+def focus_button_token(combo: QComboBox) -> str:
+    """Canonical focus_button token from combo itemData, never from display text."""
+    data = combo.currentData()
+    token = str(data if data is not None else "")
+    return token if token in FOCUS_BUTTON_TOKENS else DEFAULT_FOCUS_BUTTON
+
+
+def select_focus_button(combo: QComboBox, token: str) -> None:
+    """Restore the selector from a canonical machine value."""
+    idx = combo.findData(str(token))
+    if idx >= 0:
+        combo.setCurrentIndex(idx)
 
 
 def setup_controls_editable(*, running: bool, completed: bool, profile_locked: bool = False) -> bool:
@@ -1227,7 +1256,7 @@ class MainWindow(QMainWindow):
         self.lbl_button = self._field_label("Button")
         device_l.addWidget(self.lbl_button)
         self.button_combo = QComboBox()
-        self.button_combo.addItems(["Left", "Right", "Middle", "X1", "X2"])
+        populate_focus_button_combo(self.button_combo)
         self._setup_field(self.button_combo)
         device_l.addWidget(self.button_combo)
         device_l.addStretch(1)
@@ -2640,11 +2669,10 @@ class MainWindow(QMainWindow):
         if header_item is not None:
             header_item.setToolTip(self._tr("col_ref_delta_tooltip"))
         self.btn_new.setText(self._tr("run_again"))
-        # A lone "&" in button text is consumed as a mnemonic marker.
-        self.btn_edit_setup_new_run.setText(self._tr("edit_setup_new_run").replace("&", "&&"))
+        self.btn_edit_setup_new_run.setText(qt_button_label(self._tr("edit_setup_new_run")))
         self.btn_capture_new_run.setText(self._tr("new_run"))
         self.btn_capture_goto_results.setText(self._tr("nav_results"))
-        self.btn_capture_edit_setup.setText(self._tr("edit_setup_new_run").replace("&", "&&"))
+        self.btn_capture_edit_setup.setText(qt_button_label(self._tr("edit_setup_new_run")))
         self.capture_completed_note.setText(self._tr("capture_run_completed"))
         self.btn_view_stability.setText(self._tr("viz_stability_map"))
         self.btn_view_interval.setText(self._tr("viz_interval_trend"))
@@ -2685,7 +2713,7 @@ class MainWindow(QMainWindow):
         self.act_save_report_as.setText(self._tr("save_report_as"))
         self.btn_overlay.setText(self._tr("compare"))
         self.btn_clear_overlay.setText(self._tr("clear_overlay"))
-        self.btn_lock_profile.setText(self._tr("lock_profile_continue").replace("&", "&&"))
+        self.btn_lock_profile.setText(qt_button_label(self._tr("lock_profile_continue")))
         self.btn_edit_profile.setText(self._tr("edit_profile"))
         self.btn_help.setText(self._tr("quick_start"))
         self.lbl_theme.setText(self._tr("theme"))
@@ -2708,8 +2736,7 @@ class MainWindow(QMainWindow):
         self._sync_custom_size_status()
         self.remember_window_size_checkbox.setText(self._tr("remember_window_size"))
         self.remember_window_size_note.setText(self._tr("remember_window_size_note"))
-        # A lone "&" in button text is consumed as a mnemonic marker.
-        self.reset_window_geometry_button.setText(self._tr("reset_window_geometry").replace("&", "&&"))
+        self.reset_window_geometry_button.setText(qt_button_label(self._tr("reset_window_geometry")))
         self.issue_title.setText(self._tr("issues"))
         for key, lab in self._stat_name_labels.items():
             token = _CAPTURE_ISSUE_INTERNAL.get(key)
@@ -3299,8 +3326,8 @@ class MainWindow(QMainWindow):
         base = {
             "manual_mode": manual,
             "profile_name": "Manual_Left_Stable" if manual else "Fixture_Custom",
-            "focus_button": self.button_combo.currentText(),
-            "button": self.button_combo.currentText(),
+            "focus_button": focus_button_token(self.button_combo),
+            "button": focus_button_token(self.button_combo),
             "fixture_hz": hz,
             "fixture_reference_hz": hz,
             "capture_mode": "Windows Raw Input / 裝置RawInput",
@@ -3651,7 +3678,7 @@ class MainWindow(QMainWindow):
         if self.profile_locked_settings is not None:
             self._locked_button = str(self.profile_locked_settings.get("focus_button") or "Left")
         else:
-            self._locked_button = self.button_combo.currentText()
+            self._locked_button = focus_button_token(self.button_combo)
         try:
             self.ensure_raw_input()
         except Exception as exc:
@@ -3777,10 +3804,10 @@ class MainWindow(QMainWindow):
 
     def _apply_settings_to_setup_widgets(self, settings: dict[str, Any], target: str) -> None:
         self.device_edit.setText((target or "").strip())
-        button = str(settings.get("focus_button") or settings.get("button") or "Left")
-        idx = self.button_combo.findText(button)
-        if idx >= 0:
-            self.button_combo.setCurrentIndex(idx)
+        select_focus_button(
+            self.button_combo,
+            str(settings.get("focus_button") or settings.get("button") or DEFAULT_FOCUS_BUTTON),
+        )
         if bool(settings.get("manual_mode")):
             self.radio_manual.setChecked(True)
         else:

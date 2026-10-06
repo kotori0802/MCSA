@@ -34,9 +34,10 @@ _REPORT_CODE_SUBSUMED_BY = {"MISS_OR_SLOW": "LONG_INTERVAL_SPIKE_WARN"}
 
 _RUN_STATUS_FILLS = {"COMPLETE": "DDEBF7", "NO_DATA": "D9D9D9", "INVALID": "FCE4D6"}
 _HE_COUNT_DELTA_LABEL = "Host observations − schedule windows"
-_XLSX_TEXT_LABELS = frozenset({
-    "Run ID", "Run Profile", "Device", "HID device name", "Operator", "VID", "PID", "bcdDevice",
-    _HE_COUNT_DELTA_LABEL,
+# Rows whose values stay Excel text even when they look numeric (IDs, hex, signed counts).
+_XLSX_TEXT_ROW_IDS = frozenset({
+    "run_id", "run_profile", "device", "hid_device_name", "operator",
+    "vid", "pid", "bcd_device", "host_count_delta_vs_windows",
 })
 _LEGEND_HOST = "Host observation"
 _LEGEND_REFERENCE = "Configured reference"
@@ -67,6 +68,13 @@ def _fmt_signed_count(value: Any) -> str:
     return "0" if number == 0 else f"{number:+d}"
 
 
+def xlsx_kv_cell_value(row_id: str, value: Any) -> Any:
+    """Excel cell value for a kv row. Typing is keyed by stable row_id, never by visible label."""
+    if row_id not in _XLSX_TEXT_ROW_IDS and isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value):
+        return int(value)
+    return value
+
+
 def report_codes(tags: list[str]) -> list[str]:
     """Report-presentation names for canonical codes: neutral aliases, subsumed codes dropped, deduplicated."""
     present = {str(t) for t in tags}
@@ -93,33 +101,33 @@ def report_sheet_names(model: dict[str, Any]) -> tuple[str, ...]:
     return ("Summary", "Measurements", "Click Data")
 
 
-def _run_status_rows(run_status: str) -> list[tuple[str, str]]:
-    return [("Run Status", run_status)]
+def _run_status_rows(run_status: str) -> list[tuple[str, str, str]]:
+    return [("run_status", "Run Status", run_status)]
 
 
-def _present(rows: list[tuple[str, Any]]) -> list[tuple[str, str]]:
+def _present(rows: list[tuple[str, str, Any]]) -> list[tuple[str, str, str]]:
     out = []
-    for label, value in rows:
+    for row_id, label, value in rows:
         text = str(value if value is not None else "").strip()
         if text and text != _NONE:
-            out.append((label, text))
+            out.append((row_id, label, text))
     return out
 
 
-def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple[str, str]]:
+def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple[str, str, str]]:
     settings = run.get("settings") or {}
     device = settings.get("device_under_test") or {}
-    rows: list[tuple[str, Any]] = [
-        ("Run ID", run.get("run_id")),
-        ("Run Profile", settings.get("profile_name")),
-        ("Screening", "Measurement only"),
-        ("Device", run.get("target")),
-        ("HID device name", device.get("name")),
-        ("VID", device.get("vid")),
-        ("PID", device.get("pid")),
-        ("bcdDevice", device.get("bcd_device")),
-        ("Button", run.get("button")),
-        ("Mode", "Manual" if run.get("manual") else "Fixture"),
+    rows: list[tuple[str, str, Any]] = [
+        ("run_id", "Run ID", run.get("run_id")),
+        ("run_profile", "Run Profile", settings.get("profile_name")),
+        ("screening", "Screening", "Measurement only"),
+        ("device", "Device", run.get("target")),
+        ("hid_device_name", "HID device name", device.get("name")),
+        ("vid", "VID", device.get("vid")),
+        ("pid", "PID", device.get("pid")),
+        ("bcd_device", "bcdDevice", device.get("bcd_device")),
+        ("button", "Button", run.get("button")),
+        ("mode", "Mode", "Manual" if run.get("manual") else "Fixture"),
     ]
     if not run.get("manual"):
         hz = _finite(run.get("reference_hz"))
@@ -127,52 +135,52 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
         ref = _finite(run.get("reference_interval_ms"))
         relative = tol / ref * 100.0 if tol is not None and ref else None
         rows += [
-            ("Reference Rate", f"{hz:g} Hz" if hz is not None else None),
-            ("Reference Interval", _fmt(ref, 2, "ms")),
-            (_ASSOCIATION_WINDOW_LABEL, f"±{tol:.2f} ms" if tol is not None else None),
-            (_ASSOCIATION_RELATIVE_LABEL, f"{relative:.1f} %" if relative is not None else None),
+            ("reference_rate", "Reference Rate", f"{hz:g} Hz" if hz is not None else None),
+            ("reference_interval", "Reference Interval", _fmt(ref, 2, "ms")),
+            ("schedule_association_window", _ASSOCIATION_WINDOW_LABEL, f"±{tol:.2f} ms" if tol is not None else None),
+            ("association_relative", _ASSOCIATION_RELATIVE_LABEL, f"{relative:.1f} %" if relative is not None else None),
         ]
     elapsed = _finite(run.get("elapsed_s"))
     rows += [
-        ("Duration", f"{elapsed:.1f} s" if elapsed is not None else None),
-        ("Host Presses", str(int(run.get("host_press_count") or 0))),
-        ("Operator", run.get("operator")),
-        ("Report generated", generated_at),
+        ("duration", "Duration", f"{elapsed:.1f} s" if elapsed is not None else None),
+        ("host_presses", "Host Presses", str(int(run.get("host_press_count") or 0))),
+        ("operator", "Operator", run.get("operator")),
+        ("report_generated", "Report generated", generated_at),
     ]
     return _present(rows)
 
 
-def host_information_rows(host_env: dict[str, Any] | None, *, tool_version: str) -> list[tuple[str, str]]:
+def host_information_rows(host_env: dict[str, Any] | None, *, tool_version: str) -> list[tuple[str, str, str]]:
     env = host_env or {}
     return _present([
-        ("Host OS", env.get("platform")),
-        ("Capture backend", env.get("capture_backend")),
-        ("Tool version", tool_version),
+        ("host_os", "Host OS", env.get("platform")),
+        ("capture_backend", "Capture backend", env.get("capture_backend")),
+        ("tool_version", "Tool version", tool_version),
     ])
 
 
-def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str]]:
+def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str, str]]:
     run = model["run"]
     metrics = model["assessment"]["metrics"]
     avg = _finite(metrics.get("interval_avg_ms"))
-    rows = [
-        ("Host-observed average interval", _fmt(avg, 2, "ms")),
-        ("Host-observed cadence", _fmt(1000.0 / avg if avg else None, 2, "Hz")),
+    rows: list[tuple[str, str, str]] = [
+        ("host_average_interval", "Host-observed average interval", _fmt(avg, 2, "ms")),
+        ("host_cadence", "Host-observed cadence", _fmt(1000.0 / avg if avg else None, 2, "Hz")),
     ]
     if not run.get("manual"):
         ref = _finite(run.get("reference_interval_ms"))
-        rows.append(("Reference interval", _fmt(ref, 2, "ms")))
+        rows.append(("measurement_reference_interval", "Reference interval", _fmt(ref, 2, "ms")))
         diff = avg - ref if avg is not None and ref is not None else None
-        rows.append(("Average interval Δ vs reference", _fmt(diff, 2, "ms", signed=True)))
+        rows.append(("average_interval_delta", "Average interval Δ vs reference", _fmt(diff, 2, "ms", signed=True)))
     cv = _finite(metrics.get("interval_cv_pct"))
     if cv is not None:
-        rows.append(("Interval CV", _fmt(cv, 2, "%")))
-    rows.append(("Average hold", _fmt(metrics.get("hold_avg_ms"), 2, "ms")))
-    rows.append(("Host Press count", str(len(model["click_data"]))))
+        rows.append(("interval_cv", "Interval CV", _fmt(cv, 2, "%")))
+    rows.append(("average_hold", "Average hold", _fmt(metrics.get("hold_avg_ms"), 2, "ms")))
+    rows.append(("host_press_count", "Host Press count", str(len(model["click_data"]))))
     return rows
 
 
-def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[str, str]]]]:
+def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[str, str, str]]]]:
     if not report_has_host_evidence(model):
         return []
     snapshot = model["host_evidence"]["snapshot"]
@@ -183,42 +191,42 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
     abs_delta = snapshot["timing"]["matched_absolute_delta_stats"]
     matched_n = int(matching["matched_host_observation_count"] or 0)
     in_capture_n = int(counts["in_window_host_press_count"] or 0)
-    timing_rows: list[tuple[str, str]] = [
-        ("Matched observations used", matched_observations_used_text(matched_n, in_capture_n)),
+    timing_rows: list[tuple[str, str, str]] = [
+        ("matched_observations_used", "Matched observations used", matched_observations_used_text(matched_n, in_capture_n)),
     ]
     if matched_n == 0:
-        timing_rows.append(("Matched timing statistics", "No matched Host observations"))
+        timing_rows.append(("matched_timing_empty", "Matched timing statistics", "No matched Host observations"))
     else:
         timing_rows.extend([
-            ("Average matched timing error", _fmt(delta["average"], 3, "ms", signed=True)),
-            ("Average absolute matched timing error", _fmt(abs_delta["average"], 3, "ms")),
-            ("Minimum matched timing error", _fmt(delta["minimum"], 3, "ms", signed=True)),
-            ("Maximum matched timing error", _fmt(delta["maximum"], 3, "ms", signed=True)),
-            ("Matched timing error stdev", _fmt(delta["stdev"], 3, "ms")),
+            ("average_matched_timing_error", "Average matched timing error", _fmt(delta["average"], 3, "ms", signed=True)),
+            ("average_abs_matched_timing_error", "Average absolute matched timing error", _fmt(abs_delta["average"], 3, "ms")),
+            ("min_matched_timing_error", "Minimum matched timing error", _fmt(delta["minimum"], 3, "ms", signed=True)),
+            ("max_matched_timing_error", "Maximum matched timing error", _fmt(delta["maximum"], 3, "ms", signed=True)),
+            ("matched_timing_stdev", "Matched timing error stdev", _fmt(delta["stdev"], 3, "ms")),
         ])
         if matched_n == 1:
-            timing_rows.append(("Note", "Statistics describe a single matched observation."))
+            timing_rows.append(("matched_timing_single", "Note", "Statistics describe a single matched observation."))
     return [
         ("Schedule", [
-            ("Schedule windows", str(counts["expected_slot_count"])),
-            ("Configured reference interval", _fmt(config["reference_interval_ms"], 2, "ms")),
-            (_ASSOCIATION_WINDOW_LABEL, f"±{float(config['timing_tolerance_ms']):.3f} ms"),
+            ("expected_slot_count", "Schedule windows", str(counts["expected_slot_count"])),
+            ("configured_reference_interval", "Configured reference interval", _fmt(config["reference_interval_ms"], 2, "ms")),
+            ("schedule_association_window", _ASSOCIATION_WINDOW_LABEL, f"±{float(config['timing_tolerance_ms']):.3f} ms"),
         ]),
         ("Host observations", [
-            ("Host observations in capture", str(counts["in_window_host_press_count"])),
-            ("Host observations recorded", str(counts["raw_host_press_count"])),
-            (_HE_COUNT_DELTA_LABEL, _fmt_signed_count(counts["host_count_delta_vs_expected_slots"])),
+            ("in_capture", "Host observations in capture", str(counts["in_window_host_press_count"])),
+            ("recorded", "Host observations recorded", str(counts["raw_host_press_count"])),
+            ("host_count_delta_vs_windows", _HE_COUNT_DELTA_LABEL, _fmt_signed_count(counts["host_count_delta_vs_expected_slots"])),
         ]),
         ("Schedule window occupancy", [
-            ("Schedule windows without matched Host observation", str(matching["empty_expected_slot_count"])),
-            ("Schedule windows with 1 matched Host observation", str(matching["single_occupancy_slot_count"])),
-            ("Schedule windows with >1 matched Host observations", str(matching["multi_occupancy_slot_count"])),
+            ("unoccupied_windows", "Schedule windows without matched Host observation", str(matching["empty_expected_slot_count"])),
+            ("single_occupancy_windows", "Schedule windows with 1 matched Host observation", str(matching["single_occupancy_slot_count"])),
+            ("multi_occupancy_windows", "Schedule windows with >1 matched Host observations", str(matching["multi_occupancy_slot_count"])),
         ]),
         ("Host observation association", [
-            ("Host observations matched to schedule", str(matching["matched_host_observation_count"])),
-            ("Host observations not matched to schedule", str(matching["unmatched_host_observation_count"])),
-            ("Ambiguous Host observations", str(matching["ambiguous_host_observation_count"])),
-            ("Host observations outside capture", str(matching["outside_capture_window_observation_count"])),
+            ("matched_host_observations", "Host observations matched to schedule", str(matching["matched_host_observation_count"])),
+            ("unmatched_host_observations", "Host observations not matched to schedule", str(matching["unmatched_host_observation_count"])),
+            ("ambiguous_host_observations", "Ambiguous Host observations", str(matching["ambiguous_host_observation_count"])),
+            ("outside_capture", "Host observations outside capture", str(matching["outside_capture_window_observation_count"])),
         ]),
         ("Matched timing (Host − schedule)", timing_rows),
     ]
@@ -249,7 +257,7 @@ def _click_values(row: dict[str, Any], manual: bool) -> list[Any]:
 def build_report_view(
     model: dict[str, Any],
     *,
-    host_info: list[tuple[str, str]] | None = None,
+    host_info: list[tuple[str, str, str]] | None = None,
     generated_at: str = "",
 ) -> dict[str, Any]:
     """Single presentation view shared by the HTML and XLSX writers. Does not mutate ``model``."""
@@ -281,8 +289,11 @@ def _e(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
 
-def _kv_table(rows: list[tuple[str, str]]) -> str:
-    body = "".join(f"<tr><th scope='row'>{_e(k)}</th><td>{_e(v)}</td></tr>" for k, v in rows)
+def _kv_table(rows: list[tuple[str, str, str]]) -> str:
+    body = "".join(
+        f"<tr><th scope='row'>{_e(label)}</th><td>{_e(value)}</td></tr>"
+        for _row_id, label, value in rows
+    )
     return f"<table class='kv'>{body}</table>"
 
 
@@ -494,7 +505,7 @@ svg .dot{fill:#2563eb;fill-opacity:.55}
 def _run_status_table(view: dict[str, Any]) -> str:
     rows = [
         f"<tr><th scope='row'>{_e(label)}</th><td><span class='badge v-{_e(value)}'>{_e(value)}</span></td></tr>"
-        for label, value in view["run_status_rows"]
+        for _row_id, label, value in view["run_status_rows"]
     ]
     return f"<table class='kv'>{''.join(rows)}</table>"
 
@@ -550,7 +561,7 @@ def write_report_html(
     path: Path,
     model: dict[str, Any],
     *,
-    host_info: list[tuple[str, str]] | None = None,
+    host_info: list[tuple[str, str, str]] | None = None,
     generated_at: str = "",
 ) -> None:
     view = build_report_view(model, host_info=host_info, generated_at=generated_at)
@@ -589,7 +600,7 @@ def write_report_xlsx(
     path: Path,
     model: dict[str, Any],
     *,
-    host_info: list[tuple[str, str]] | None = None,
+    host_info: list[tuple[str, str, str]] | None = None,
     generated_at: str = "",
 ) -> bool:
     """Write the V2 workbook. Returns False only when openpyxl is unavailable."""
@@ -615,12 +626,10 @@ def write_report_xlsx(
     ws = wb.active
     ws.title = "Summary"
 
-    def kv(sheet, row: int, pairs: list[tuple[str, str]]) -> int:
-        for label, value in pairs:
+    def kv(sheet, row: int, pairs: list[tuple[str, str, str]]) -> int:
+        for row_id, label, value in pairs:
             sheet.cell(row=row, column=1, value=label).font = bold
-            if label not in _XLSX_TEXT_LABELS and isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value):
-                value = int(value)
-            cell = sheet.cell(row=row, column=2, value=value)
+            cell = sheet.cell(row=row, column=2, value=xlsx_kv_cell_value(row_id, value))
             cell.alignment = Alignment(wrap_text=True, vertical="top", horizontal="left")
             row += 1
         return row
