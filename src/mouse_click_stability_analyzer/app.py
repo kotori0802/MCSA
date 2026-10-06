@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import sys
 import threading
@@ -587,6 +588,49 @@ LEGACY_HEURISTIC_ASSESSMENT_NOTE = (
 _LEGACY_HEALTH_METRIC_KEYS = ("health", "passed", "fail_reasons", "warn_reasons")
 
 
+FIXTURE_TIMING_TOLERANCE_KEY = "fixture_timing_tolerance_ms"
+
+
+def stamp_frozen_schedule_association_window(
+    settings_norm: dict[str, Any],
+    completed_model: dict[str, Any],
+) -> dict[str, Any]:
+    """Stamp JSON ``settings.fixture_timing_tolerance_ms`` from the frozen completed model.
+
+    ``run.timing_tolerance_ms`` is the value HTML/XLSX render, so every artifact
+    in one bundle carries the same window. ``normalize_auto_settings`` drops
+    the key, and caller ``settings`` are never consulted for it.
+
+    Provenance comes from the frozen ``run.settings`` snapshot:
+    - key absent there: leave absent (old input / incomplete provenance)
+    - present, run value None: JSON null (Manual / not applicable)
+    - present, run value 0.0: 0.0 (a real configured window)
+    """
+    out = dict(settings_norm)
+    out.pop(FIXTURE_TIMING_TOLERANCE_KEY, None)
+    run = completed_model.get("run") or {}
+    frozen_settings = run.get("settings")
+    value = run.get("timing_tolerance_ms")
+    if isinstance(frozen_settings, dict):
+        if FIXTURE_TIMING_TOLERANCE_KEY not in frozen_settings:
+            return out
+    elif value is None:
+        return out
+    if value is None:
+        out[FIXTURE_TIMING_TOLERANCE_KEY] = None
+        return out
+    if isinstance(value, bool):
+        return out
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return out
+    if not math.isfinite(number):
+        return out
+    out[FIXTURE_TIMING_TOLERANCE_KEY] = number
+    return out
+
+
 def _report_fallback_model(target: str, operator: str, settings: dict[str, Any], events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
     """Canonical model for callers without a frozen Results model (no expected-count promotion)."""
     from .completed_result import build_completed_result_model
@@ -613,6 +657,8 @@ def write_reports(
     CSV, and TXT sidecars keep their legacy layout, except that ``result`` /
     ``run_status`` carry the authoritative run status and every legacy
     heuristic verdict field lives under ``legacy_heuristic_assessment``.
+    The Schedule Association Window in every artifact comes from the frozen
+    ``completed_model`` (``run.timing_tolerance_ms``), not from ``settings``.
     """
     report_root.mkdir(parents=True, exist_ok=True)
     if completed_model is None:
@@ -621,6 +667,7 @@ def write_reports(
     settings_norm = normalize_settings(settings)
     settings_norm.update(settings)
     settings_norm = normalize_auto_settings({"settings": settings_norm})
+    settings_norm = stamp_frozen_schedule_association_window(settings_norm, completed_model)
     settings_norm["target_product"] = target or settings_norm.get("target_product", "")
     events = annotate_events(events, settings_norm)
     legacy_payload = build_payload(target, operator, settings_norm, events, run_id=run_id)
