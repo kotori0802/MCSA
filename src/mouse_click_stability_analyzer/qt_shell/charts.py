@@ -255,8 +255,15 @@ class _ChartBase(QWidget):
         self.measurement_only_presentation = bool(enabled)
         self.update()
 
-    def _label(self, key: str, fallback: str) -> str:
-        return self.labels.get(key) or fallback
+    def _label(self, key: str, fallback: str = "") -> str:
+        text = self.labels.get(key) if self.labels else ""
+        if text:
+            return text
+        from ..i18n import t
+        resolved = t("en", key)
+        if resolved != key:
+            return resolved
+        return fallback or key
 
     def _screening_label(self, internal: str, fallback: str) -> str:
         def tr(key: str, **_kwargs: object) -> str:

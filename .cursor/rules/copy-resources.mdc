@@ -1,0 +1,24 @@
+---
+description: Copy resources vs Python vs terminology ownership
+alwaysApply: true
+---
+
+# Copy resources
+
+Ordinary wording lives in `src/mouse_click_stability_analyzer/resources/strings/`.
+
+## Copy-only task
+
+May edit `resources/strings/**`. Must not edit Python. Must not rename JSON keys or placeholders.
+
+## UI-layout task
+
+May edit Qt layout/style. Must not edit `resources/strings/**` unless explicitly requested.
+
+## Terminology task
+
+Do not consolidate or populate `terminology.json` until Stage 2.
+
+## Report
+
+HTML/XLSX labels are `report.json` English only. Do not invent Chinese report copy.

@@ -1,0 +1,272 @@
+{
+  "app_title": {
+    "en": "Mouse Click Stability Analyzer",
+    "zh-TW": "滑鼠點擊穩定度分析器"
+  },
+  "browse": {
+    "en": "Browse file…",
+    "zh-TW": "瀏覽檔案…"
+  },
+  "cancel": {
+    "en": "Cancel",
+    "zh-TW": "取消"
+  },
+  "clear_overlay": {
+    "en": "Clear Overlay",
+    "zh-TW": "清除疊圖"
+  },
+  "clicks": {
+    "en": "CLICKS",
+    "zh-TW": "點擊數"
+  },
+  "compare": {
+    "en": "Compare",
+    "zh-TW": "比較"
+  },
+  "compare_btn": {
+    "en": "Compare",
+    "zh-TW": "比較"
+  },
+  "compare_note": {
+    "en": "You do not need to choose between summary/detail JSON files.",
+    "zh-TW": "無需手動選 summary/detail JSON。"
+  },
+  "compare_overlay": {
+    "en": "Compare Overlay",
+    "zh-TW": "比較疊圖"
+  },
+  "compare_pick": {
+    "en": "Pick a previous run (auto-loads detail events):",
+    "zh-TW": "選擇先前輪次（自動載入 detail 事件）："
+  },
+  "compare_title": {
+    "en": "Compare with previous run",
+    "zh-TW": "與先前輪次比較"
+  },
+  "edit_setup_new_run": {
+    "en": "Edit Setup & New Run",
+    "zh-TW": "編輯設定並開始新一輪"
+  },
+  "export_analysis_txt": {
+    "en": "Analysis TXT",
+    "zh-TW": "分析 TXT"
+  },
+  "export_click_log_csv": {
+    "en": "Click Log CSV",
+    "zh-TW": "點擊紀錄 CSV"
+  },
+  "export_detail_json": {
+    "en": "Detail JSON",
+    "zh-TW": "詳細 JSON"
+  },
+  "export_save_as": {
+    "en": "Export / Save As",
+    "zh-TW": "匯出 / 另存為"
+  },
+  "export_summary_json": {
+    "en": "Summary JSON",
+    "zh-TW": "摘要 JSON"
+  },
+  "finish_button": {
+    "en": "Finish & Generate Report",
+    "zh-TW": "完成並產生報告"
+  },
+  "generate_excel": {
+    "en": "Generate Excel",
+    "zh-TW": "產生 Excel"
+  },
+  "generate_html": {
+    "en": "Generate HTML",
+    "zh-TW": "產生 HTML"
+  },
+  "generate_report": {
+    "en": "Generate Report",
+    "zh-TW": "產生報告"
+  },
+  "guide_body": {
+    "en": "1. Choose Manual or Fixture and complete Setup.\n2. Press Lock Profile & Continue.\n3. On Capture, press Start Capture. Recording begins on the first valid click.\n4. Manual has no timer — press F5 or Esc to Stop.\n5. Fixture: optional Auto Stop, or Stop with F5 / Esc.\n6. Review charts, then New Run or Finish & Generate Report.\n\nTip: prefer F5 / Esc to stop so Stop-button clicks do not contaminate data.",
+    "zh-TW": "1. 選擇手動或治具並完成設定。\n2. 按「鎖定設定檔並繼續」。\n3. 在擷取頁按開始擷取。第一個有效點擊才開始記錄。\n4. 手動無計時 — F5 或 Esc 停止。\n5. 治具：可選自動停止，或 F5/Esc 停止。\n6. 檢視圖表後新一輪或完成報告。\n\n提示：用 F5/Esc 停止，避免點停止鈕污染資料。"
+  },
+  "guide_title": {
+    "en": "Quick Start",
+    "zh-TW": "快速開始"
+  },
+  "hold": {
+    "en": "HOLD",
+    "zh-TW": "按住"
+  },
+  "host_presses": {
+    "en": "HOST PRESSES",
+    "zh-TW": "主機按下"
+  },
+  "interval": {
+    "en": "INTERVAL",
+    "zh-TW": "間隔"
+  },
+  "language": {
+    "en": "Language",
+    "zh-TW": "語言"
+  },
+  "load_overlay_failed": {
+    "en": "Load overlay failed",
+    "zh-TW": "載入疊圖失敗"
+  },
+  "na": {
+    "en": "n/a",
+    "zh-TW": "不適用"
+  },
+  "nav_capture": {
+    "en": "Capture",
+    "zh-TW": "擷取"
+  },
+  "nav_preferences": {
+    "en": "Preferences",
+    "zh-TW": "偏好設定"
+  },
+  "nav_results": {
+    "en": "Results",
+    "zh-TW": "結果"
+  },
+  "nav_setup": {
+    "en": "Setup",
+    "zh-TW": "設定"
+  },
+  "new_run": {
+    "en": "New Run",
+    "zh-TW": "新一輪"
+  },
+  "no_events": {
+    "en": "No events in that run (need a detail report).",
+    "zh-TW": "該輪無事件（需要 detail 報告）。"
+  },
+  "no_run": {
+    "en": "No run to report yet.",
+    "zh-TW": "尚無可報告的輪次。"
+  },
+  "no_runs": {
+    "en": "No previous runs found yet.\nFinish a run first, then use Compare Overlay.",
+    "zh-TW": "尚無先前輪次。\n請先完成一輪再使用比較疊圖。"
+  },
+  "overlay_list_line": {
+    "en": "{label} · {result} · {n} clicks",
+    "zh-TW": "{label} · {result} · {n} 次點擊",
+    "placeholders": [
+      "label",
+      "result",
+      "n"
+    ]
+  },
+  "overlay_status": {
+    "en": "Overlay: {name}",
+    "zh-TW": "疊圖：{name}",
+    "placeholders": [
+      "name"
+    ]
+  },
+  "phase": {
+    "en": "PHASE",
+    "zh-TW": "階段"
+  },
+  "phase_listen": {
+    "en": "LISTEN",
+    "zh-TW": "聆聽"
+  },
+  "phase_review": {
+    "en": "REVIEW",
+    "zh-TW": "檢視"
+  },
+  "phase_running": {
+    "en": "RUNNING",
+    "zh-TW": "執行中"
+  },
+  "quick_start": {
+    "en": "Quick Start",
+    "zh-TW": "教學導覽"
+  },
+  "report": {
+    "en": "Report",
+    "zh-TW": "報告"
+  },
+  "report_failed": {
+    "en": "Report failed",
+    "zh-TW": "報告失敗"
+  },
+  "report_missing_detail": {
+    "en": "Missing: {detail}",
+    "zh-TW": "Missing: {detail}",
+    "placeholders": [
+      "detail"
+    ]
+  },
+  "report_ready": {
+    "en": "Report ready.",
+    "zh-TW": "報告已就緒。"
+  },
+  "run_status": {
+    "en": "Run Status",
+    "zh-TW": "執行狀態"
+  },
+  "run_status_complete": {
+    "en": "COMPLETE",
+    "zh-TW": "完成"
+  },
+  "run_status_invalid": {
+    "en": "INVALID",
+    "zh-TW": "無效"
+  },
+  "run_status_no_data": {
+    "en": "NO_DATA",
+    "zh-TW": "無資料"
+  },
+  "save_report_as": {
+    "en": "Save Report As…",
+    "zh-TW": "另存報告至…"
+  },
+  "saved_files": {
+    "en": "Saved {n} files to {path}",
+    "zh-TW": "已儲存 {n} 個檔案至 {path}",
+    "placeholders": [
+      "n",
+      "path"
+    ]
+  },
+  "saved_to": {
+    "en": "Saved to:\n{path}",
+    "zh-TW": "已儲存至：\n{path}",
+    "placeholders": [
+      "path"
+    ]
+  },
+  "seg_avg": {
+    "en": "SEG AVG",
+    "zh-TW": "段平均"
+  },
+  "seg_cv": {
+    "en": "SEG CV",
+    "zh-TW": "段 CV"
+  },
+  "stop": {
+    "en": "Stop (F5 / Esc)",
+    "zh-TW": "停止 (F5 / Esc)"
+  },
+  "theme": {
+    "en": "Theme",
+    "zh-TW": "主題"
+  },
+  "theme_dark": {
+    "en": "Dark",
+    "zh-TW": "深色"
+  },
+  "theme_light": {
+    "en": "Light",
+    "zh-TW": "淺色"
+  },
+  "time": {
+    "en": "TIME",
+    "zh-TW": "時間"
+  },
+  "verdict": {
+    "en": "VERDICT",
+    "zh-TW": "判定"
+  }
+}

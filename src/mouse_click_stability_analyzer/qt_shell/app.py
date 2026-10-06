@@ -1347,8 +1347,8 @@ class MainWindow(QMainWindow):
         config_l.addWidget(self.auto_stop_label)
         auto_stop_row = QHBoxLayout()
         auto_stop_row.setSpacing(8)
-        self.auto_stop_off = QPushButton("OFF")
-        self.auto_stop_on = QPushButton("ON")
+        self.auto_stop_off = QPushButton("")
+        self.auto_stop_on = QPushButton("")
         for btn in (self.auto_stop_off, self.auto_stop_on):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2723,6 +2723,8 @@ class MainWindow(QMainWindow):
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self._refresh_association_context()
         self.auto_stop_label.setText(self._tr("auto_stop"))
+        self.auto_stop_off.setText(self._tr("auto_stop_off_button"))
+        self.auto_stop_on.setText(self._tr("auto_stop_on_button"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
         self.lbl_custom_limits.setText(self._tr("screening").upper())
         self.lbl_screening.setText(self._tr("screening").upper())
@@ -3763,7 +3765,7 @@ class MainWindow(QMainWindow):
         try:
             self.ensure_raw_input()
         except Exception as exc:
-            self.alert_label.setText(f"Raw Input failed: {exc}")
+            self.alert_label.setText(self._tr("raw_input_failed", error=exc))
 
     def ensure_raw_input(self):
         if self.raw_input is None:
@@ -4033,7 +4035,7 @@ class MainWindow(QMainWindow):
                 return
         src = Path(str((self.report_paths or {}).get(key) or ""))
         if not src.exists():
-            QMessageBox.critical(self, self._tr("report_failed"), f"Missing: {src.name or key}")
+            QMessageBox.critical(self, self._tr("report_failed"), self._tr("report_missing_detail", detail=src.name or key))
             return
         filters = {
             "txt": "Text (*.txt);;All (*.*)",
@@ -4296,7 +4298,7 @@ class MainWindow(QMainWindow):
             })
         if button != target:
             if self.running and event_type == "up":
-                self.alert_label.setText(f"Wrong button: {button}")
+                self.alert_label.setText(self._tr("wrong_button_alert", button=button))
             return
         key = (device_source, str(button))
         if not self.running and (t_perf is None or not self._is_timestamp_after_arm_boundary(t_perf)):
@@ -4429,7 +4431,7 @@ class MainWindow(QMainWindow):
             auto_sec = float(duration_sec)
         target = str(s.get("focus_button") or "Left")
         if button != target:
-            self.alert_label.setText(f"Wrong button: got {button}, expected {target}")
+            self.alert_label.setText(self._tr("wrong_button_expected_alert", button=button, target=target))
             self._arming_scheduled = False
             return
         self.events.clear()

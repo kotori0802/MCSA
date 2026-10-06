@@ -32,28 +32,40 @@ SCREENING_PRESENTATION_KEYS: dict[str, str] = {
     "CAPTURE_SOURCE_INVALID": "legend_invalid_capture_source",
 }
 
-# English fallbacks so HTML/XLSX can share the same aliases without Qt i18n.
+# Report-owned English aliases (report.json). Qt Capture still uses legend_* via tr().
+SCREENING_REPORT_KEYS: dict[str, str] = {
+    "ON_CADENCE": "report_alias_observation",
+    "OK": "report_alias_observation",
+    "CHATTER_BOUNCE": "report_alias_very_short_interval",
+    "CHATTER_HARD": "report_alias_very_short_interval",
+    "TRUE_EXTRA_CLICK": "report_alias_short_interval",
+    "HIGH_PROBABILITY_DOUBLE_CLICK": "report_alias_short_interval",
+    "INCOMPLETE_REBOUND": "report_alias_short_hold",
+    "FIXTURE_ACTUATION_TOO_SHORT": "report_alias_short_hold",
+    "LOW_HOLD_WARNING": "report_alias_short_hold",
+    "MISS_OR_SLOW": "report_alias_long_interval",
+    "LONG_INTERVAL_SPIKE_WARN": "report_alias_long_interval",
+    "INTERVAL_JITTER_WARN": "report_alias_interval_variation",
+    "SETUP_ALIGNMENT_SUSPECT": "report_alias_hold_variation",
+    "TIMING_JITTER_PAIR": "report_alias_timing_variation",
+    "FIXTURE_HZ_MISMATCH": "report_alias_cadence_vs_reference",
+    "PAUSE_GAP": "report_alias_pause_excluded",
+    "PAUSE_GAP_EXCLUDED": "report_alias_pause_excluded",
+    "WRONG_BUTTON_DETECTED": "report_alias_wrong_button",
+    "INSUFFICIENT_CLICKS": "report_alias_low_press_count",
+    "CAPTURE_SOURCE_INVALID": "report_alias_invalid_capture_source",
+}
+
+
+def _report_alias(token: str) -> str:
+    from .strings.loader import report_text
+
+    key = SCREENING_REPORT_KEYS.get(token)
+    return report_text(key) if key else token
+
+
 SCREENING_PRESENTATION_EN: dict[str, str] = {
-    "ON_CADENCE": "Observation",
-    "OK": "Observation",
-    "CHATTER_BOUNCE": "Very short interval",
-    "CHATTER_HARD": "Very short interval",
-    "TRUE_EXTRA_CLICK": "Short interval",
-    "HIGH_PROBABILITY_DOUBLE_CLICK": "Short interval",
-    "INCOMPLETE_REBOUND": "Short hold",
-    "FIXTURE_ACTUATION_TOO_SHORT": "Short hold",
-    "LOW_HOLD_WARNING": "Short hold",
-    "MISS_OR_SLOW": "Long interval",
-    "LONG_INTERVAL_SPIKE_WARN": "Long interval",
-    "INTERVAL_JITTER_WARN": "Interval variation",
-    "SETUP_ALIGNMENT_SUSPECT": "Hold variation",
-    "TIMING_JITTER_PAIR": "Timing variation",
-    "FIXTURE_HZ_MISMATCH": "Cadence vs reference",
-    "PAUSE_GAP": "Pause excluded",
-    "PAUSE_GAP_EXCLUDED": "Pause excluded",
-    "WRONG_BUTTON_DETECTED": "Wrong button",
-    "INSUFFICIENT_CLICKS": "Low press count",
-    "CAPTURE_SOURCE_INVALID": "Invalid capture source",
+    token: _report_alias(token) for token in SCREENING_REPORT_KEYS
 }
 
 
@@ -68,6 +80,9 @@ def screening_presentation_label(
     key = SCREENING_PRESENTATION_KEYS.get(token)
     if key and callable(tr):
         return tr(key)
+    report_key = SCREENING_REPORT_KEYS.get(token)
+    if report_key:
+        return _report_alias(token)
     return SCREENING_PRESENTATION_EN.get(token, token)
 
 
@@ -101,4 +116,10 @@ def matched_observations_used_text(matched_n: Any, in_capture_n: Any) -> str:
     Outside-capture observations never enter schedule association, so they are
     not part of this population. Matching calculations are unchanged.
     """
-    return f"{int(matched_n or 0)} of {int(in_capture_n or 0)} in capture"
+    from .strings.loader import report_text
+
+    return report_text(
+        "report_matched_observations_used_value",
+        matched=int(matched_n or 0),
+        total=int(in_capture_n or 0),
+    )

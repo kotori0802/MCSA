@@ -1,0 +1,382 @@
+{
+  "arm_capture": {
+    "en": "Start Capture",
+    "zh-TW": "開始擷取"
+  },
+  "axis_elapsed_s": {
+    "en": "Elapsed (s)",
+    "zh-TW": "經過 (s)"
+  },
+  "axis_hold_ms": {
+    "en": "Hold (ms)",
+    "zh-TW": "按住 (ms)"
+  },
+  "axis_interval_ms": {
+    "en": "Interval (ms)",
+    "zh-TW": "間隔 (ms)"
+  },
+  "capture_run_completed": {
+    "en": "Run completed.\nReview results in the Results workspace.",
+    "zh-TW": "測試已完成。\n請在結果工作區檢視。"
+  },
+  "chart_interval": {
+    "en": "Interval over time",
+    "zh-TW": "間隔隨時間"
+  },
+  "chart_interval_trend": {
+    "en": "Interval Trend",
+    "zh-TW": "間隔趨勢"
+  },
+  "chart_scatter_fixture": {
+    "en": "Stability vs target {beat} ms",
+    "zh-TW": "相對目標 {beat} ms 穩定度",
+    "placeholders": [
+      "beat"
+    ]
+  },
+  "chart_scatter_manual": {
+    "en": "Manual stability (hold vs interval)",
+    "zh-TW": "手動穩定度（按住 vs 間隔）"
+  },
+  "chart_stability_map": {
+    "en": "Click Stability Map",
+    "zh-TW": "點擊穩定度圖"
+  },
+  "chart_stability_map_subtitle": {
+    "en": "Interval vs Hold",
+    "zh-TW": "間隔 vs 按住"
+  },
+  "chart_stability_map_subtitle_fixture": {
+    "en": "Interval vs Hold · Reference {beat} ms · {hz} Hz",
+    "zh-TW": "間隔 vs 按住 · 參考 {beat} ms · {hz} Hz",
+    "placeholders": [
+      "beat",
+      "hz"
+    ]
+  },
+  "delay": {
+    "en": "Long interval",
+    "zh-TW": "長間隔"
+  },
+  "delta_line": {
+    "en": "A short interval={a_extra} long interval={a_delay} · B short interval={b_extra} long interval={b_delay}",
+    "zh-TW": "A 短間隔={a_extra} 長間隔={a_delay} · B 短間隔={b_extra} 長間隔={b_delay}",
+    "placeholders": [
+      "a_extra",
+      "a_delay",
+      "b_extra",
+      "b_delay"
+    ]
+  },
+  "disarm_capture": {
+    "en": "Cancel Start",
+    "zh-TW": "取消開始"
+  },
+  "dut": {
+    "en": "DUT",
+    "zh-TW": "DUT"
+  },
+  "extra": {
+    "en": "Short interval",
+    "zh-TW": "短間隔"
+  },
+  "fail_verdict": {
+    "en": "FAIL — hardware-risk evidence present.",
+    "zh-TW": "FAIL — 有硬體風險證據。"
+  },
+  "hover_click": {
+    "en": "Click #{n}",
+    "zh-TW": "點擊 #{n}",
+    "placeholders": [
+      "n"
+    ]
+  },
+  "hover_hold": {
+    "en": "Hold {value} ms",
+    "zh-TW": "按住 {value} ms",
+    "placeholders": [
+      "value"
+    ]
+  },
+  "hover_interval": {
+    "en": "Interval {value} ms",
+    "zh-TW": "間隔 {value} ms",
+    "placeholders": [
+      "value"
+    ]
+  },
+  "hover_interval_delta": {
+    "en": "Interval Δ vs reference {value} ms",
+    "zh-TW": "間隔 Δ 對參考值 {value} ms",
+    "placeholders": [
+      "value"
+    ]
+  },
+  "issues": {
+    "en": "OBSERVATIONS",
+    "zh-TW": "觀測"
+  },
+  "legend_cadence_vs_reference": {
+    "en": "Cadence vs reference",
+    "zh-TW": "節拍相對參考值"
+  },
+  "legend_chatter": {
+    "en": "Very short interval",
+    "zh-TW": "極短間隔"
+  },
+  "legend_extra": {
+    "en": "Short interval",
+    "zh-TW": "短間隔"
+  },
+  "legend_hold_variation": {
+    "en": "Hold variation",
+    "zh-TW": "按住變異"
+  },
+  "legend_interval_variation": {
+    "en": "Interval variation",
+    "zh-TW": "間隔變異"
+  },
+  "legend_invalid_capture_source": {
+    "en": "Invalid capture source",
+    "zh-TW": "擷取來源無效"
+  },
+  "legend_low_press_count": {
+    "en": "Low press count",
+    "zh-TW": "按下次數偏低"
+  },
+  "legend_miss": {
+    "en": "Long interval",
+    "zh-TW": "長間隔"
+  },
+  "legend_on_cadence": {
+    "en": "Observation",
+    "zh-TW": "觀測"
+  },
+  "legend_overlay": {
+    "en": "Overlay (A)",
+    "zh-TW": "疊圖 (A)"
+  },
+  "legend_pause_excluded": {
+    "en": "Pause excluded",
+    "zh-TW": "暫停已排除"
+  },
+  "legend_rebound": {
+    "en": "Short hold",
+    "zh-TW": "短按住"
+  },
+  "legend_target": {
+    "en": "Target beat",
+    "zh-TW": "目標節拍",
+    "note": "Legacy Capture label for the configured reference interval. Not a PASS/FAIL threshold."
+  },
+  "legend_timing_variation": {
+    "en": "Timing variation",
+    "zh-TW": "時序變異"
+  },
+  "legend_wrong_button": {
+    "en": "Wrong button",
+    "zh-TW": "按鍵不符"
+  },
+  "page_capture_subtitle": {
+    "en": "Record and inspect host-observed click timing.",
+    "zh-TW": "記錄並檢視主機觀測的點擊時序。"
+  },
+  "pass_manual": {
+    "en": "PASS — operator rhythm looks stable (not a DUT hardware score).",
+    "zh-TW": "PASS — 操作節奏穩定（非 DUT 硬體分數）。"
+  },
+  "phase_armed": {
+    "en": "WAITING",
+    "zh-TW": "等待"
+  },
+  "phase_draft": {
+    "en": "DRAFT",
+    "zh-TW": "草稿"
+  },
+  "phase_ready": {
+    "en": "READY",
+    "zh-TW": "就緒"
+  },
+  "raw_input_failed": {
+    "en": "Raw Input failed: {error}",
+    "zh-TW": "Raw Input failed: {error}",
+    "placeholders": [
+      "error"
+    ]
+  },
+  "rebound": {
+    "en": "Short hold",
+    "zh-TW": "短按住"
+  },
+  "recording_fixture": {
+    "en": "Capturing · Press Stop (F5 / Esc).",
+    "zh-TW": "擷取中 · 請按停止（F5 / Esc）。"
+  },
+  "recording_fixture_autostop": {
+    "en": "Capturing · Auto Stop at {sec}s · F5/Esc",
+    "zh-TW": "擷取中 · {sec} 秒自動停止 · F5/Esc",
+    "placeholders": [
+      "sec"
+    ]
+  },
+  "recording_manual": {
+    "en": "Capturing · Press Stop (F5 / Esc).",
+    "zh-TW": "擷取中 · 請按停止（F5 / Esc）。"
+  },
+  "review_clicks": {
+    "en": "Clicks: {clicks} | Verdict: {verdict}",
+    "zh-TW": "點擊數：{clicks} | 判定：{verdict}",
+    "placeholders": [
+      "clicks",
+      "verdict"
+    ]
+  },
+  "review_hint": {
+    "en": "Review this run, then New Run or Finish Report.",
+    "zh-TW": "檢視本輪後，可新一輪或完成報告。"
+  },
+  "review_interval": {
+    "en": "Interval avg/CV: {avg} / {cv}",
+    "zh-TW": "間隔 平均/CV：{avg} / {cv}",
+    "placeholders": [
+      "avg",
+      "cv"
+    ]
+  },
+  "review_mode": {
+    "en": "Mode: {mode} | Button: {button}",
+    "zh-TW": "模式：{mode} | 按鍵：{button}",
+    "placeholders": [
+      "mode",
+      "button"
+    ]
+  },
+  "review_tags": {
+    "en": "Tags: {tags}",
+    "zh-TW": "標籤：{tags}",
+    "placeholders": [
+      "tags"
+    ]
+  },
+  "review_tags_none": {
+    "en": "-",
+    "zh-TW": "-"
+  },
+  "setup_score": {
+    "en": "SETUP",
+    "zh-TW": "架設"
+  },
+  "status_armed": {
+    "en": "Waiting for input · The first valid click starts the run.",
+    "zh-TW": "等待輸入 · 第一個有效點擊開始本輪。"
+  },
+  "status_armed_fixture": {
+    "en": "Waiting for fixture input · The first valid fixture click starts the run.",
+    "zh-TW": "等待治具輸入 · 第一個有效治具點擊開始本輪。"
+  },
+  "status_armed_manual": {
+    "en": "Waiting for input · Click inside the Test Area to begin.",
+    "zh-TW": "等待輸入 · 請在測試區點擊以開始。"
+  },
+  "status_draft": {
+    "en": "Lock the Setup profile before capture.",
+    "zh-TW": "擷取前請先鎖定設定檔。"
+  },
+  "status_ready": {
+    "en": "Ready · Select Start Capture. Recording begins on the first valid click.",
+    "zh-TW": "就緒 · 請按開始擷取。第一個有效點擊才開始記錄。"
+  },
+  "status_ready_fixture": {
+    "en": "Ready · Select Start Capture before fixture input.\nRecording begins on the first valid fixture click.",
+    "zh-TW": "就緒 · 請在治具輸入前按開始擷取。\n第一個有效治具點擊才開始記錄。"
+  },
+  "status_ready_manual": {
+    "en": "Ready · Select Start Capture, then click inside the Test Area.\nRecording begins on the first valid click.",
+    "zh-TW": "就緒 · 請按開始擷取，然後在測試區點擊。\n第一個有效點擊才開始記錄。"
+  },
+  "test_area_hint": {
+    "en": "TEST AREA\nLock the Setup profile, then Start Capture.\nStop with F5 or Esc",
+    "zh-TW": "測試區\n先鎖定設定檔，再按開始擷取。\nF5 或 Esc 停止"
+  },
+  "test_area_hint_armed": {
+    "en": "TEST AREA\nWaiting for the first valid click.",
+    "zh-TW": "測試區\n等待第一個有效點擊。"
+  },
+  "test_area_hint_armed_fixture": {
+    "en": "TEST AREA\nWaiting for the first valid fixture click.\nThe pointer does not need to be here.",
+    "zh-TW": "測試區\n等待第一個有效治具點擊。\n指標不必在此區域。"
+  },
+  "test_area_hint_armed_manual": {
+    "en": "TEST AREA\nClick inside this area to begin.",
+    "zh-TW": "測試區\n請在此區域點擊以開始。"
+  },
+  "test_area_hint_draft": {
+    "en": "TEST AREA\nLock the Setup profile, then Start Capture.\nStop with F5 or Esc",
+    "zh-TW": "測試區\n先鎖定設定檔，再按開始擷取。\nF5 或 Esc 停止"
+  },
+  "test_area_hint_ready": {
+    "en": "TEST AREA\nSelect Start Capture. Recording begins on the first valid click.",
+    "zh-TW": "測試區\n請先按開始擷取。第一個有效點擊才開始記錄。"
+  },
+  "test_area_hint_ready_fixture": {
+    "en": "TEST AREA\nCharts appear here. Fixture clicks do not need to hit this area.",
+    "zh-TW": "測試區\n圖表顯示於此。治具點擊不必落在此區域。"
+  },
+  "test_area_hint_ready_manual": {
+    "en": "TEST AREA\nAfter Start Capture, click inside this area.\nRecording begins on the first valid click.",
+    "zh-TW": "測試區\n按開始擷取後，在此區域點擊。\n第一個有效點擊才開始記錄。"
+  },
+  "viz_fit_data": {
+    "en": "Fit Data",
+    "zh-TW": "縮放至資料"
+  },
+  "viz_interval_trend": {
+    "en": "Interval Trend",
+    "zh-TW": "間隔趨勢"
+  },
+  "viz_reset_view": {
+    "en": "Reset View",
+    "zh-TW": "重設檢視"
+  },
+  "viz_stability_map": {
+    "en": "Stability Map",
+    "zh-TW": "穩定度圖"
+  },
+  "viz_zoom_in": {
+    "en": "Zoom In",
+    "zh-TW": "放大"
+  },
+  "viz_zoom_out": {
+    "en": "Zoom Out",
+    "zh-TW": "縮小"
+  },
+  "waiting_data": {
+    "en": "Waiting for click data",
+    "zh-TW": "等待點擊資料"
+  },
+  "warn_fixture": {
+    "en": "WARN — review tags before blaming DUT.",
+    "zh-TW": "WARN — 歸責 DUT 前請先檢視標籤。"
+  },
+  "warn_manual": {
+    "en": "WARN — usually operator-side stability caution.",
+    "zh-TW": "WARN — 通常為操作端穩定度警示。"
+  },
+  "wrong_button_alert": {
+    "en": "Wrong button: {button}",
+    "zh-TW": "Wrong button: {button}",
+    "placeholders": [
+      "button"
+    ],
+    "note": "{button} is the canonical button token (Left/Right/Middle/X1/X2), not display text."
+  },
+  "wrong_button_expected_alert": {
+    "en": "Wrong button: got {button}, expected {target}",
+    "zh-TW": "Wrong button: got {button}, expected {target}",
+    "placeholders": [
+      "button",
+      "target"
+    ],
+    "note": "{button} and {target} are canonical button tokens (Left/Right/Middle/X1/X2), not display text."
+  }
+}

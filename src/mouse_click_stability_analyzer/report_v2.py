@@ -21,10 +21,11 @@ from mouse_click_stability_analyzer.presentation import (
     screening_presentation_label,
     screening_presentation_labels,
 )
+from mouse_click_stability_analyzer.strings.loader import report_text as _rt
 
-REPORT_TITLE = "MCSA — Test Report"
+REPORT_TITLE = _rt("report_title")
 _CHART_POINT_LIMIT = 1500
-_NONE = "—"
+_NONE = _rt("report_none")
 
 # Canonical tags that record a run property rather than a WARN/FAIL finding.
 _NON_FINDING_RESULT_CODES = frozenset({"MANUAL_PROFILE_NO_EXPECTED_COUNT"})
@@ -33,16 +34,11 @@ _NON_FINDING_RESULT_CODES = frozenset({"MANUAL_PROFILE_NO_EXPECTED_COUNT"})
 _REPORT_CODE_SUBSUMED_BY = {"MISS_OR_SLOW": "LONG_INTERVAL_SPIKE_WARN"}
 
 _RUN_STATUS_FILLS = {"COMPLETE": "DDEBF7", "NO_DATA": "D9D9D9", "INVALID": "FCE4D6"}
-_HE_COUNT_DELTA_LABEL = "Host observations − schedule windows"
 # Rows whose values stay Excel text even when they look numeric (IDs, hex, signed counts).
 _XLSX_TEXT_ROW_IDS = frozenset({
     "run_id", "run_profile", "device", "hid_device_name", "operator",
     "vid", "pid", "bcd_device", "host_count_delta_vs_windows",
 })
-_LEGEND_HOST = "Host observation"
-_LEGEND_REFERENCE = "Configured reference"
-_ASSOCIATION_WINDOW_LABEL = "Schedule Association Window"
-_ASSOCIATION_RELATIVE_LABEL = "Window relative to reference interval (derived, informational)"
 
 
 def _finite(value: Any) -> float | None:
@@ -97,12 +93,21 @@ def report_has_host_evidence(model: dict[str, Any]) -> bool:
 
 def report_sheet_names(model: dict[str, Any]) -> tuple[str, ...]:
     if report_has_host_evidence(model):
-        return ("Summary", "Measurements", "Host Evidence", "Click Data")
-    return ("Summary", "Measurements", "Click Data")
+        return (
+            _rt("report_sheet_summary"),
+            _rt("report_sheet_measurements"),
+            _rt("report_sheet_host_evidence"),
+            _rt("report_sheet_click_data"),
+        )
+    return (
+        _rt("report_sheet_summary"),
+        _rt("report_sheet_measurements"),
+        _rt("report_sheet_click_data"),
+    )
 
 
 def _run_status_rows(run_status: str) -> list[tuple[str, str, str]]:
-    return [("run_status", "Run Status", run_status)]
+    return [("run_status", _rt("report_label_run_status"), run_status)]
 
 
 def _present(rows: list[tuple[str, str, Any]]) -> list[tuple[str, str, str]]:
@@ -118,16 +123,16 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
     settings = run.get("settings") or {}
     device = settings.get("device_under_test") or {}
     rows: list[tuple[str, str, Any]] = [
-        ("run_id", "Run ID", run.get("run_id")),
-        ("run_profile", "Run Profile", settings.get("profile_name")),
-        ("screening", "Screening", "Measurement only"),
-        ("device", "Device", run.get("target")),
-        ("hid_device_name", "HID device name", device.get("name")),
-        ("vid", "VID", device.get("vid")),
-        ("pid", "PID", device.get("pid")),
-        ("bcd_device", "bcdDevice", device.get("bcd_device")),
-        ("button", "Button", run.get("button")),
-        ("mode", "Mode", "Manual" if run.get("manual") else "Fixture"),
+        ("run_id", _rt("report_label_run_id"), run.get("run_id")),
+        ("run_profile", _rt("report_label_run_profile"), settings.get("profile_name")),
+        ("screening", _rt("report_label_screening"), _rt("report_value_measurement_only")),
+        ("device", _rt("report_label_device"), run.get("target")),
+        ("hid_device_name", _rt("report_label_hid_device_name"), device.get("name")),
+        ("vid", _rt("report_label_vid"), device.get("vid")),
+        ("pid", _rt("report_label_pid"), device.get("pid")),
+        ("bcd_device", _rt("report_label_bcd_device"), device.get("bcd_device")),
+        ("button", _rt("report_label_button"), run.get("button")),
+        ("mode", _rt("report_label_mode"), _rt("report_value_manual") if run.get("manual") else _rt("report_value_fixture")),
     ]
     if not run.get("manual"):
         hz = _finite(run.get("reference_hz"))
@@ -135,17 +140,17 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
         ref = _finite(run.get("reference_interval_ms"))
         relative = tol / ref * 100.0 if tol is not None and ref else None
         rows += [
-            ("reference_rate", "Reference Rate", f"{hz:g} Hz" if hz is not None else None),
-            ("reference_interval", "Reference Interval", _fmt(ref, 2, "ms")),
-            ("schedule_association_window", _ASSOCIATION_WINDOW_LABEL, f"±{tol:.2f} ms" if tol is not None else None),
-            ("association_relative", _ASSOCIATION_RELATIVE_LABEL, f"{relative:.1f} %" if relative is not None else None),
+            ("reference_rate", _rt("report_label_reference_rate"), f"{hz:g} Hz" if hz is not None else None),
+            ("reference_interval", _rt("report_label_reference_interval"), _fmt(ref, 2, "ms")),
+            ("schedule_association_window", _rt("report_label_schedule_association_window"), f"±{tol:.2f} ms" if tol is not None else None),
+            ("association_relative", _rt("report_label_association_relative"), f"{relative:.1f} %" if relative is not None else None),
         ]
     elapsed = _finite(run.get("elapsed_s"))
     rows += [
-        ("duration", "Duration", f"{elapsed:.1f} s" if elapsed is not None else None),
-        ("host_presses", "Host Presses", str(int(run.get("host_press_count") or 0))),
-        ("operator", "Operator", run.get("operator")),
-        ("report_generated", "Report generated", generated_at),
+        ("duration", _rt("report_label_duration"), f"{elapsed:.1f} s" if elapsed is not None else None),
+        ("host_presses", _rt("report_label_host_presses"), str(int(run.get("host_press_count") or 0))),
+        ("operator", _rt("report_label_operator"), run.get("operator")),
+        ("report_generated", _rt("report_label_report_generated"), generated_at),
     ]
     return _present(rows)
 
@@ -153,9 +158,9 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
 def host_information_rows(host_env: dict[str, Any] | None, *, tool_version: str) -> list[tuple[str, str, str]]:
     env = host_env or {}
     return _present([
-        ("host_os", "Host OS", env.get("platform")),
-        ("capture_backend", "Capture backend", env.get("capture_backend")),
-        ("tool_version", "Tool version", tool_version),
+        ("host_os", _rt("report_label_host_os"), env.get("platform")),
+        ("capture_backend", _rt("report_label_capture_backend"), env.get("capture_backend")),
+        ("tool_version", _rt("report_label_tool_version"), tool_version),
     ])
 
 
@@ -164,19 +169,19 @@ def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str, str]]:
     metrics = model["assessment"]["metrics"]
     avg = _finite(metrics.get("interval_avg_ms"))
     rows: list[tuple[str, str, str]] = [
-        ("host_average_interval", "Host-observed average interval", _fmt(avg, 2, "ms")),
-        ("host_cadence", "Host-observed cadence", _fmt(1000.0 / avg if avg else None, 2, "Hz")),
+        ("host_average_interval", _rt("report_label_host_average_interval"), _fmt(avg, 2, "ms")),
+        ("host_cadence", _rt("report_label_host_cadence"), _fmt(1000.0 / avg if avg else None, 2, "Hz")),
     ]
     if not run.get("manual"):
         ref = _finite(run.get("reference_interval_ms"))
-        rows.append(("measurement_reference_interval", "Reference interval", _fmt(ref, 2, "ms")))
+        rows.append(("measurement_reference_interval", _rt("report_label_measurement_reference_interval"), _fmt(ref, 2, "ms")))
         diff = avg - ref if avg is not None and ref is not None else None
-        rows.append(("average_interval_delta", "Average interval Δ vs reference", _fmt(diff, 2, "ms", signed=True)))
+        rows.append(("average_interval_delta", _rt("report_label_average_interval_delta"), _fmt(diff, 2, "ms", signed=True)))
     cv = _finite(metrics.get("interval_cv_pct"))
     if cv is not None:
-        rows.append(("interval_cv", "Interval CV", _fmt(cv, 2, "%")))
-    rows.append(("average_hold", "Average hold", _fmt(metrics.get("hold_avg_ms"), 2, "ms")))
-    rows.append(("host_press_count", "Host Press count", str(len(model["click_data"]))))
+        rows.append(("interval_cv", _rt("report_label_interval_cv"), _fmt(cv, 2, "%")))
+    rows.append(("average_hold", _rt("report_label_average_hold"), _fmt(metrics.get("hold_avg_ms"), 2, "ms")))
+    rows.append(("host_press_count", _rt("report_label_host_press_count"), str(len(model["click_data"]))))
     return rows
 
 
@@ -192,50 +197,58 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
     matched_n = int(matching["matched_host_observation_count"] or 0)
     in_capture_n = int(counts["in_window_host_press_count"] or 0)
     timing_rows: list[tuple[str, str, str]] = [
-        ("matched_observations_used", "Matched observations used", matched_observations_used_text(matched_n, in_capture_n)),
+        ("matched_observations_used", _rt("report_label_matched_observations_used"), matched_observations_used_text(matched_n, in_capture_n)),
     ]
     if matched_n == 0:
-        timing_rows.append(("matched_timing_empty", "Matched timing statistics", "No matched Host observations"))
+        timing_rows.append(("matched_timing_empty", _rt("report_label_matched_timing_statistics"), _rt("report_value_no_matched_host_observations")))
     else:
         timing_rows.extend([
-            ("average_matched_timing_error", "Average matched timing error", _fmt(delta["average"], 3, "ms", signed=True)),
-            ("average_abs_matched_timing_error", "Average absolute matched timing error", _fmt(abs_delta["average"], 3, "ms")),
-            ("min_matched_timing_error", "Minimum matched timing error", _fmt(delta["minimum"], 3, "ms", signed=True)),
-            ("max_matched_timing_error", "Maximum matched timing error", _fmt(delta["maximum"], 3, "ms", signed=True)),
-            ("matched_timing_stdev", "Matched timing error stdev", _fmt(delta["stdev"], 3, "ms")),
+            ("average_matched_timing_error", _rt("report_label_average_matched_timing_error"), _fmt(delta["average"], 3, "ms", signed=True)),
+            ("average_abs_matched_timing_error", _rt("report_label_average_abs_matched_timing_error"), _fmt(abs_delta["average"], 3, "ms")),
+            ("min_matched_timing_error", _rt("report_label_min_matched_timing_error"), _fmt(delta["minimum"], 3, "ms", signed=True)),
+            ("max_matched_timing_error", _rt("report_label_max_matched_timing_error"), _fmt(delta["maximum"], 3, "ms", signed=True)),
+            ("matched_timing_stdev", _rt("report_label_matched_timing_stdev"), _fmt(delta["stdev"], 3, "ms")),
         ])
         if matched_n == 1:
-            timing_rows.append(("matched_timing_single", "Note", "Statistics describe a single matched observation."))
+            timing_rows.append(("matched_timing_single", _rt("report_label_note"), _rt("report_note_single_matched")))
     return [
-        ("Schedule", [
-            ("expected_slot_count", "Schedule windows", str(counts["expected_slot_count"])),
-            ("configured_reference_interval", "Configured reference interval", _fmt(config["reference_interval_ms"], 2, "ms")),
-            ("schedule_association_window", _ASSOCIATION_WINDOW_LABEL, f"±{float(config['timing_tolerance_ms']):.3f} ms"),
+        (_rt("report_group_schedule"), [
+            ("expected_slot_count", _rt("report_label_schedule_windows"), str(counts["expected_slot_count"])),
+            ("configured_reference_interval", _rt("report_label_configured_reference_interval"), _fmt(config["reference_interval_ms"], 2, "ms")),
+            ("schedule_association_window", _rt("report_label_schedule_association_window"), f"±{float(config['timing_tolerance_ms']):.3f} ms"),
         ]),
-        ("Host observations", [
-            ("in_capture", "Host observations in capture", str(counts["in_window_host_press_count"])),
-            ("recorded", "Host observations recorded", str(counts["raw_host_press_count"])),
-            ("host_count_delta_vs_windows", _HE_COUNT_DELTA_LABEL, _fmt_signed_count(counts["host_count_delta_vs_expected_slots"])),
+        (_rt("report_group_host_observations"), [
+            ("in_capture", _rt("report_label_in_capture"), str(counts["in_window_host_press_count"])),
+            ("recorded", _rt("report_label_recorded"), str(counts["raw_host_press_count"])),
+            ("host_count_delta_vs_windows", _rt("report_label_host_count_delta_vs_windows"), _fmt_signed_count(counts["host_count_delta_vs_expected_slots"])),
         ]),
-        ("Schedule window occupancy", [
-            ("unoccupied_windows", "Schedule windows without matched Host observation", str(matching["empty_expected_slot_count"])),
-            ("single_occupancy_windows", "Schedule windows with 1 matched Host observation", str(matching["single_occupancy_slot_count"])),
-            ("multi_occupancy_windows", "Schedule windows with >1 matched Host observations", str(matching["multi_occupancy_slot_count"])),
+        (_rt("report_group_occupancy"), [
+            ("unoccupied_windows", _rt("report_label_unoccupied_windows"), str(matching["empty_expected_slot_count"])),
+            ("single_occupancy_windows", _rt("report_label_single_occupancy_windows"), str(matching["single_occupancy_slot_count"])),
+            ("multi_occupancy_windows", _rt("report_label_multi_occupancy_windows"), str(matching["multi_occupancy_slot_count"])),
         ]),
-        ("Host observation association", [
-            ("matched_host_observations", "Host observations matched to schedule", str(matching["matched_host_observation_count"])),
-            ("unmatched_host_observations", "Host observations not matched to schedule", str(matching["unmatched_host_observation_count"])),
-            ("ambiguous_host_observations", "Ambiguous Host observations", str(matching["ambiguous_host_observation_count"])),
-            ("outside_capture", "Host observations outside capture", str(matching["outside_capture_window_observation_count"])),
+        (_rt("report_group_association"), [
+            ("matched_host_observations", _rt("report_label_matched_host_observations"), str(matching["matched_host_observation_count"])),
+            ("unmatched_host_observations", _rt("report_label_unmatched_host_observations"), str(matching["unmatched_host_observation_count"])),
+            ("ambiguous_host_observations", _rt("report_label_ambiguous_host_observations"), str(matching["ambiguous_host_observation_count"])),
+            ("outside_capture", _rt("report_label_outside_capture"), str(matching["outside_capture_window_observation_count"])),
         ]),
-        ("Matched timing (Host − schedule)", timing_rows),
+        (_rt("report_group_matched_timing"), timing_rows),
     ]
 
 
 def click_data_columns(manual: bool) -> list[str]:
-    cols = ["#", "Elapsed (ms)", "Button", "Interval (ms)", "Hold (ms)", "Observation", "Observation flag(s)"]
+    cols = [
+        _rt("report_click_col_index"),
+        _rt("report_click_col_elapsed"),
+        _rt("report_click_col_button"),
+        _rt("report_click_col_interval"),
+        _rt("report_click_col_hold"),
+        _rt("report_click_col_observation"),
+        _rt("report_click_col_flags"),
+    ]
     if not manual:
-        cols.append("Interval Δ vs ref. (ms)")
+        cols.append(_rt("report_click_col_ref_delta"))
     return cols
 
 
@@ -270,7 +283,7 @@ def build_report_view(
         chart_reference = {"interval_ms": ref}
     return {
         "chart_reference": chart_reference,
-        "title": REPORT_TITLE,
+        "title": _rt("report_title"),
         "run_status": run_status,
         "run_status_rows": _run_status_rows(run_status),
         "test_information": _test_information_rows(run, generated_at),
@@ -339,7 +352,7 @@ def _svg(body: str, title: str) -> str:
 
 
 def _empty_chart(title: str) -> str:
-    return _svg(f"<text x='{_W / 2:.0f}' y='{_H / 2:.0f}' class='lb' text-anchor='middle'>No data</text>", title)
+    return _svg(f"<text x='{_W / 2:.0f}' y='{_H / 2:.0f}' class='lb' text-anchor='middle'>{_e(_rt('report_chart_no_data'))}</text>", title)
 
 
 # Report charts are interval-domain: they draw only the configured reference.
@@ -359,7 +372,7 @@ def _svg_reference_horizontal(reference: dict[str, Any], ymin: float, ymax: floa
     ref = reference["interval_ms"]
     ry = _scale(ref, ymin, ymax, _H - _B, _T)
     return (f"<line x1='{_L}' y1='{ry:.1f}' x2='{_W - _R}' y2='{ry:.1f}' class='ref'>"
-            f"<title>{_LEGEND_REFERENCE}</title></line>"
+            f"<title>{_rt("report_legend_configured_reference")}</title></line>"
             f"<text x='{_W - _R - 4}' y='{ry - 5:.1f}' class='rl' text-anchor='end'>{_reference_label(reference)}</text>")
 
 
@@ -369,12 +382,12 @@ def _svg_reference_vertical(reference: dict[str, Any], xmin: float, xmax: float)
     anchor = "start" if rx < (_L + _W - _R) / 2 else "end"
     dx = 5 if anchor == "start" else -5
     return (f"<line x1='{rx:.1f}' y1='{_T}' x2='{rx:.1f}' y2='{_H - _B}' class='ref'>"
-            f"<title>{_LEGEND_REFERENCE}</title></line>"
+            f"<title>{_rt("report_legend_configured_reference")}</title></line>"
             f"<text x='{rx + dx:.1f}' y='{_T + 12}' class='rl' text-anchor='{anchor}'>{_reference_label(reference)}</text>")
 
 
 def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str, Any] | None) -> str:
-    title = "Interval over time"
+    title = _rt("report_chart_interval_over_time")
     pts = _downsample(series)
     if len(pts) < 2:
         return _empty_chart(title)
@@ -390,15 +403,15 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
         f"{_scale(x, xmin, xmax, _L, _W - _R):.1f},{_scale(y, ymin, ymax, _H - _B, _T):.1f}"
         for x, y in zip(xs, ys)
     )
-    body = _axis(xmin, xmax, ymin, ymax, "Elapsed (s)", "Interval (ms)")
+    body = _axis(xmin, xmax, ymin, ymax, _rt("report_axis_elapsed_s"), _rt("report_axis_interval_ms"))
     if reference:
         body += _svg_reference_horizontal(reference, ymin, ymax)
-    body += f"<polyline points='{coords}' class='series'><title>{_LEGEND_HOST}</title></polyline>"
+    body += f"<polyline points='{coords}' class='series'><title>{_rt("report_legend_host_observation")}</title></polyline>"
     return _svg(body, title)
 
 
 def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None) -> str:
-    title = "Interval distribution"
+    title = _rt("report_chart_interval_distribution")
     if not bins:
         return _empty_chart(title)
     lo, hi = float(bins[0]["lo"]), float(bins[-1]["hi"])
@@ -406,7 +419,7 @@ def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None)
     if span:
         lo, hi = min(lo, span[0]), max(hi, span[1])
     peak = max(int(b["count"]) for b in bins) or 1
-    body = _axis(lo, hi, 0, peak, "Interval (ms)", "Count")
+    body = _axis(lo, hi, 0, peak, _rt("report_axis_interval_ms"), _rt("report_axis_count"))
     for b in bins:
         h = (int(b["count"]) / peak) * (_H - _B - _T)
         x0 = _scale(float(b["lo"]), lo, hi, _L, _W - _R)
@@ -422,7 +435,7 @@ def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None)
 
 
 def _svg_scatter(points: list[tuple[float, float, str]], reference: dict[str, Any] | None) -> str:
-    title = "Hold vs Interval"
+    title = _rt("report_chart_hold_vs_interval")
     pts = _downsample(points)
     if not pts:
         return _empty_chart(title)
@@ -434,7 +447,7 @@ def _svg_scatter(points: list[tuple[float, float, str]], reference: dict[str, An
         xlo, xhi = min(xlo, span[0]), max(xhi, span[1])
     xmin, xmax = _padded(xlo, xhi)
     ymin, ymax = _padded(min(ys), max(ys))
-    body = _axis(xmin, xmax, ymin, ymax, "Interval (ms)", "Hold (ms)")
+    body = _axis(xmin, xmax, ymin, ymax, _rt("report_axis_interval_ms"), _rt("report_axis_hold_ms"))
     if reference:
         body += _svg_reference_vertical(reference, xmin, xmax)
     for x, y in zip(xs, ys):
@@ -449,8 +462,8 @@ def _chart_legend(reference: dict[str, Any] | None, host_swatch: str) -> str:
     if not reference:
         return ""
     items = [
-        f"<span class='li'><i class='sw {host_swatch}'></i>{_LEGEND_HOST}</span>",
-        f"<span class='li'><i class='sw sw-ref'></i>{_LEGEND_REFERENCE} {_e(_reference_label(reference))}</span>",
+        f"<span class='li'><i class='sw {host_swatch}'></i>{_rt("report_legend_host_observation")}</span>",
+        f"<span class='li'><i class='sw sw-ref'></i>{_rt("report_legend_configured_reference")} {_e(_reference_label(reference))}</span>",
     ]
     return f"<div class='legend'>{''.join(items)}</div>"
 
@@ -515,24 +528,24 @@ def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
     reference = view["chart_reference"]
     charts = (
         "<div class='charts'>"
-        f"<figure><figcaption>Interval over time</figcaption>{_svg_interval_series(analysis['interval_series'], reference)}"
+        f"<figure><figcaption>{_rt("report_chart_interval_over_time")}</figcaption>{_svg_interval_series(analysis['interval_series'], reference)}"
         f"{_chart_legend(reference, 'sw-line')}</figure>"
-        f"<figure><figcaption>Interval distribution</figcaption>{_svg_histogram(analysis['histogram'], reference)}"
+        f"<figure><figcaption>{_rt("report_chart_interval_distribution")}</figcaption>{_svg_histogram(analysis['histogram'], reference)}"
         f"{_chart_legend(reference, 'sw-bar')}</figure>"
-        f"<figure><figcaption>Hold vs Interval</figcaption>{_svg_scatter(analysis['scatter_points'], reference)}"
+        f"<figure><figcaption>{_rt("report_chart_hold_vs_interval")}</figcaption>{_svg_scatter(analysis['scatter_points'], reference)}"
         f"{_chart_legend(reference, 'sw-dot')}</figure>"
         "</div>"
     )
     host_evidence = ""
     if view["host_evidence"]:
         host_evidence = (
-            "<section id='host-evidence'><h2>Host Evidence</h2><div class='groups'>"
+            "<section id='host-evidence'><h2>" + _e(_rt("report_section_host_evidence")) + "</h2><div class='groups'>"
             + "".join(f"<div><h3>{_e(name)}</h3>{_kv_table(rows)}</div>" for name, rows in view["host_evidence"])
             + "</div></section>"
         )
     host_info = ""
     if view["host_information"]:
-        host_info = f"<section id='host-information'><h2>Host Information</h2>{_kv_table(view['host_information'])}</section>"
+        host_info = f"<section id='host-information'><h2>{_e(_rt('report_section_host_information'))}</h2>{_kv_table(view['host_information'])}</section>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -544,12 +557,12 @@ def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
 <body>
 <main>
 <h1>{_e(view['title'])}</h1>
-<section id="run-status"><h2>Run Status</h2>{_run_status_table(view)}</section>
+<section id="run-status"><h2>{_e(_rt("report_section_run_status"))}</h2>{_run_status_table(view)}</section>
 <div class="cols stack">
-<section id="test-information"><h2>Test Information</h2>{_kv_table(view['test_information'])}</section>
+<section id="test-information"><h2>{_e(_rt("report_section_test_information"))}</h2>{_kv_table(view['test_information'])}</section>
 {host_info}
 </div>
-<section id="measurements"><h2>Measurements</h2>{_kv_table(view['measurements'])}{charts}</section>
+<section id="measurements"><h2>{_e(_rt("report_section_measurements"))}</h2>{_kv_table(view['measurements'])}{charts}</section>
 {host_evidence}
 </main>
 </body>
@@ -624,7 +637,8 @@ def write_report_xlsx(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Summary"
+    sheets = report_sheet_names(model)
+    ws.title = sheets[0]
 
     def kv(sheet, row: int, pairs: list[tuple[str, str, str]]) -> int:
         for row_id, label, value in pairs:
@@ -640,25 +654,30 @@ def write_report_xlsx(
 
     ws["A1"] = view["title"]
     ws["A1"].font = Font(bold=True, size=16)
-    row = section(ws, 3, "Run Status")
+    row = section(ws, 3, _rt("report_section_run_status"))
     row = kv(ws, row, view["run_status_rows"])
     status_cell = ws.cell(row=4, column=2)
     status_cell.font = Font(bold=True, size=13)
     status_cell.fill = PatternFill("solid", fgColor=_RUN_STATUS_FILLS.get(view["run_status"], "FFFFFF"))
-    row = section(ws, row + 1, "Test Information")
+    row = section(ws, row + 1, _rt("report_section_test_information"))
     row = kv(ws, row, view["test_information"])
     if view["host_information"]:
-        row = section(ws, row + 1, "Host Information")
+        row = section(ws, row + 1, _rt("report_section_host_information"))
         kv(ws, row, view["host_information"])
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 48
 
-    wm = wb.create_sheet("Measurements")
-    wm["A1"] = "Measurements"
+    wm = wb.create_sheet(sheets[1])
+    wm["A1"] = _rt("report_section_measurements")
     wm["A1"].font = Font(bold=True, size=14)
     row = kv(wm, 3, view["measurements"])
-    hist_row = section(wm, row + 1, "Interval distribution")
-    for c, name in enumerate(("Bin centre (ms)", "Low (ms)", "High (ms)", "Count"), start=1):
+    hist_row = section(wm, row + 1, _rt("report_chart_interval_distribution"))
+    for c, name in enumerate((
+        _rt("report_hist_bin_centre"),
+        _rt("report_hist_low"),
+        _rt("report_hist_high"),
+        _rt("report_hist_count"),
+    ), start=1):
         h = wm.cell(row=hist_row, column=c, value=name)
         h.font = head_font
         h.fill = head_fill
@@ -675,8 +694,8 @@ def write_report_xlsx(
     wm.column_dimensions["D"].width = 10
 
     if view["host_evidence"]:
-        wh = wb.create_sheet("Host Evidence")
-        wh["A1"] = "Host Evidence"
+        wh = wb.create_sheet(_rt("report_sheet_host_evidence"))
+        wh["A1"] = _rt("report_section_host_evidence")
         wh["A1"].font = Font(bold=True, size=14)
         row = 3
         for name, rows in view["host_evidence"]:
@@ -685,7 +704,7 @@ def write_report_xlsx(
         wh.column_dimensions["A"].width = 52
         wh.column_dimensions["B"].width = 16
 
-    wc = wb.create_sheet("Click Data")
+    wc = wb.create_sheet(_rt("report_sheet_click_data"))
     cols = view["click_columns"]
     for c, name in enumerate(cols, start=1):
         h = wc.cell(row=1, column=c, value=name)
@@ -746,8 +765,8 @@ def write_report_xlsx(
     def reference_markers(vertical: bool, lo: float, hi: float) -> list:
         ref = reference["interval_ms"]
         if vertical:
-            return [marker_series([ref, ref], [lo, hi], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash")]
-        return [marker_series([lo, hi], [ref, ref], f"{_LEGEND_REFERENCE} {ref:.2f} ms", "dash")]
+            return [marker_series([ref, ref], [lo, hi], f"{_rt("report_legend_configured_reference")} {ref:.2f} ms", "dash")]
+        return [marker_series([lo, hi], [ref, ref], f"{_rt("report_legend_configured_reference")} {ref:.2f} ms", "dash")]
 
     def with_legend(chart):
         chart.legend = Legend()
@@ -764,11 +783,11 @@ def write_report_xlsx(
         last = n_rows + 1
         ys = [v for _, v in series] + (list(span) if span else [])
         line = frame(
-            ScatterChart(scatterStyle="line"), "Interval over time", "Elapsed (ms)", "Interval (ms)",
+            ScatterChart(scatterStyle="line"), _rt("report_chart_interval_over_time"), _rt("report_axis_elapsed_ms"), _rt("report_axis_interval_ms"),
             y_range=_padded(min(ys), max(ys)),
         )
         s = Series(Reference(wc, min_col=4, min_row=2, max_row=last), Reference(wc, min_col=2, min_row=2, max_row=last),
-                   title=_LEGEND_HOST)
+                   title=_rt("report_legend_host_observation"))
         s.marker.symbol = "none"
         s.smooth = False
         s.graphicalProperties.line.solidFill = "2563EB"
@@ -782,12 +801,12 @@ def write_report_xlsx(
         xs = [p[0] for p in points] + (list(span) if span else [])
         y_range = _padded(min(p[1] for p in points), max(p[1] for p in points))
         scatter = frame(
-            ScatterChart(scatterStyle="marker"), "Hold vs Interval", "Interval (ms)", "Hold (ms)",
+            ScatterChart(scatterStyle="marker"), _rt("report_chart_hold_vs_interval"), _rt("report_axis_interval_ms"), _rt("report_axis_hold_ms"),
             x_range=_padded(min(xs), max(xs)), y_range=y_range,
         )
         scatter.y_axis.number_format = "0.0"
         p = Series(Reference(wc, min_col=5, min_row=2, max_row=last), Reference(wc, min_col=4, min_row=2, max_row=last),
-                   title=_LEGEND_HOST)
+                   title=_rt("report_legend_host_observation"))
         p.marker.symbol = "circle"
         p.marker.size = 5
         p.marker.graphicalProperties.solidFill = "2563EB"
@@ -799,12 +818,12 @@ def write_report_xlsx(
             with_legend(scatter)
         wm.add_chart(scatter, "F37")
     if bins:
-        bar = frame(BarChart(), "Interval distribution", "Interval (ms)", "Count")
+        bar = frame(BarChart(), _rt("report_chart_interval_distribution"), _rt("report_axis_interval_ms"), _rt("report_axis_count"))
         bar.x_axis.axPos = "b"
         bar.gapWidth = 30
         bar.add_data(Reference(wm, min_col=4, min_row=hist_row + 1, max_row=hist_row + len(bins)))
         bar.set_categories(Reference(wm, min_col=1, min_row=hist_row + 1, max_row=hist_row + len(bins)))
-        bar.series[0].tx = SeriesLabel(v=_LEGEND_HOST)
+        bar.series[0].tx = SeriesLabel(v=_rt("report_legend_host_observation"))
         bar.series[0].graphicalProperties.solidFill = "60A5FA"
         bar.series[0].graphicalProperties.line.solidFill = "60A5FA"
         if reference and bins[0][0] <= span[0] and span[1] <= bins[-1][1]:

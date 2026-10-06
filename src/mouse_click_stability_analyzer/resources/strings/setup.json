@@ -1,0 +1,257 @@
+{
+  "assoc_derived_note": {
+    "en": "Derived for information only. Not a decision threshold.",
+    "zh-TW": "僅供參考的推導值，並非判定門檻。",
+    "note": "Derived for information only. Not a decision threshold."
+  },
+  "assoc_no": {
+    "en": "No",
+    "zh-TW": "否"
+  },
+  "assoc_overlap": {
+    "en": "Adjacent windows overlap",
+    "zh-TW": "相鄰時間窗重疊"
+  },
+  "assoc_overlap_note": {
+    "en": "Host observations in overlapping windows may be reported as Ambiguous.",
+    "zh-TW": "位於重疊時間窗內的主機觀測可能被標示為模糊。"
+  },
+  "assoc_reference_interval": {
+    "en": "Reference Interval",
+    "zh-TW": "參考間隔"
+  },
+  "assoc_relative": {
+    "en": "Relative to reference interval",
+    "zh-TW": "相對於參考間隔"
+  },
+  "assoc_window": {
+    "en": "Schedule Association Window",
+    "zh-TW": "排程關聯範圍"
+  },
+  "assoc_yes": {
+    "en": "Yes",
+    "zh-TW": "是"
+  },
+  "auto_stop": {
+    "en": "Auto Stop",
+    "zh-TW": "自動停止"
+  },
+  "auto_stop_after": {
+    "en": "Auto Stop After (s)",
+    "zh-TW": "自動停止秒數"
+  },
+  "auto_stop_invalid": {
+    "en": "Auto Stop requires a finite positive number of seconds.",
+    "zh-TW": "自動停止需填入大於 0 的有限秒數。"
+  },
+  "auto_stop_off_button": {
+    "en": "OFF",
+    "zh-TW": "OFF",
+    "note": "Toggle token. Keep identical in both languages; current UI does not translate OFF/ON."
+  },
+  "auto_stop_on_button": {
+    "en": "ON",
+    "zh-TW": "ON",
+    "note": "Toggle token. Keep identical in both languages; current UI does not translate OFF/ON."
+  },
+  "button": {
+    "en": "Button",
+    "zh-TW": "按鍵"
+  },
+  "controls": {
+    "en": "CONTROLS",
+    "zh-TW": "控制"
+  },
+  "custom_limits": {
+    "en": "Custom Limits",
+    "zh-TW": "自訂上限"
+  },
+  "custom_limits_invalid": {
+    "en": "Custom Limits must be finite positive numbers.",
+    "zh-TW": "自訂上限必須為大於 0 的有限數字。"
+  },
+  "custom_limits_order_invalid": {
+    "en": "Chatter must be below double-click, and actuation-too-short must be below low-hold warning.",
+    "zh-TW": "Chatter 必須小於雙擊門檻，且按壓過短必須小於低按壓警示。"
+  },
+  "device": {
+    "en": "Device",
+    "zh-TW": "裝置"
+  },
+  "device_placeholder": {
+    "en": "Device name (optional)",
+    "zh-TW": "裝置名稱（選填）"
+  },
+  "duration_sec": {
+    "en": "Duration sec",
+    "zh-TW": "測試秒數"
+  },
+  "edit_profile": {
+    "en": "Edit Profile",
+    "zh-TW": "編輯設定檔"
+  },
+  "fixture": {
+    "en": "Fixture",
+    "zh-TW": "治具"
+  },
+  "fixture_hz": {
+    "en": "Fixture Hz",
+    "zh-TW": "治具 Hz"
+  },
+  "fixture_timing_tolerance_invalid": {
+    "en": "Schedule Association Window is required: enter a finite number of ms (0 or greater).",
+    "zh-TW": "必須設定排程關聯範圍：請輸入 0 以上的有限毫秒數。"
+  },
+  "fixture_timing_tolerance_ms": {
+    "en": "Schedule Association Window (± ms)",
+    "zh-TW": "排程關聯範圍 (± ms)"
+  },
+  "fixture_timing_tolerance_placeholder": {
+    "en": "e.g. 2",
+    "zh-TW": "例：2"
+  },
+  "fixture_warn": {
+    "en": "Fixture mode needs a click fixture at the set Hz. Hand-clicking will usually WARN.",
+    "zh-TW": "治具模式需以設定 Hz 敲擊；手按通常會 WARN。"
+  },
+  "limit_actuation_short_ms": {
+    "en": "Actuation short (ms)",
+    "zh-TW": "按壓過短 (ms)"
+  },
+  "limit_chatter_ms": {
+    "en": "Chatter (ms)",
+    "zh-TW": "Chatter (ms)"
+  },
+  "limit_double_click_ms": {
+    "en": "Double-click (ms)",
+    "zh-TW": "雙擊門檻 (ms)"
+  },
+  "limit_interval_cv_pct": {
+    "en": "Interval CV (%)",
+    "zh-TW": "間隔 CV (%)"
+  },
+  "limit_low_hold_ms": {
+    "en": "Low hold (ms)",
+    "zh-TW": "低按壓警示 (ms)"
+  },
+  "listen_hint": {
+    "en": "Lock the Setup profile before capture.",
+    "zh-TW": "擷取前請先鎖定設定檔。"
+  },
+  "lock_profile_continue": {
+    "en": "Lock Profile & Continue",
+    "zh-TW": "鎖定設定檔並繼續"
+  },
+  "loose": {
+    "en": "Loose",
+    "zh-TW": "寬鬆"
+  },
+  "manual": {
+    "en": "Manual",
+    "zh-TW": "手動"
+  },
+  "medium": {
+    "en": "Medium",
+    "zh-TW": "中等"
+  },
+  "mode_fixture": {
+    "en": "Fixture · Reference {ms} ms ({hz} Hz)",
+    "zh-TW": "治具 · 參考 {ms} ms（{hz} Hz）",
+    "placeholders": [
+      "ms",
+      "hz"
+    ]
+  },
+  "mode_manual": {
+    "en": "Manual · Observation",
+    "zh-TW": "手動 · 觀察"
+  },
+  "page_setup_subtitle": {
+    "en": "Configure the test before capture.",
+    "zh-TW": "擷取前先設定測試條件。"
+  },
+  "preview_auto_stop_off": {
+    "en": "Off",
+    "zh-TW": "關閉"
+  },
+  "preview_mode": {
+    "en": "Mode",
+    "zh-TW": "模式"
+  },
+  "preview_reference_rate": {
+    "en": "Reference Rate",
+    "zh-TW": "參考速率"
+  },
+  "preview_timing_tolerance": {
+    "en": "Schedule Association Window",
+    "zh-TW": "排程關聯範圍"
+  },
+  "profile_status_draft": {
+    "en": "Setup Draft — lock the profile before capture.",
+    "zh-TW": "設定草稿 — 擷取前請先鎖定設定檔。"
+  },
+  "profile_status_locked": {
+    "en": "Profile locked.",
+    "zh-TW": "設定檔已鎖定。"
+  },
+  "reference_interval_derived": {
+    "en": "= {ms} ms interval",
+    "zh-TW": "= 間隔 {ms} ms",
+    "placeholders": [
+      "ms"
+    ]
+  },
+  "reference_rate_hz": {
+    "en": "Reference Rate (Hz)",
+    "zh-TW": "參考速率 (Hz)"
+  },
+  "reference_rate_invalid": {
+    "en": "Reference Rate must be a finite positive number.",
+    "zh-TW": "參考速率必須為大於 0 的有限數字。"
+  },
+  "rules": {
+    "en": "Rules",
+    "zh-TW": "規則"
+  },
+  "screening": {
+    "en": "Screening",
+    "zh-TW": "篩查"
+  },
+  "screening_measurement_only": {
+    "en": "Measurement only",
+    "zh-TW": "僅量測"
+  },
+  "screening_measurement_only_note": {
+    "en": "No approved screening or validation profile is applied.",
+    "zh-TW": "未套用核准的篩查或驗證設定檔。",
+    "note": "No approved screening or validation profile is applied."
+  },
+  "segment_sec": {
+    "en": "Segment sec",
+    "zh-TW": "分段秒數"
+  },
+  "setup": {
+    "en": "SETUP",
+    "zh-TW": "設定"
+  },
+  "setup_config_section": {
+    "en": "Test Configuration",
+    "zh-TW": "測試設定"
+  },
+  "setup_device_section": {
+    "en": "Device / DUT",
+    "zh-TW": "裝置 / DUT"
+  },
+  "setup_locked_profile_section": {
+    "en": "Locked Profile",
+    "zh-TW": "已鎖定設定檔"
+  },
+  "setup_profile_section": {
+    "en": "Setup Check",
+    "zh-TW": "設定檢查"
+  },
+  "strict": {
+    "en": "Strict",
+    "zh-TW": "嚴苛"
+  }
+}

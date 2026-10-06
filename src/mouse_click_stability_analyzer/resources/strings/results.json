@@ -1,0 +1,457 @@
+{
+  "ambiguous": {
+    "en": "Ambiguous Host observations",
+    "zh-TW": "模糊主機觀測"
+  },
+  "analysis": {
+    "en": "Analysis",
+    "zh-TW": "分析"
+  },
+  "analysis_view": {
+    "en": "View",
+    "zh-TW": "檢視"
+  },
+  "association": {
+    "en": "Association",
+    "zh-TW": "對應"
+  },
+  "average_abs_error": {
+    "en": "Average absolute matched timing error",
+    "zh-TW": "平均絕對匹配時序誤差"
+  },
+  "average_error": {
+    "en": "Average matched timing error",
+    "zh-TW": "平均匹配時序誤差"
+  },
+  "click_data": {
+    "en": "Click Data",
+    "zh-TW": "點擊資料"
+  },
+  "col_button": {
+    "en": "Button",
+    "zh-TW": "按鍵"
+  },
+  "col_elapsed": {
+    "en": "Elapsed",
+    "zh-TW": "經過"
+  },
+  "col_hold": {
+    "en": "Hold",
+    "zh-TW": "按住"
+  },
+  "col_index": {
+    "en": "#",
+    "zh-TW": "#"
+  },
+  "col_interval": {
+    "en": "Interval",
+    "zh-TW": "間隔"
+  },
+  "col_ref_delta": {
+    "en": "Interval Δ vs ref.",
+    "zh-TW": "間隔 Δ 對參考值"
+  },
+  "col_ref_delta_tooltip": {
+    "en": "Observed interval − configured reference interval",
+    "zh-TW": "觀測間隔 − 設定參考間隔",
+    "note": "Observed interval minus configured reference interval. Not matched timing error."
+  },
+  "col_state": {
+    "en": "Timing observation",
+    "zh-TW": "時序觀測"
+  },
+  "col_state_tooltip": {
+    "en": "Measurement-only: no Screening or Validation category is applied.",
+    "zh-TW": "僅量測：未套用 Screening 或 Validation 類別。",
+    "note": "Measurement-only: no Screening or Validation category is applied."
+  },
+  "col_tags": {
+    "en": "Observation flag(s)",
+    "zh-TW": "觀測旗標"
+  },
+  "configured_reference": {
+    "en": "Configured reference",
+    "zh-TW": "設定參考值"
+  },
+  "delta_vs_windows": {
+    "en": "Host observations − schedule windows",
+    "zh-TW": "主機觀測 − 排程時間窗"
+  },
+  "difference": {
+    "en": "Average interval Δ vs reference",
+    "zh-TW": "平均間隔 Δ 對參考值"
+  },
+  "editing_next_run_note": {
+    "en": "Editing setup for next run. Previous completed result remains unchanged.",
+    "zh-TW": "正在編輯下一輪設定。先前完成的結果維持不變。"
+  },
+  "evidence": {
+    "en": "Evidence",
+    "zh-TW": "證據"
+  },
+  "existing_rule": {
+    "en": "Existing rule",
+    "zh-TW": "既有規則"
+  },
+  "expected_windows": {
+    "en": "Schedule windows",
+    "zh-TW": "排程時間窗"
+  },
+  "he_config": {
+    "en": "Fixture Frequency {hz} Hz · Capture Duration {duration} s · Schedule Association Window ±{tol} ms · Configured reference interval {ref} ms",
+    "zh-TW": "治具頻率 {hz} Hz · 測試時間 {duration} s · 排程關聯範圍 ±{tol} ms · 設定參考間隔 {ref} ms",
+    "placeholders": [
+      "hz",
+      "duration",
+      "tol",
+      "ref"
+    ]
+  },
+  "he_counts": {
+    "en": "Schedule windows {expected} · Host observations in capture {in_window} · Host observations − schedule windows {delta} · Host observations recorded {raw}",
+    "zh-TW": "排程時間窗 {expected} · 擷取內主機觀測 {in_window} · 主機觀測 − 排程時間窗 {delta} · 已記錄主機觀測 {raw}",
+    "placeholders": [
+      "expected",
+      "in_window",
+      "delta",
+      "raw"
+    ]
+  },
+  "he_matched_used": {
+    "en": "Matched observations used {matched} of {total} in capture",
+    "zh-TW": "使用的匹配觀測 {matched} / {total}（擷取內）",
+    "placeholders": [
+      "matched",
+      "total"
+    ]
+  },
+  "he_observations": {
+    "en": "Host observations matched to schedule {matched} · Host observations not matched to schedule {unmatched} · Ambiguous Host observations {ambiguous} · Host observations outside capture {outside}",
+    "zh-TW": "已匹配排程的主機觀測 {matched} · 未匹配排程的主機觀測 {unmatched} · 模糊主機觀測 {ambiguous} · 擷取窗外主機觀測 {outside}",
+    "placeholders": [
+      "matched",
+      "unmatched",
+      "ambiguous",
+      "outside"
+    ]
+  },
+  "he_overlap": {
+    "en": "Adjacent windows overlap: Yes · Host observations in overlapping windows may be reported as Ambiguous.",
+    "zh-TW": "相鄰時間窗重疊：是 · 位於重疊時間窗內的主機觀測可能被標示為模糊。"
+  },
+  "he_timing": {
+    "en": "Matched timing (Host − schedule, ms): Average {avg} · Minimum {min} · Maximum {max} · Stdev {sd} · Average absolute {abs_avg}",
+    "zh-TW": "匹配時序（主機 − 排程，ms）：平均 {avg} · 最小 {min} · 最大 {max} · 標準差 {sd} · 平均絕對 {abs_avg}",
+    "placeholders": [
+      "avg",
+      "min",
+      "max",
+      "sd",
+      "abs_avg"
+    ]
+  },
+  "he_timing_empty": {
+    "en": "Matched timing statistics are not available (no matched Host observations).",
+    "zh-TW": "沒有匹配的主機觀測，因此沒有匹配時序統計。"
+  },
+  "he_title": {
+    "en": "HOST EVIDENCE — host-observed Presses vs configured Fixture schedule",
+    "zh-TW": "主機觀測證據 — 主機觀測 Press 對照設定的治具排程"
+  },
+  "he_windows": {
+    "en": "Schedule windows without matched Host observation {empty} · Schedule windows with 1 matched Host observation {single} · Schedule windows with >1 matched Host observations {multi}",
+    "zh-TW": "無匹配主機觀測的排程時間窗 {empty} · 有 1 筆匹配主機觀測的排程時間窗 {single} · 有超過 1 筆匹配主機觀測的排程時間窗 {multi}",
+    "placeholders": [
+      "empty",
+      "single",
+      "multi"
+    ]
+  },
+  "hold_vs_interval": {
+    "en": "Hold vs Interval",
+    "zh-TW": "按住 vs 間隔"
+  },
+  "host_observations": {
+    "en": "Host observations",
+    "zh-TW": "主機觀測"
+  },
+  "in_capture": {
+    "en": "Host observations in capture",
+    "zh-TW": "擷取內主機觀測"
+  },
+  "informational_observation": {
+    "en": "Informational observation",
+    "zh-TW": "資訊性觀測"
+  },
+  "interval_distribution": {
+    "en": "Interval distribution",
+    "zh-TW": "間隔分布"
+  },
+  "interval_over_time": {
+    "en": "Interval over time",
+    "zh-TW": "間隔隨時間"
+  },
+  "legend_configured_reference": {
+    "en": "Configured reference",
+    "zh-TW": "設定參考值",
+    "note": "Configured reference only. Not a PASS/FAIL threshold."
+  },
+  "legend_host_observation": {
+    "en": "Host observation",
+    "zh-TW": "主機觀測"
+  },
+  "matched": {
+    "en": "Host observations matched to schedule",
+    "zh-TW": "已匹配排程的主機觀測"
+  },
+  "matched_observations_used": {
+    "en": "Matched observations used",
+    "zh-TW": "使用的匹配觀測"
+  },
+  "matched_observations_used_value": {
+    "en": "{matched} of {total} in capture",
+    "zh-TW": "{matched} / {total}（擷取內）",
+    "placeholders": [
+      "matched",
+      "total"
+    ]
+  },
+  "matched_timing_empty": {
+    "en": "No matched Host observations — matched timing statistics are not available.",
+    "zh-TW": "沒有匹配的主機觀測，因此沒有匹配時序統計。"
+  },
+  "matched_timing_single": {
+    "en": "Statistics describe a single matched observation.",
+    "zh-TW": "統計僅描述單一匹配觀測。"
+  },
+  "max_error": {
+    "en": "Maximum matched timing error",
+    "zh-TW": "最大匹配時序誤差"
+  },
+  "measured": {
+    "en": "Measured",
+    "zh-TW": "量測值"
+  },
+  "min_error": {
+    "en": "Minimum matched timing error",
+    "zh-TW": "最小匹配時序誤差"
+  },
+  "multi_occupancy": {
+    "en": "Schedule windows with >1 matched Host observations",
+    "zh-TW": "有超過 1 筆匹配主機觀測的排程時間窗"
+  },
+  "neutral_host_evidence_note": {
+    "en": "Host-observed schedule association only. This evidence does not apply a screening or validation profile.",
+    "zh-TW": "僅為主機觀測與排程的對應。此證據未套用篩查或驗證設定檔。"
+  },
+  "next_run": {
+    "en": "Next run",
+    "zh-TW": "下一輪"
+  },
+  "not_applicable_manual": {
+    "en": "Host Evidence is not applicable to Manual mode.",
+    "zh-TW": "手動模式不適用主機觀測證據。"
+  },
+  "not_applicable_no_duration": {
+    "en": "Host Evidence is not applicable when Auto Stop duration is not configured.",
+    "zh-TW": "未設定自動停止時長時不適用主機觀測證據。"
+  },
+  "obs_actuation_short": {
+    "en": "Host-observed holds include short holds.",
+    "zh-TW": "主機觀測按住時間含有短按住。"
+  },
+  "obs_capture_source": {
+    "en": "Capture source is invalid.",
+    "zh-TW": "擷取來源無效。"
+  },
+  "obs_chatter_hard": {
+    "en": "Host-observed intervals include very short intervals.",
+    "zh-TW": "主機觀測間隔含有極短間隔。"
+  },
+  "obs_double_click": {
+    "en": "Host-observed intervals include short intervals.",
+    "zh-TW": "主機觀測間隔含有短間隔。"
+  },
+  "obs_fixture_hz_mismatch": {
+    "en": "Host-observed cadence differs from the configured reference.",
+    "zh-TW": "主機觀測節拍與設定參考值不同。"
+  },
+  "obs_host_count_above": {
+    "en": "Host-observed press count is above the configured reference count.",
+    "zh-TW": "主機觀測按下次數高於設定參考次數。"
+  },
+  "obs_host_count_below": {
+    "en": "Host-observed press count is below the configured reference count.",
+    "zh-TW": "主機觀測按下次數低於設定參考次數。"
+  },
+  "obs_incomplete_rebound": {
+    "en": "Host-observed holds include short holds.",
+    "zh-TW": "主機觀測按住時間含有短按住。"
+  },
+  "obs_insufficient": {
+    "en": "Host-observed press count is low.",
+    "zh-TW": "主機觀測按下次數偏低。"
+  },
+  "obs_interval_jitter": {
+    "en": "Host-observed interval variation.",
+    "zh-TW": "主機觀測間隔變異。"
+  },
+  "obs_low_hold": {
+    "en": "Host-observed holds include short holds.",
+    "zh-TW": "主機觀測按住時間含有短按住。"
+  },
+  "obs_miss_or_slow": {
+    "en": "Host-observed intervals include long intervals.",
+    "zh-TW": "主機觀測間隔含有長間隔。"
+  },
+  "obs_pause_gap": {
+    "en": "Host-observed pauses were excluded.",
+    "zh-TW": "主機觀測暫停已排除。"
+  },
+  "obs_setup_alignment": {
+    "en": "Host-observed hold variation.",
+    "zh-TW": "主機觀測按住時間變異。"
+  },
+  "obs_timing_jitter_pair": {
+    "en": "Host-observed timing variation.",
+    "zh-TW": "主機觀測時序變異。"
+  },
+  "obs_true_extra": {
+    "en": "Host-observed intervals include short intervals.",
+    "zh-TW": "主機觀測間隔含有短間隔。"
+  },
+  "obs_wrong_button": {
+    "en": "Host-observed button does not match the configured target button.",
+    "zh-TW": "主機觀測按鍵與設定目標按鍵不符。"
+  },
+  "observations_none": {
+    "en": "No informational observations.",
+    "zh-TW": "沒有資訊性觀測。"
+  },
+  "observed_average": {
+    "en": "Host-observed average interval",
+    "zh-TW": "主機觀測平均間隔"
+  },
+  "occupancy": {
+    "en": "Occupancy",
+    "zh-TW": "佔用"
+  },
+  "outside_capture": {
+    "en": "Host observations outside capture",
+    "zh-TW": "擷取窗外主機觀測"
+  },
+  "page_results_placeholder": {
+    "en": "Detailed Results workspace will be migrated in a later phase.",
+    "zh-TW": "詳細結果工作區將於後續階段遷移。"
+  },
+  "page_results_subtitle": {
+    "en": "Review completed-run evidence and outputs.",
+    "zh-TW": "檢視完成測試的證據與輸出。"
+  },
+  "raw_observations": {
+    "en": "Host observations recorded",
+    "zh-TW": "已記錄主機觀測"
+  },
+  "reference_interval": {
+    "en": "Configured reference interval",
+    "zh-TW": "設定參考間隔"
+  },
+  "results_actions": {
+    "en": "Post-run Actions",
+    "zh-TW": "完成後動作"
+  },
+  "results_avg_hold": {
+    "en": "Average hold",
+    "zh-TW": "平均按住時間"
+  },
+  "results_avg_interval": {
+    "en": "Host-observed average interval",
+    "zh-TW": "主機觀測平均間隔"
+  },
+  "results_chart_legend_help": {
+    "en": "Host observation: an accepted button press recorded by the Host capture path. Configured reference: the nominal interval from the configured Reference Rate. It is not a PASS/FAIL threshold.",
+    "zh-TW": "主機觀測：主機擷取路徑記錄到的有效按壓。設定參考值：由設定參考速率得出的名義間隔，不是 PASS/FAIL 門檻。",
+    "note": "Measurement-only Results legend. Not a PASS/FAIL threshold."
+  },
+  "results_elapsed": {
+    "en": "Actual elapsed time",
+    "zh-TW": "實際經過時間"
+  },
+  "results_empty": {
+    "en": "No completed run yet.",
+    "zh-TW": "尚未有完成的測試。"
+  },
+  "results_existing_result": {
+    "en": "Existing Result",
+    "zh-TW": "既有結果"
+  },
+  "results_host_clicks": {
+    "en": "Host Presses",
+    "zh-TW": "主機按下次數"
+  },
+  "results_host_evidence_section": {
+    "en": "Host Evidence",
+    "zh-TW": "主機觀測證據"
+  },
+  "results_observations": {
+    "en": "Observations",
+    "zh-TW": "觀測結果"
+  },
+  "results_run_context": {
+    "en": "Run Context",
+    "zh-TW": "執行內容"
+  },
+  "results_run_summary": {
+    "en": "Run Summary",
+    "zh-TW": "執行摘要"
+  },
+  "run_again": {
+    "en": "Run Again",
+    "zh-TW": "再跑一次"
+  },
+  "run_profile": {
+    "en": "Run Profile",
+    "zh-TW": "執行設定檔"
+  },
+  "schedule": {
+    "en": "Schedule",
+    "zh-TW": "排程"
+  },
+  "single_occupancy": {
+    "en": "Schedule windows with 1 matched Host observation",
+    "zh-TW": "有 1 筆匹配主機觀測的排程時間窗"
+  },
+  "stdev": {
+    "en": "Matched timing error stdev",
+    "zh-TW": "匹配時序誤差標準差"
+  },
+  "timing_error": {
+    "en": "Matched timing (Host − schedule)",
+    "zh-TW": "匹配時序（主機 − 排程）"
+  },
+  "timing_error_unavailable": {
+    "en": "Per-observation timing-error geometry is not in the frozen Host Evidence snapshot. Aggregate matched-delta statistics are shown instead.",
+    "zh-TW": "凍結的主機觀測證據快照不含逐筆時序誤差幾何，改顯示已匹配的彙總誤差統計。"
+  },
+  "timing_group": {
+    "en": "Matched timing (Host − schedule)",
+    "zh-TW": "匹配時序（主機 − 排程）"
+  },
+  "tolerance": {
+    "en": "Schedule Association Window",
+    "zh-TW": "排程關聯範圍",
+    "note": "Schedule Association Window. Not an interval-category threshold."
+  },
+  "unmatched": {
+    "en": "Host observations not matched to schedule",
+    "zh-TW": "未匹配排程的主機觀測"
+  },
+  "unoccupied": {
+    "en": "Schedule windows without matched Host observation",
+    "zh-TW": "無匹配主機觀測的排程時間窗"
+  },
+  "waiting_for_mouse_input": {
+    "en": "Run complete · Stop fixture input and move the mouse to unlock post-run actions.",
+    "zh-TW": "測試已完成 · 請停止治具輸入並移動滑鼠以解鎖後續操作。"
+  }
+}

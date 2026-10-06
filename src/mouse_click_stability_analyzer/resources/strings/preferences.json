@@ -1,0 +1,98 @@
+{
+  "apply_custom_size": {
+    "en": "Apply Custom Size",
+    "zh-TW": "套用自訂大小"
+  },
+  "custom_height": {
+    "en": "Height",
+    "zh-TW": "高度"
+  },
+  "custom_size_pending": {
+    "en": "Not applied yet — press Apply Custom Size.",
+    "zh-TW": "尚未套用 — 請按「套用自訂大小」。"
+  },
+  "custom_width": {
+    "en": "Width",
+    "zh-TW": "寬度"
+  },
+  "custom_window_size": {
+    "en": "Custom Window Size",
+    "zh-TW": "自訂視窗大小"
+  },
+  "display_language": {
+    "en": "Display Language",
+    "zh-TW": "顯示語言"
+  },
+  "page_preferences_subtitle": {
+    "en": "Application preferences.",
+    "zh-TW": "應用程式偏好設定。"
+  },
+  "pref_appearance_section": {
+    "en": "Appearance",
+    "zh-TW": "外觀"
+  },
+  "pref_window_section": {
+    "en": "Window & Layout",
+    "zh-TW": "視窗與版面"
+  },
+  "preferences_more_note": {
+    "en": "Additional application preferences may be added later.",
+    "zh-TW": "未來可能新增其他應用程式偏好設定。"
+  },
+  "remember_window_size": {
+    "en": "Remember last window size and position",
+    "zh-TW": "記住上次的視窗大小與位置"
+  },
+  "remember_window_size_note": {
+    "en": "When on, the last window size and position are restored at the next launch and take priority over Startup Window. Choosing a size above still applies immediately. Reset clears the remembered geometry and returns to Auto.",
+    "zh-TW": "開啟時，下次啟動會還原上次的視窗大小與位置，並優先於「啟動視窗」設定。在上方選擇尺寸仍會立即套用。重設會清除記住的位置並回到自動。"
+  },
+  "reset_window_geometry": {
+    "en": "Reset Window Size & Position",
+    "zh-TW": "重設視窗大小與位置"
+  },
+  "startup_window": {
+    "en": "Startup Window",
+    "zh-TW": "啟動視窗"
+  },
+  "window_fit_note": {
+    "en": "Presets larger than the current work area are fitted to the screen.",
+    "zh-TW": "大於目前可用工作區的預設尺寸會自動縮放以符合螢幕。"
+  },
+  "window_mode_auto": {
+    "en": "Auto (Recommended)",
+    "zh-TW": "自動（建議）"
+  },
+  "window_mode_compact": {
+    "en": "Compact",
+    "zh-TW": "精簡"
+  },
+  "window_mode_custom": {
+    "en": "Custom…",
+    "zh-TW": "自訂…"
+  },
+  "window_mode_full_hd": {
+    "en": "Full HD",
+    "zh-TW": "Full HD"
+  },
+  "window_mode_laptop": {
+    "en": "Laptop",
+    "zh-TW": "筆電"
+  },
+  "window_mode_large": {
+    "en": "Large",
+    "zh-TW": "大型"
+  },
+  "window_mode_large_plus": {
+    "en": "Large+",
+    "zh-TW": "大型+"
+  },
+  "window_mode_maximized": {
+    "en": "Maximized",
+    "zh-TW": "最大化"
+  },
+  "window_mode_standard": {
+    "en": "Standard",
+    "zh-TW": "標準"
+  }
+}

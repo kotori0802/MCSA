@@ -1,0 +1,331 @@
+{
+  "report_title": {
+    "en": "MCSA — Test Report"
+  },
+  "report_sheet_summary": {
+    "en": "Summary"
+  },
+  "report_sheet_measurements": {
+    "en": "Measurements"
+  },
+  "report_sheet_host_evidence": {
+    "en": "Host Evidence"
+  },
+  "report_sheet_click_data": {
+    "en": "Click Data"
+  },
+  "report_section_run_status": {
+    "en": "Run Status"
+  },
+  "report_section_test_information": {
+    "en": "Test Information"
+  },
+  "report_section_host_information": {
+    "en": "Host Information"
+  },
+  "report_section_measurements": {
+    "en": "Measurements"
+  },
+  "report_section_host_evidence": {
+    "en": "Host Evidence"
+  },
+  "report_label_run_status": {
+    "en": "Run Status"
+  },
+  "report_label_run_id": {
+    "en": "Run ID"
+  },
+  "report_label_run_profile": {
+    "en": "Run Profile"
+  },
+  "report_label_screening": {
+    "en": "Screening"
+  },
+  "report_value_measurement_only": {
+    "en": "Measurement only"
+  },
+  "report_label_device": {
+    "en": "Device"
+  },
+  "report_label_hid_device_name": {
+    "en": "HID device name"
+  },
+  "report_label_vid": {
+    "en": "VID"
+  },
+  "report_label_pid": {
+    "en": "PID"
+  },
+  "report_label_bcd_device": {
+    "en": "bcdDevice"
+  },
+  "report_label_button": {
+    "en": "Button"
+  },
+  "report_label_mode": {
+    "en": "Mode"
+  },
+  "report_value_manual": {
+    "en": "Manual"
+  },
+  "report_value_fixture": {
+    "en": "Fixture"
+  },
+  "report_label_reference_rate": {
+    "en": "Reference Rate"
+  },
+  "report_label_reference_interval": {
+    "en": "Reference Interval"
+  },
+  "report_label_schedule_association_window": {
+    "en": "Schedule Association Window"
+  },
+  "report_label_association_relative": {
+    "en": "Window relative to reference interval (derived, informational)",
+    "note": "Derived informational value. Not a decision threshold."
+  },
+  "report_label_duration": {
+    "en": "Duration"
+  },
+  "report_label_host_presses": {
+    "en": "Host Presses"
+  },
+  "report_label_operator": {
+    "en": "Operator"
+  },
+  "report_label_report_generated": {
+    "en": "Report generated"
+  },
+  "report_label_host_os": {
+    "en": "Host OS"
+  },
+  "report_label_capture_backend": {
+    "en": "Capture backend"
+  },
+  "report_label_tool_version": {
+    "en": "Tool version"
+  },
+  "report_label_host_average_interval": {
+    "en": "Host-observed average interval"
+  },
+  "report_label_host_cadence": {
+    "en": "Host-observed cadence"
+  },
+  "report_label_measurement_reference_interval": {
+    "en": "Reference interval"
+  },
+  "report_label_average_interval_delta": {
+    "en": "Average interval Δ vs reference"
+  },
+  "report_label_interval_cv": {
+    "en": "Interval CV"
+  },
+  "report_label_average_hold": {
+    "en": "Average hold"
+  },
+  "report_label_host_press_count": {
+    "en": "Host Press count"
+  },
+  "report_label_matched_observations_used": {
+    "en": "Matched observations used"
+  },
+  "report_matched_observations_used_value": {
+    "en": "{matched} of {total} in capture",
+    "placeholders": [
+      "matched",
+      "total"
+    ]
+  },
+  "report_label_matched_timing_statistics": {
+    "en": "Matched timing statistics"
+  },
+  "report_value_no_matched_host_observations": {
+    "en": "No matched Host observations"
+  },
+  "report_label_average_matched_timing_error": {
+    "en": "Average matched timing error"
+  },
+  "report_label_average_abs_matched_timing_error": {
+    "en": "Average absolute matched timing error"
+  },
+  "report_label_min_matched_timing_error": {
+    "en": "Minimum matched timing error"
+  },
+  "report_label_max_matched_timing_error": {
+    "en": "Maximum matched timing error"
+  },
+  "report_label_matched_timing_stdev": {
+    "en": "Matched timing error stdev"
+  },
+        "report_note_single_matched": {
+          "en": "Statistics describe a single matched observation."
+        },
+        "report_label_note": {
+          "en": "Note"
+        },
+  "report_group_schedule": {
+    "en": "Schedule"
+  },
+  "report_label_schedule_windows": {
+    "en": "Schedule windows"
+  },
+  "report_label_configured_reference_interval": {
+    "en": "Configured reference interval",
+    "note": "Configured reference only. Not a PASS/FAIL threshold."
+  },
+  "report_group_host_observations": {
+    "en": "Host observations"
+  },
+  "report_label_in_capture": {
+    "en": "Host observations in capture"
+  },
+  "report_label_recorded": {
+    "en": "Host observations recorded"
+  },
+  "report_label_host_count_delta_vs_windows": {
+    "en": "Host observations − schedule windows"
+  },
+  "report_group_occupancy": {
+    "en": "Schedule window occupancy"
+  },
+  "report_label_unoccupied_windows": {
+    "en": "Schedule windows without matched Host observation"
+  },
+  "report_label_single_occupancy_windows": {
+    "en": "Schedule windows with 1 matched Host observation"
+  },
+  "report_label_multi_occupancy_windows": {
+    "en": "Schedule windows with >1 matched Host observations"
+  },
+  "report_group_association": {
+    "en": "Host observation association"
+  },
+  "report_label_matched_host_observations": {
+    "en": "Host observations matched to schedule"
+  },
+  "report_label_unmatched_host_observations": {
+    "en": "Host observations not matched to schedule"
+  },
+  "report_label_ambiguous_host_observations": {
+    "en": "Ambiguous Host observations"
+  },
+  "report_label_outside_capture": {
+    "en": "Host observations outside capture"
+  },
+  "report_group_matched_timing": {
+    "en": "Matched timing (Host − schedule)"
+  },
+  "report_click_col_index": {
+    "en": "#"
+  },
+  "report_click_col_elapsed": {
+    "en": "Elapsed (ms)"
+  },
+  "report_click_col_button": {
+    "en": "Button"
+  },
+  "report_click_col_interval": {
+    "en": "Interval (ms)"
+  },
+  "report_click_col_hold": {
+    "en": "Hold (ms)"
+  },
+  "report_click_col_observation": {
+    "en": "Observation"
+  },
+  "report_click_col_flags": {
+    "en": "Observation flag(s)"
+  },
+  "report_click_col_ref_delta": {
+    "en": "Interval Δ vs ref. (ms)"
+  },
+  "report_chart_interval_over_time": {
+    "en": "Interval over time"
+  },
+  "report_chart_interval_distribution": {
+    "en": "Interval distribution"
+  },
+  "report_chart_hold_vs_interval": {
+    "en": "Hold vs Interval"
+  },
+  "report_axis_elapsed_s": {
+    "en": "Elapsed (s)"
+  },
+  "report_axis_elapsed_ms": {
+    "en": "Elapsed (ms)"
+  },
+  "report_axis_interval_ms": {
+    "en": "Interval (ms)"
+  },
+  "report_axis_hold_ms": {
+    "en": "Hold (ms)"
+  },
+  "report_axis_count": {
+    "en": "Count"
+  },
+  "report_legend_host_observation": {
+    "en": "Host observation",
+    "note": "Accepted Host-observed press. Not a PASS/FAIL verdict."
+  },
+  "report_legend_configured_reference": {
+    "en": "Configured reference",
+    "note": "Configured reference only. Not a PASS/FAIL threshold."
+  },
+  "report_hist_bin_centre": {
+    "en": "Bin centre (ms)"
+  },
+  "report_hist_low": {
+    "en": "Low (ms)"
+  },
+  "report_hist_high": {
+    "en": "High (ms)"
+  },
+  "report_hist_count": {
+    "en": "Count"
+  },
+  "report_alias_observation": {
+    "en": "Observation"
+  },
+  "report_alias_very_short_interval": {
+    "en": "Very short interval"
+  },
+  "report_alias_short_interval": {
+    "en": "Short interval"
+  },
+  "report_alias_short_hold": {
+    "en": "Short hold"
+  },
+  "report_alias_long_interval": {
+    "en": "Long interval"
+  },
+  "report_alias_interval_variation": {
+    "en": "Interval variation"
+  },
+  "report_alias_hold_variation": {
+    "en": "Hold variation"
+  },
+  "report_alias_timing_variation": {
+    "en": "Timing variation"
+  },
+  "report_alias_cadence_vs_reference": {
+    "en": "Cadence vs reference"
+  },
+  "report_alias_pause_excluded": {
+    "en": "Pause excluded"
+  },
+  "report_alias_wrong_button": {
+    "en": "Wrong button"
+  },
+  "report_alias_low_press_count": {
+    "en": "Low press count"
+  },
+  "report_alias_invalid_capture_source": {
+    "en": "Invalid capture source"
+  },
+  "report_none": {
+    "en": "—"
+  },
+  "report_chart_no_data": {
+    "en": "No data"
+  }
+}
