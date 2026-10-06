@@ -32,7 +32,7 @@ save_readme_screenshot.bat
 ```bat
 install.bat
 run.bat
-python -m mouse_click_stability_analyzer --mode self-test
+run.bat --mode self-test
 ```
 
 ---

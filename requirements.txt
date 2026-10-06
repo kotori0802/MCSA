@@ -1,5 +1,3 @@
-# Core analysis runs on the Python standard library.
-# Optional Excel engineering reports:
-openpyxl>=3.1; platform_system == "Windows"
-# Optional modern GUI shell (default when installed):
-PySide6>=6.6
+# Engineering GUI runtime pin set. See requirements-gui.txt for versions and rationale.
+# install.bat installs these into a project-local .venv (Python 3.12 64-bit).
+-r requirements-gui.txt

@@ -40,49 +40,36 @@ The analyzer **separates potential DUT behavior from setup/fixture instability**
 ## Requirements
 
 - **Windows 10/11** (Phase 1 — Raw Input capture)
-- Python **3.10+**
-- Optional: `openpyxl` for Excel reports (`pip install openpyxl`)
+- **Python 3.12 64-bit** for this release line (library metadata still allows 3.10+; that is not a production support claim)
+- Verified GUI packages: `PySide6==6.11.0`, `openpyxl==3.1.5` (see `requirements-gui.txt`)
+
+Recommended install folder: **`C:\MCSA\`** or **`C:\Tools\MCSA\`**. A deep OneDrive / Desktop path can push PySide6 files inside `.venv` past 260 characters on PCs without Windows long-path support.
 
 ## Quick Start
 
 ```bat
-cd C:\mouse_click_stability_analyzer
+cd C:\MCSA
 install.bat
 run.bat
 ```
 
-`install.bat` installs the package plus **PySide6** (modern GUI). `run.bat` prefers the Qt shell when available; fall back with:
+`install.bat` creates a **project-local `.venv`** with Python 3.12 and installs the Qt GUI extras there. It does not install into global Python and does not require Administrator.
+
+`run.bat` always runs **this folder's** `src\` with that `.venv` (or `py -3.12` / a 3.12 `python` if `.venv` is not present yet). It will not pick a newer Python, and it will not fall back to the legacy Tk UI.
+
+If the window flashes and closes, run `run_diagnose.bat`.
+
+Headless self-test (synthetic data, no GUI):
 
 ```bat
-run.bat --ui tk
+run.bat --mode self-test
 ```
 
-Or manually:
-
-```bat
-cd C:\mouse_click_stability_analyzer
-python -m pip install -e ".[gui]"
-python -m mouse_click_stability_analyzer
-python -m mouse_click_stability_analyzer --ui tk
-```
-
-**Important:** run `install.bat` (or `pip install -e .`) **inside the project folder**, not from `C:\Windows\System32`. `run.bat` picks the first Python that can import the package (`py -3`, then `python`, then `py`). `install.bat` installs for both `python` and `py -3` when available.
-
-Before publishing: run `clean_local.bat` to remove local test reports and build cache (see [RELEASING.md](RELEASING.md)).
-
-If the window flashes and closes, run `run_diagnose.bat` to see the error, or:
-
-```bat
-python -B -m mouse_click_stability_analyzer
-```
-
-Or headless self-test (synthetic data, no GUI):
-
-```bat
-python -m mouse_click_stability_analyzer --mode self-test
-```
+The legacy Tk UI is available only by explicit request (`run.bat --ui tk`) and is not used for production.
 
 Reports are written to `reports/` **after you complete a local run**. This repository does not ship real device sessions.
+
+Before publishing: run `clean_local.bat` to remove local test reports and build cache (see [RELEASING.md](RELEASING.md)).
 
 ## Typical Workflow
 

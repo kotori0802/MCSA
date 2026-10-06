@@ -1,0 +1,10 @@
+# Verified engineering GUI runtime for this release line.
+# Host: Python 3.12 64-bit (3.12.10 ran the complete required suites).
+# Do not install these into global Python; use install.bat -> project .venv.
+#
+# PySide6 6.11.0: the version on Python 3.12 that ran Stage 0 / UI suites.
+# openpyxl 3.1.5: the version that wrote engineering XLSX in those environments.
+# Transitive wheels (shiboken6, PySide6-Essentials/Addons, et-xmlfile) are
+# left unpinned so pip can resolve the matching set for the pinned parents.
+PySide6==6.11.0
+openpyxl==3.1.5

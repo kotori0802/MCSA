@@ -22,9 +22,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-excel = ["openpyxl>=3.1"]
-qt = ["PySide6>=6.6"]
-gui = ["PySide6>=6.6", "openpyxl>=3.1"]
+excel = ["openpyxl==3.1.5"]
+qt = ["PySide6==6.11.0"]
+gui = ["PySide6==6.11.0", "openpyxl==3.1.5"]
 
 [project.scripts]
 mcsa = "mouse_click_stability_analyzer.cli:main"
