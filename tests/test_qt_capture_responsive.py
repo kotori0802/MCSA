@@ -122,15 +122,19 @@ class CaptureResponsiveTests(unittest.TestCase):
 
     def _assert_capture_usable(self, *, stats_cols: int, issues_cols: int) -> None:
         self.assertEqual(self.win.capture_stats_grid.columns(), stats_cols)
-        self.assertEqual(self.win.capture_issues_grid.columns(), issues_cols)
         _no_pairwise_overlap(self._stat_cells())
-        _no_pairwise_overlap(self._issue_cells())
         _no_pairwise_overlap(self._action_buttons())
-        self._assert_label_value_separated([
+        values = [
             self.win.val_phase, self.win.val_time, self.win.val_clicks,
             self.win.val_interval, self.win.val_hold, self.win.val_verdict,
-            self.win.val_extra, self.win.val_rebound, self.win.val_delay,
-        ])
+        ]
+        if self.win.capture_issues_grid.isHidden():
+            self.assertTrue(self.win.issue_title.isHidden())
+        else:
+            self.assertEqual(self.win.capture_issues_grid.columns(), issues_cols)
+            _no_pairwise_overlap(self._issue_cells())
+            values.extend([self.win.val_extra, self.win.val_rebound, self.win.val_delay])
+        self._assert_label_value_separated(values)
         self.assertGreaterEqual(self.win.test_area.height(), 280)
         self.assertTrue(self.win.scatter.isVisible())
         self.assertFalse(self.win.interval_chart.isVisible())
@@ -192,17 +196,21 @@ class CaptureResponsiveTests(unittest.TestCase):
         self._assert_capture_usable(stats_cols=6, issues_cols=3)
         ys = {c.y() for c in self._stat_cells()}
         self.assertEqual(len(ys), 1)
-        self.assertEqual(len({c.y() for c in self._issue_cells()}), 1)
+        if not self.win.capture_issues_grid.isHidden():
+            self.assertEqual(len({c.y() for c in self._issue_cells()}), 1)
 
     # 2
     def test_standard_1440_has_no_metric_overlap(self):
         self._show_capture_at(1440, 810)
         self.assertIn(self.win.capture_stats_grid.columns(), (3, 6))
-        self.assertIn(self.win.capture_issues_grid.columns(), (3, 5))
+        if not self.win.capture_issues_grid.isHidden():
+            self.assertIn(self.win.capture_issues_grid.columns(), (3, 5))
+            _no_pairwise_overlap(self._issue_cells())
+            self._assert_label_value_separated([self.win.val_phase, self.win.val_verdict, self.win.val_extra])
+        else:
+            self._assert_label_value_separated([self.win.val_phase, self.win.val_verdict])
         _no_pairwise_overlap(self._stat_cells())
-        _no_pairwise_overlap(self._issue_cells())
         _no_pairwise_overlap(self._action_buttons())
-        self._assert_label_value_separated([self.win.val_phase, self.win.val_verdict, self.win.val_extra])
         self.assertGreaterEqual(self.win.test_area.height(), 280)
 
     # 3
@@ -216,7 +224,8 @@ class CaptureResponsiveTests(unittest.TestCase):
     def test_minimum_size_reflows_metrics_without_clipping(self):
         self._show_capture_at(*_OVERFLOW_SIZE)
         self.assertLess(self.win.capture_stats_grid.columns(), 6)
-        self.assertLess(self.win.capture_issues_grid.columns(), 5)
+        if not self.win.capture_issues_grid.isHidden():
+            self.assertLess(self.win.capture_issues_grid.columns(), 5)
         self._assert_capture_usable(
             stats_cols=self.win.capture_stats_grid.columns(),
             issues_cols=self.win.capture_issues_grid.columns(),

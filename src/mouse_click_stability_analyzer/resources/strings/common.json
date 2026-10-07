@@ -92,16 +92,16 @@
     "zh-TW": "快速開始"
   },
   "hold": {
-    "en": "HOLD",
-    "zh-TW": "按住"
+    "en": "{@term.hold}",
+    "zh-TW": "{@term.hold}"
   },
   "host_presses": {
     "en": "HOST PRESSES",
     "zh-TW": "主機按下"
   },
   "interval": {
-    "en": "INTERVAL",
-    "zh-TW": "間隔"
+    "en": "{@term.interval}",
+    "zh-TW": "{@term.interval}"
   },
   "language": {
     "en": "Language",
@@ -203,20 +203,20 @@
     "zh-TW": "報告已就緒。"
   },
   "run_status": {
-    "en": "Run Status",
-    "zh-TW": "執行狀態"
+    "en": "{@term.run_status}",
+    "zh-TW": "{@term.run_status}"
   },
   "run_status_complete": {
-    "en": "COMPLETE",
-    "zh-TW": "完成"
+    "en": "{@term.run_status_complete}",
+    "zh-TW": "{@term.run_status_complete}"
   },
   "run_status_invalid": {
-    "en": "INVALID",
-    "zh-TW": "無效"
+    "en": "{@term.run_status_invalid}",
+    "zh-TW": "{@term.run_status_invalid}"
   },
   "run_status_no_data": {
-    "en": "NO_DATA",
-    "zh-TW": "無資料"
+    "en": "{@term.run_status_no_data}",
+    "zh-TW": "{@term.run_status_no_data}"
   },
   "save_report_as": {
     "en": "Save Report As…",

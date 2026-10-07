@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QHeaderView
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
@@ -23,7 +25,10 @@ from mouse_click_stability_analyzer.presentation import (
     screening_presentation_label,
 )
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
-from mouse_click_stability_analyzer.qt_shell.click_table_sort import sort_permutation
+from mouse_click_stability_analyzer.qt_shell.click_table_sort import (
+    CLICK_TABLE_MEASUREMENT_VISIBLE_IDS,
+    sort_permutation,
+)
 from mouse_click_stability_analyzer.qt_shell.charts import ScatterChart
 
 
@@ -65,6 +70,47 @@ class TypedSortPermutationTests(unittest.TestCase):
         ties = [2, 0, 1]
         order = sort_permutation(values, numeric=True, tie_breakers=ties)
         self.assertEqual(order, [1, 2, 0])
+
+    def test_numeric_equal_values_ascending_keep_canonical_order(self):
+        values = [10.0, 5.0, 10.0, 5.0, 10.0]
+        ties = [4, 3, 0, 1, 2]
+        order = sort_permutation(values, numeric=True, tie_breakers=ties)
+        self.assertEqual([values[i] for i in order], [5.0, 5.0, 10.0, 10.0, 10.0])
+        self.assertEqual([ties[i] for i in order], [1, 3, 0, 2, 4])
+
+    def test_numeric_equal_values_descending_keep_canonical_order(self):
+        values = [10.0, 5.0, 10.0, 5.0, 10.0]
+        ties = [4, 3, 0, 1, 2]
+        order = sort_permutation(values, numeric=True, descending=True, tie_breakers=ties)
+        self.assertEqual([values[i] for i in order], [10.0, 10.0, 10.0, 5.0, 5.0])
+        self.assertEqual([ties[i] for i in order], [0, 2, 4, 1, 3])
+
+    def test_text_equal_values_ascending_keep_canonical_order(self):
+        values = ["Right", "left", "Left", "right", "Left"]
+        ties = [3, 4, 0, 1, 2]
+        order = sort_permutation(values, tie_breakers=ties)
+        self.assertEqual([values[i].casefold() for i in order], ["left", "left", "left", "right", "right"])
+        self.assertEqual([ties[i] for i in order], [0, 2, 4, 1, 3])
+
+    def test_text_equal_values_descending_keep_canonical_order(self):
+        values = ["Right", "left", "Left", "right", "Left"]
+        ties = [3, 4, 0, 1, 2]
+        order = sort_permutation(values, descending=True, tie_breakers=ties)
+        self.assertEqual([values[i].casefold() for i in order], ["right", "right", "left", "left", "left"])
+        self.assertEqual([ties[i] for i in order], [1, 3, 0, 2, 4])
+
+    def test_equal_values_with_blanks_descending(self):
+        values = [None, 7.0, "", 7.0, 3.0]
+        ties = [4, 2, 0, 1, 3]
+        order = sort_permutation(values, numeric=True, descending=True, tie_breakers=ties)
+        self.assertEqual([ties[i] for i in order], [1, 2, 3, 0, 4])
+
+    def test_inputs_are_not_mutated(self):
+        values = [3.0, 1.0, 3.0]
+        ties = [2, 1, 0]
+        sort_permutation(values, numeric=True, descending=True, tie_breakers=ties)
+        self.assertEqual(values, [3.0, 1.0, 3.0])
+        self.assertEqual(ties, [2, 1, 0])
 
 
 class ClickDataTableSortTests(unittest.TestCase):
@@ -108,6 +154,40 @@ class ClickDataTableSortTests(unittest.TestCase):
         table = self.win.results_click_table
         return [table.item(r, column).text() for r in range(table.rowCount())]
 
+    def _show_click_data(self) -> None:
+        self.win.show()
+        self.win.resize(1280, 800)
+        self.win.results_empty_card.setVisible(False)
+        self.win.results_workspace.setVisible(True)
+        self.win._show_workflow_page("results")
+        self.win.results_tabs.setCurrentIndex(2)
+        table = self.win.results_click_table
+        table.show()
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        width = 40
+        for index in range(header.count()):
+            if header.isSectionHidden(index):
+                header.resizeSection(index, 0)
+            else:
+                header.resizeSection(index, 96)
+                width += 96
+        table.setMinimumWidth(width)
+        table.resize(width, 280)
+        self._qapp.processEvents()
+
+    def _click_header(self, logical: int) -> None:
+        header = self.win.results_click_table.horizontalHeader()
+        x = header.sectionViewportPosition(logical) + max(header.sectionSize(logical) // 2, 4)
+        y = max(header.height() // 2, 2)
+        QTest.mouseClick(
+            header.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            QPoint(x, y),
+        )
+        self._qapp.processEvents()
+
     def test_default_order_is_hash_ascending(self):
         self.win._populate_click_table({"click_data": self._rows([
             {"index": 1, "elapsed_ms": 0.0, "interval_ms": None, "reference_delta_ms": None},
@@ -115,21 +195,70 @@ class ClickDataTableSortTests(unittest.TestCase):
             {"index": 10, "elapsed_ms": 90.0, "interval_ms": 10.0, "reference_delta_ms": -15.0},
             {"index": 11, "elapsed_ms": 100.0, "interval_ms": 10.0, "reference_delta_ms": -15.0},
         ])})
+        self._show_click_data()
         header = self.win.results_click_table.horizontalHeader()
         self.assertEqual(header.sortIndicatorSection(), 0)
         self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.AscendingOrder)
+        self.assertEqual(self.win.click_sort_column_combo.currentData(), "index")
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "asc")
         self.assertEqual(self._col(0), ["1", "2", "10", "11"])
+        ids = [
+            self.win.click_sort_column_combo.itemData(i)
+            for i in range(self.win.click_sort_column_combo.count())
+        ]
+        self.assertEqual(tuple(ids), CLICK_TABLE_MEASUREMENT_VISIBLE_IDS)
+        self.assertNotIn("state", ids)
+        self.assertNotIn("tags", ids)
+        self.assertNotEqual(self.win.click_sort_column_combo.currentData(), self.win.click_sort_column_combo.currentText())
 
-    def test_integer_and_header_toggle(self):
+    def test_header_click_toggles_and_syncs_sort_controls(self):
         self.win._populate_click_table({"click_data": self._rows([
-            {"index": 1}, {"index": 10}, {"index": 11}, {"index": 2},
+            {"index": 1, "interval_ms": 11.0},
+            {"index": 10, "interval_ms": 10.0},
+            {"index": 11, "interval_ms": 9.0},
+            {"index": 2, "interval_ms": 12.0},
         ])})
+        self._show_click_data()
         self.assertEqual(self._col(0), ["1", "2", "10", "11"])
-        self.win._on_click_header_clicked(0)
-        self.assertEqual(self.win.results_click_table.horizontalHeader().sortIndicatorOrder(), Qt.SortOrder.DescendingOrder)
+        self._click_header(0)
+        header = self.win.results_click_table.horizontalHeader()
+        self.assertEqual(header.sortIndicatorSection(), 0)
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.DescendingOrder)
+        self.assertEqual(self.win.click_sort_column_combo.currentData(), "index")
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "desc")
         self.assertEqual(self._col(0), ["11", "10", "2", "1"])
-        self.win._on_click_header_clicked(0)
+        self._click_header(0)
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.AscendingOrder)
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "asc")
         self.assertEqual(self._col(0), ["1", "2", "10", "11"])
+        self._click_header(3)
+        self.assertEqual(header.sortIndicatorSection(), 3)
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.AscendingOrder)
+        self.assertEqual(self.win.click_sort_column_combo.currentData(), "interval_ms")
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "asc")
+        self.assertEqual(self._col(3), ["9.00", "10.00", "11.00", "12.00"])
+        self.assertEqual(self._col(0), ["11", "10", "1", "2"])
+
+    def test_sort_controls_update_header_and_table(self):
+        self.win._populate_click_table({"click_data": self._rows([
+            {"index": 1, "interval_ms": 11.0, "hold_ms": 8.0},
+            {"index": 2, "interval_ms": 9.0, "hold_ms": 10.0},
+            {"index": 3, "interval_ms": 10.0, "hold_ms": 9.0},
+        ])})
+        self._show_click_data()
+        combo = self.win.click_sort_column_combo
+        combo.setCurrentIndex(combo.findData("interval_ms"))
+        self._qapp.processEvents()
+        header = self.win.results_click_table.horizontalHeader()
+        self.assertEqual(header.sortIndicatorSection(), 3)
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.AscendingOrder)
+        self.assertEqual(self.win._click_sort_id, "interval_ms")
+        self.assertEqual(self._col(3), ["9.00", "10.00", "11.00"])
+        self.win.click_sort_order_combo.setCurrentIndex(self.win.click_sort_order_combo.findData("desc"))
+        self._qapp.processEvents()
+        self.assertEqual(header.sortIndicatorOrder(), Qt.SortOrder.DescendingOrder)
+        self.assertEqual(self.win._click_sort_descending, True)
+        self.assertEqual(self._col(3), ["11.00", "10.00", "9.00"])
 
     def test_numeric_decimals_and_negatives(self):
         self.win._populate_click_table({"click_data": self._rows([
@@ -137,14 +266,37 @@ class ClickDataTableSortTests(unittest.TestCase):
             {"index": 2, "elapsed_ms": 9.9, "interval_ms": 9.9, "hold_ms": 9.9, "reference_delta_ms": -5.0},
             {"index": 3, "elapsed_ms": 10.0, "interval_ms": 10.0, "hold_ms": 10.0, "reference_delta_ms": 0.0},
         ])})
-        self.win._on_click_header_clicked(3)
+        self._show_click_data()
+        self._click_header(3)
         self.assertEqual(self._col(3), ["9.90", "10.00", "10.01"])
-        self.win._on_click_header_clicked(7)
+        self._click_header(7)
         self.assertEqual(self._col(7), ["-5.00", "0.00", "2.00"])
-        self.win._on_click_header_clicked(1)
+        self._click_header(1)
         self.assertEqual(self._col(1), ["9.90", "10.00", "100.00"])
-        self.win._on_click_header_clicked(4)
+        self._click_header(4)
         self.assertEqual(self._col(4), ["9.90", "10.00", "10.01"])
+
+    def test_header_descending_keeps_canonical_order_for_equal_values(self):
+        self.win._populate_click_table({"click_data": self._rows([
+            {"index": 1, "interval_ms": 10.0, "button": "Left"},
+            {"index": 2, "interval_ms": 20.0, "button": "Right"},
+            {"index": 3, "interval_ms": 10.0, "button": "Left"},
+            {"index": 4, "interval_ms": 20.0, "button": "Right"},
+            {"index": 5, "interval_ms": 10.0, "button": "Left"},
+        ])})
+        self._show_click_data()
+        self._click_header(3)
+        self.assertEqual(self._col(0), ["1", "3", "5", "2", "4"])
+        self._click_header(3)
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "desc")
+        self.assertEqual(self._col(3), ["20.00", "20.00", "10.00", "10.00", "10.00"])
+        self.assertEqual(self._col(0), ["2", "4", "1", "3", "5"])
+        self._click_header(2)
+        self.assertEqual(self._col(0), ["1", "3", "5", "2", "4"])
+        self._click_header(2)
+        self.assertEqual(self.win.click_sort_column_combo.currentData(), "button")
+        self.assertEqual(self.win.click_sort_order_combo.currentData(), "desc")
+        self.assertEqual(self._col(0), ["2", "4", "1", "3", "5"])
 
     def test_blank_interval_last_both_directions(self):
         self.win._populate_click_table({"click_data": self._rows([
@@ -152,10 +304,11 @@ class ClickDataTableSortTests(unittest.TestCase):
             {"index": 2, "interval_ms": 10.0},
             {"index": 3, "interval_ms": 2.0},
         ])})
-        self.win._on_click_header_clicked(3)
+        self._show_click_data()
+        self._click_header(3)
         self.assertEqual(self._col(3), ["2.00", "10.00", ""])
         self.assertEqual(self._col(0)[-1], "1")
-        self.win._on_click_header_clicked(3)
+        self._click_header(3)
         self.assertEqual(self._col(3), ["10.00", "2.00", ""])
         self.assertEqual(self._col(0)[-1], "1")
 
@@ -173,10 +326,11 @@ class ClickDataTableSortTests(unittest.TestCase):
         ])
         model = {"click_data": click_data}
         self.win._populate_click_table(model)
+        self._show_click_data()
         before_ids = [id(e) for e in self.win.events]
         before_index = [e["click_index"] for e in self.win.events]
         before_model = [row["index"] for row in click_data]
-        self.win._on_click_header_clicked(3)
+        self._click_header(3)
         self.assertEqual([id(e) for e in self.win.events], before_ids)
         self.assertEqual([e["click_index"] for e in self.win.events], before_index)
         self.assertEqual([row["index"] for row in click_data], before_model)
@@ -214,6 +368,13 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.assertEqual(self.win.results_click_table.item(0, 5).text(), "—")
         self.assertNotEqual(self.win.results_click_table.item(0, 5).text(), "Observation")
         self.assertEqual(self.win.results_click_table.horizontalHeaderItem(5).text(), "Timing observation")
+        header = self.win.results_click_table.horizontalHeader()
+        self.assertTrue(header.isSectionHidden(5))
+        self.assertTrue(header.isSectionHidden(6))
+        self.assertFalse(header.isSectionHidden(0))
+        self.assertFalse(header.isSectionHidden(3))
+        self.assertFalse(header.isSectionHidden(7))
+        self.assertEqual(self.win.results_click_table.columnCount(), 8)
 
     def test_legacy_classes_remain_internal(self):
         self.assertEqual(classify_click(5.0, 80.0, {"chatter_threshold_ms": 8}), "CHATTER_BOUNCE")
@@ -260,18 +421,32 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.assertFalse(self.win.results_interval_chart.data_aware_fit)
         self.assertFalse(self.win.results_distribution_chart.data_aware_fit)
         self.assertTrue(self.win.scatter.data_aware_fit)
+        self.assertTrue(self.win.scatter.measurement_only_presentation)
+        self.assertTrue(self.win.interval_chart.measurement_only_presentation)
         self.assertEqual(STRINGS["en"]["legend_on_cadence"], "Observation")
         self.assertEqual(STRINGS["en"]["legend_target"], "Target beat")
-        capture = ScatterChart()
-        capture.set_data_aware_fit(True)
-        capture.set_theme(capture.palette, labels)
-        capture.set_points([(25.0, 8.0, "TRUE_EXTRA_CLICK")], target_beat_ms=25.0)
-        capture_text = [text for _, text in capture.legend_entries()]
-        self.assertIn("Observation", capture_text)
-        self.assertIn("Short interval", capture_text)
-        self.assertIn("Very short interval", capture_text)
-        self.assertIn("Long interval", capture_text)
-        self.assertNotIn("Host observation", capture_text)
+        self.win.scatter.set_theme(self.win.scatter.palette, labels)
+        self.win.scatter.set_points([(25.0, 8.0, "TRUE_EXTRA_CLICK")], target_beat_ms=25.0)
+        capture_text = [text for _, text in self.win.scatter.legend_entries()]
+        self.assertIn("Host observation", capture_text)
+        self.assertIn("Configured reference", capture_text)
+        for banned in (
+            "Short interval",
+            "Very short interval",
+            "Short hold",
+            "Long interval",
+            "Cadence vs reference",
+            "Observation",
+            "Target beat",
+        ):
+            self.assertNotIn(banned, capture_text)
+        screening = ScatterChart()
+        screening.set_data_aware_fit(True)
+        screening.set_theme(screening.palette, labels)
+        screening.set_points([(25.0, 8.0, "TRUE_EXTRA_CLICK")], target_beat_ms=25.0)
+        screening_text = [text for _, text in screening.legend_entries()]
+        self.assertIn("Short interval", screening_text)
+        self.assertNotIn("Host observation", screening_text)
 
     def test_point_color_does_not_promote_heuristic_in_results(self):
         extra = self.win.results_scatter._point_color("TRUE_EXTRA_CLICK")
@@ -281,8 +456,9 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.assertEqual(extra, host)
         self.assertEqual(chatter, host)
         self.assertEqual(miss, host)
-        capture = ScatterChart()
-        self.assertNotEqual(capture._point_color("TRUE_EXTRA_CLICK"), capture.palette.on_cadence)
+        self.assertEqual(self.win.scatter._point_color("TRUE_EXTRA_CLICK"), self.win.scatter.palette.on_cadence)
+        screening = ScatterChart()
+        self.assertNotEqual(screening._point_color("TRUE_EXTRA_CLICK"), screening.palette.on_cadence)
         self.assertIn("Host observation", self.win.results_chart_legend_help.text())
         self.assertIn("not a PASS/FAIL threshold", self.win.results_chart_legend_help.text())
         self.assertNotIn("Target beat", self.win.results_chart_legend_help.text())

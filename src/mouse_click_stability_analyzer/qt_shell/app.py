@@ -93,7 +93,15 @@ from .presentation import (
     screening_presentation_label,
     screening_presentation_labels,
 )
-from .click_table_sort import CLICK_TABLE_NUMERIC_COLUMNS, sort_permutation
+from .click_table_sort import (
+    CLICK_TABLE_COLUMN_IDS,
+    CLICK_TABLE_ID_TO_INDEX,
+    CLICK_TABLE_INDEX_TO_ID,
+    CLICK_TABLE_LABEL_KEYS,
+    CLICK_TABLE_MEASUREMENT_VISIBLE_IDS,
+    CLICK_TABLE_NUMERIC_COLUMNS,
+    sort_permutation,
+)
 from .styles import density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
@@ -1060,6 +1068,29 @@ class MainWindow(QMainWindow):
     def _tr(self, key: str, **kwargs) -> str:
         return t(self.lang, key, **kwargs)
 
+    def _screening_profile_active(self) -> bool:
+        """True only when an approved Screening/Validation Profile is applied.
+
+        Measurement-only is the current product mode. Classifier tags remain
+        internal until a profile is actually selected.
+        """
+        return False
+
+    def _measurement_only_presentation(self) -> bool:
+        return not self._screening_profile_active()
+
+    def _apply_measurement_only_chrome(self) -> None:
+        measurement = self._measurement_only_presentation()
+        if getattr(self, "issue_title", None) is not None:
+            self.issue_title.setVisible(not measurement)
+        if getattr(self, "capture_issues_grid", None) is not None:
+            self.capture_issues_grid.setVisible(not measurement)
+        if getattr(self, "scatter", None) is not None:
+            self.scatter.set_measurement_only_presentation(measurement)
+        if getattr(self, "interval_chart", None) is not None:
+            self.interval_chart.set_measurement_only_presentation(measurement)
+        self._apply_click_table_column_visibility()
+
     def _chart_labels(self) -> dict[str, str]:
         keys = (
             "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s",
@@ -1657,6 +1688,8 @@ class MainWindow(QMainWindow):
         self.interval_chart = IntervalChart()
         self.scatter.set_data_aware_fit(True)
         self.interval_chart.set_data_aware_fit(True)
+        self.scatter.set_measurement_only_presentation(True)
+        self.interval_chart.set_measurement_only_presentation(True)
         self.scatter.title = self._tr("chart_stability_map")
         self.scatter.subtitle = self._tr("chart_stability_map_subtitle")
         self.interval_chart.title = self._tr("chart_interval_trend")
@@ -1925,22 +1958,54 @@ class MainWindow(QMainWindow):
         clicks_page = QWidget()
         clicks_l = QVBoxLayout(clicks_page)
         clicks_l.setContentsMargins(0, 8, 0, 0)
-        self.results_click_table = QTableWidget(0, 8)
+        sort_bar = QHBoxLayout()
+        sort_bar.setContentsMargins(0, 0, 0, 8)
+        sort_bar.setSpacing(8)
+        self.lbl_click_sort_by = QLabel("Sort by:")
+        self.lbl_click_sort_by.setObjectName("Muted")
+        self.click_sort_column_combo = QComboBox()
+        self.click_sort_column_combo.setObjectName("ClickSortColumnCombo")
+        self.click_sort_column_combo.currentIndexChanged.connect(self._on_click_sort_column_changed)
+        self.lbl_click_sort_order = QLabel("Order:")
+        self.lbl_click_sort_order.setObjectName("Muted")
+        self.click_sort_order_combo = QComboBox()
+        self.click_sort_order_combo.setObjectName("ClickSortOrderCombo")
+        self.click_sort_order_combo.currentIndexChanged.connect(self._on_click_sort_order_changed)
+        sort_bar.addWidget(self.lbl_click_sort_by)
+        sort_bar.addWidget(self.click_sort_column_combo)
+        sort_bar.addWidget(self.lbl_click_sort_order)
+        sort_bar.addWidget(self.click_sort_order_combo)
+        sort_bar.addStretch(1)
+        for combo in (self.click_sort_column_combo, self.click_sort_order_combo):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.click_sort_column_combo.setMinimumContentsLength(8)
+        self.click_sort_order_combo.setMinimumContentsLength(8)
+        clicks_l.addLayout(sort_bar)
+        self.results_click_table = QTableWidget(0, len(CLICK_TABLE_COLUMN_IDS))
         self.results_click_table.setObjectName("ResultsClickTable")
         self.results_click_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_click_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.results_click_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.results_click_table.verticalHeader().setVisible(False)
         self.results_click_table.setSortingEnabled(False)
+        self.results_click_table.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.results_click_table.setMinimumWidth(0)
+        clicks_page.setMinimumWidth(0)
+        clicks_page.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         click_header = self.results_click_table.horizontalHeader()
         click_header.setStretchLastSection(True)
         click_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         click_header.setSectionsClickable(True)
         click_header.setSortIndicatorShown(True)
-        click_header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
-        click_header.sectionClicked.connect(self._on_click_header_clicked)
+        self._click_sort_id = "index"
+        self._click_sort_descending = False
+        click_header.setSortIndicator(CLICK_TABLE_ID_TO_INDEX["index"], Qt.SortOrder.AscendingOrder)
+        click_header.sortIndicatorChanged.connect(self._on_click_sort_indicator_changed)
         self.results_click_table.itemSelectionChanged.connect(self._on_click_table_selection_changed)
         clicks_l.addWidget(self.results_click_table)
+        self._fill_click_sort_controls()
+        self._apply_click_table_column_visibility()
         self.results_tabs.addTab(clicks_page, "Click Data")
         self.results_clicks_page = clicks_page
 
@@ -2672,6 +2737,8 @@ class MainWindow(QMainWindow):
         self.results_tabs.setTabText(0, self._tr("analysis"))
         self.results_tabs.setTabText(1, self._tr("evidence"))
         self.results_tabs.setTabText(2, self._tr("click_data"))
+        self.lbl_click_sort_by.setText(self._tr("click_sort_by"))
+        self.lbl_click_sort_order.setText(self._tr("click_sort_order"))
         headers = [
             self._tr("col_index"),
             self._tr("col_elapsed"),
@@ -2772,6 +2839,8 @@ class MainWindow(QMainWindow):
             lab.setText(text.upper())
         self.hint.setText(self._tr("test_area_hint"))
         self._sync_auto_stop_widgets()
+        self._fill_click_sort_controls()
+        self._apply_measurement_only_chrome()
         self._show_workflow_page(self._current_page)
         self._refresh_lifecycle_presentation()
         self._refresh_results_workspace()
@@ -3192,28 +3261,108 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, sort_value)
                 item.setData(Qt.ItemDataRole.UserRole + 1, r)
                 table.setItem(r, c, item)
+        self._apply_click_table_column_visibility()
+        self._set_click_sort("index", False)
+
+    def _click_table_visible_ids(self) -> tuple[str, ...]:
+        if self._measurement_only_presentation():
+            return CLICK_TABLE_MEASUREMENT_VISIBLE_IDS
+        return CLICK_TABLE_COLUMN_IDS
+
+    def _apply_click_table_column_visibility(self) -> None:
+        table = getattr(self, "results_click_table", None)
+        if table is None:
+            return
         header = table.horizontalHeader()
-        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        visible = set(self._click_table_visible_ids())
+        for index, column_id in enumerate(CLICK_TABLE_COLUMN_IDS):
+            hidden = column_id not in visible
+            header.setSectionHidden(index, hidden)
+            if hidden:
+                header.resizeSection(index, 0)
+        if self._click_sort_id not in visible:
+            self._click_sort_id = "index"
+            self._click_sort_descending = False
+
+    def _fill_click_sort_controls(self) -> None:
+        if getattr(self, "click_sort_column_combo", None) is None:
+            return
+        visible_ids = self._click_table_visible_ids()
+        column_combo = self.click_sort_column_combo
+        order_combo = self.click_sort_order_combo
+        column_combo.blockSignals(True)
+        order_combo.blockSignals(True)
+        try:
+            column_combo.clear()
+            for column_id in visible_ids:
+                column_combo.addItem(self._tr(CLICK_TABLE_LABEL_KEYS[column_id]), column_id)
+            index = column_combo.findData(self._click_sort_id)
+            column_combo.setCurrentIndex(index if index >= 0 else 0)
+            order_combo.clear()
+            order_combo.addItem(self._tr("click_sort_ascending"), "asc")
+            order_combo.addItem(self._tr("click_sort_descending"), "desc")
+            order_combo.setCurrentIndex(1 if self._click_sort_descending else 0)
+        finally:
+            column_combo.blockSignals(False)
+            order_combo.blockSignals(False)
+
+    def _sync_click_sort_controls(self) -> None:
+        self._fill_click_sort_controls()
+        header = self.results_click_table.horizontalHeader()
+        logical = CLICK_TABLE_ID_TO_INDEX[self._click_sort_id]
+        order = Qt.SortOrder.DescendingOrder if self._click_sort_descending else Qt.SortOrder.AscendingOrder
+        header.blockSignals(True)
+        header.setSortIndicator(logical, order)
+        header.blockSignals(False)
+
+    def _set_click_sort(self, column_id: str, descending: bool) -> None:
+        visible = self._click_table_visible_ids()
+        if column_id not in visible:
+            column_id = "index"
+            descending = False
+        self._click_sort_id = column_id
+        self._click_sort_descending = bool(descending)
+        self._sync_click_sort_controls()
+        self._apply_click_table_sort()
+
+    def _on_click_sort_column_changed(self, _index: int = 0) -> None:
+        column_id = self.click_sort_column_combo.currentData()
+        if not column_id or column_id == self._click_sort_id:
+            return
+        self._set_click_sort(str(column_id), False)
+
+    def _on_click_sort_order_changed(self, _index: int = 0) -> None:
+        descending = self.click_sort_order_combo.currentData() == "desc"
+        if descending == self._click_sort_descending:
+            return
+        self._set_click_sort(self._click_sort_id, descending)
+
+    def _on_click_sort_indicator_changed(self, section: int, order: Qt.SortOrder) -> None:
+        column_id = CLICK_TABLE_INDEX_TO_ID.get(section)
+        if column_id is None or column_id not in self._click_table_visible_ids():
+            return
+        descending = order == Qt.SortOrder.DescendingOrder
+        if column_id == self._click_sort_id and descending == self._click_sort_descending:
+            return
+        self._click_sort_id = column_id
+        self._click_sort_descending = descending
+        self._fill_click_sort_controls()
         self._apply_click_table_sort()
 
     def _on_click_header_clicked(self, section: int) -> None:
-        header = self.results_click_table.horizontalHeader()
-        if header.sortIndicatorSection() == section:
-            order = (
-                Qt.SortOrder.DescendingOrder
-                if header.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
-                else Qt.SortOrder.AscendingOrder
-            )
+        column_id = CLICK_TABLE_INDEX_TO_ID.get(section)
+        if column_id is None or column_id not in self._click_table_visible_ids():
+            return
+        if column_id == self._click_sort_id:
+            descending = not self._click_sort_descending
         else:
-            order = Qt.SortOrder.AscendingOrder
-        header.setSortIndicator(section, order)
-        self._apply_click_table_sort()
+            descending = False
+        self._set_click_sort(column_id, descending)
 
     def _apply_click_table_sort(self) -> None:
         table = self.results_click_table
-        header = table.horizontalHeader()
-        column = header.sortIndicatorSection()
-        descending = header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+        column = CLICK_TABLE_ID_TO_INDEX.get(self._click_sort_id, 0)
+        descending = self._click_sort_descending
         n = table.rowCount()
         m = table.columnCount()
         if n <= 1 or column < 0:
@@ -4529,15 +4678,18 @@ class MainWindow(QMainWindow):
         self.val_setup.setText(self._tr("na"))
         self.val_verdict.setText(self._run_status_display(run_status))
         if final or self.completed:
-            alert = []
-            for tag in _QT_ALERT_TAGS:
-                if tag not in tags:
-                    continue
-                if tag in SCREENING_PRESENTATION_KEYS:
-                    alert.append(screening_presentation_label(tag, self._tr))
-                else:
-                    alert.append(str(tag))
-            self.alert_label.setText(" · ".join(alert))
+            if self._screening_profile_active():
+                alert = []
+                for tag in _QT_ALERT_TAGS:
+                    if tag not in tags:
+                        continue
+                    if tag in SCREENING_PRESENTATION_KEYS:
+                        alert.append(screening_presentation_label(tag, self._tr))
+                    else:
+                        alert.append(str(tag))
+                self.alert_label.setText(" · ".join(alert))
+            else:
+                self.alert_label.setText("")
             self.review_text.clear()
             self._refresh_results_workspace()
 

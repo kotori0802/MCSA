@@ -9,7 +9,7 @@ Ordinary wording lives in `src/mouse_click_stability_analyzer/resources/strings/
 
 ## Copy-only task
 
-May edit `resources/strings/**`. Must not edit Python. Must not rename JSON keys or placeholders.
+May edit page JSON under `resources/strings/` except `terminology.json`. Must not edit Python. Must not rename JSON keys or placeholders.
 
 ## UI-layout task
 
@@ -17,7 +17,7 @@ May edit Qt layout/style. Must not edit `resources/strings/**` unless explicitly
 
 ## Terminology task
 
-Do not consolidate or populate `terminology.json` until Stage 2.
+Shared engineering terms live in `terminology.json`. Page files reference them with `{@term.key}`. Read `note`/`help` before changing a term. Do not duplicate a canonical term’s exact wording in page files.
 
 ## Report
 

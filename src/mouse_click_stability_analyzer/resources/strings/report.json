@@ -15,7 +15,7 @@
     "en": "Click Data"
   },
   "report_section_run_status": {
-    "en": "Run Status"
+    "en": "{@term.run_status}"
   },
   "report_section_test_information": {
     "en": "Test Information"
@@ -30,7 +30,7 @@
     "en": "Host Evidence"
   },
   "report_label_run_status": {
-    "en": "Run Status"
+    "en": "{@term.run_status}"
   },
   "report_label_run_id": {
     "en": "Run ID"
@@ -42,7 +42,7 @@
     "en": "Screening"
   },
   "report_value_measurement_only": {
-    "en": "Measurement only"
+    "en": "{@term.measurement_only}"
   },
   "report_label_device": {
     "en": "Device"
@@ -66,19 +66,19 @@
     "en": "Mode"
   },
   "report_value_manual": {
-    "en": "Manual"
+    "en": "{@term.mode_manual}"
   },
   "report_value_fixture": {
-    "en": "Fixture"
+    "en": "{@term.mode_fixture}"
   },
   "report_label_reference_rate": {
-    "en": "Reference Rate"
+    "en": "{@term.reference_rate}"
   },
   "report_label_reference_interval": {
-    "en": "Reference Interval"
+    "en": "{@term.reference_interval}"
   },
   "report_label_schedule_association_window": {
-    "en": "Schedule Association Window"
+    "en": "{@term.schedule_association_window}"
   },
   "report_label_association_relative": {
     "en": "Window relative to reference interval (derived, informational)",
@@ -88,7 +88,7 @@
     "en": "Duration"
   },
   "report_label_host_presses": {
-    "en": "Host Presses"
+    "en": "{@term.host_presses}"
   },
   "report_label_operator": {
     "en": "Operator"
@@ -112,7 +112,7 @@
     "en": "Host-observed cadence"
   },
   "report_label_measurement_reference_interval": {
-    "en": "Reference interval"
+    "en": "{@term.reference_interval}"
   },
   "report_label_average_interval_delta": {
     "en": "Average interval Δ vs reference"
@@ -157,12 +157,12 @@
   "report_label_matched_timing_stdev": {
     "en": "Matched timing error stdev"
   },
-        "report_note_single_matched": {
-          "en": "Statistics describe a single matched observation."
-        },
-        "report_label_note": {
-          "en": "Note"
-        },
+  "report_note_single_matched": {
+    "en": "Statistics describe a single matched observation."
+  },
+  "report_label_note": {
+    "en": "Note"
+  },
   "report_group_schedule": {
     "en": "Schedule"
   },
@@ -170,20 +170,20 @@
     "en": "Schedule windows"
   },
   "report_label_configured_reference_interval": {
-    "en": "Configured reference interval",
+    "en": "{@term.configured_reference_interval}",
     "note": "Configured reference only. Not a PASS/FAIL threshold."
   },
   "report_group_host_observations": {
-    "en": "Host observations"
+    "en": "{@term.host_observations}"
   },
   "report_label_in_capture": {
-    "en": "Host observations in capture"
+    "en": "{@term.host_observations_in_capture}"
   },
   "report_label_recorded": {
-    "en": "Host observations recorded"
+    "en": "{@term.host_observations_recorded}"
   },
   "report_label_host_count_delta_vs_windows": {
-    "en": "Host observations − schedule windows"
+    "en": "{@term.host_observations} − schedule windows"
   },
   "report_group_occupancy": {
     "en": "Schedule window occupancy"
@@ -201,16 +201,16 @@
     "en": "Host observation association"
   },
   "report_label_matched_host_observations": {
-    "en": "Host observations matched to schedule"
+    "en": "{@term.host_observations_matched}"
   },
   "report_label_unmatched_host_observations": {
-    "en": "Host observations not matched to schedule"
+    "en": "{@term.host_observations_unmatched}"
   },
   "report_label_ambiguous_host_observations": {
-    "en": "Ambiguous Host observations"
+    "en": "{@term.host_observations_ambiguous}"
   },
   "report_label_outside_capture": {
-    "en": "Host observations outside capture"
+    "en": "{@term.host_observations_outside_capture}"
   },
   "report_group_matched_timing": {
     "en": "Matched timing (Host − schedule)"
@@ -225,10 +225,10 @@
     "en": "Button"
   },
   "report_click_col_interval": {
-    "en": "Interval (ms)"
+    "en": "{@term.interval} (ms)"
   },
   "report_click_col_hold": {
-    "en": "Hold (ms)"
+    "en": "{@term.hold} (ms)"
   },
   "report_click_col_observation": {
     "en": "Observation"
@@ -240,13 +240,13 @@
     "en": "Interval Δ vs ref. (ms)"
   },
   "report_chart_interval_over_time": {
-    "en": "Interval over time"
+    "en": "{@term.interval} over time"
   },
   "report_chart_interval_distribution": {
-    "en": "Interval distribution"
+    "en": "{@term.interval} distribution"
   },
   "report_chart_hold_vs_interval": {
-    "en": "Hold vs Interval"
+    "en": "{@term.hold} vs {@term.interval}"
   },
   "report_axis_elapsed_s": {
     "en": "Elapsed (s)"
@@ -255,20 +255,20 @@
     "en": "Elapsed (ms)"
   },
   "report_axis_interval_ms": {
-    "en": "Interval (ms)"
+    "en": "{@term.interval} (ms)"
   },
   "report_axis_hold_ms": {
-    "en": "Hold (ms)"
+    "en": "{@term.hold} (ms)"
   },
   "report_axis_count": {
     "en": "Count"
   },
   "report_legend_host_observation": {
-    "en": "Host observation",
+    "en": "{@term.host_observation}",
     "note": "Accepted Host-observed press. Not a PASS/FAIL verdict."
   },
   "report_legend_configured_reference": {
-    "en": "Configured reference",
+    "en": "{@term.configured_reference}",
     "note": "Configured reference only. Not a PASS/FAIL threshold."
   },
   "report_hist_bin_centre": {

@@ -819,6 +819,34 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertNotIn("specification", self.win.scatter.subtitle.lower())
         self.assertEqual(self.win.interval_chart.title, "Interval Trend")
 
+    def test_measurement_only_capture_does_not_present_legacy_categories(self):
+        self._fixture(hz="40", tol="2")
+        self._start_run()
+        self._raw_click()
+        self.win._refresh_metrics(final=False)
+        self.assertTrue(self.win.scatter.measurement_only_presentation)
+        self.assertTrue(self.win.issue_title.isHidden())
+        self.assertTrue(self.win.capture_issues_grid.isHidden())
+        self.assertFalse(self.win.val_time.isHidden())
+        self.assertFalse(self.win.val_clicks.isHidden())
+        self.assertFalse(self.win.val_interval.isHidden())
+        self.assertFalse(self.win.val_hold.isHidden())
+        self.assertFalse(self.win.val_verdict.isHidden())
+        legend = [text for _, text in self.win.scatter.legend_entries()]
+        self.assertIn("Host observation", legend)
+        self.assertIn("Configured reference", legend)
+        for banned in (
+            "Short interval",
+            "Very short interval",
+            "Short hold",
+            "Long interval",
+            "Cadence vs reference",
+        ):
+            self.assertNotIn(banned, legend)
+        self.assertNotIn("Short interval", self.win.alert_label.text())
+        self.assertNotIn("Very short interval", self.win.alert_label.text())
+        self.assertNotIn("Cadence vs reference", self.win.alert_label.text())
+
     def test_toolbar_is_outside_test_area(self):
         self._show_capture()
         self.assertFalse(self.win.test_area.isAncestorOf(self.win.capture_viz_toolbar))

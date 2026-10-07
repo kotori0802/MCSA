@@ -214,8 +214,14 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
             self.assertNotIn("Observation", text)
             self.assertNotIn("Short interval", text)
         self.assertEqual(table.horizontalHeaderItem(5).text(), "Timing observation")
+        self.assertTrue(table.horizontalHeader().isSectionHidden(5))
+        self.assertTrue(table.horizontalHeader().isSectionHidden(6))
+        self.assertFalse(table.horizontalHeader().isSectionHidden(0))
+        self.assertFalse(table.horizontalHeader().isSectionHidden(7))
         self.assertEqual(self.win._stat_name_labels["extra"].text(), "SHORT INTERVAL")
         self.assertEqual(self.win.issue_title.text(), "OBSERVATIONS")
+        self.assertTrue(self.win.issue_title.isHidden())
+        self.assertTrue(self.win.capture_issues_grid.isHidden())
 
     def test_interval_delta_is_not_matched_timing_error(self):
         self._setup_fixture(hz="40", tol="2")

@@ -83,7 +83,7 @@ class FormatterTests(unittest.TestCase):
     def test_values_come_from_snapshot(self):
         text = "\n".join(format_host_evidence_review_lines(_snapshot(), _en))
         for fragment in (
-            "Fixture Frequency 40 Hz",
+            "Reference Rate 40 Hz",
             "Capture Duration 10.000 s",
             "Schedule Association Window ±2.000 ms",
             "Configured reference interval 25.000 ms",
@@ -189,7 +189,7 @@ class FormatterTests(unittest.TestCase):
     def test_decimal_frequency_compact(self):
         snap = _snapshot(configuration={"fixture_frequency_hz": 7.5, "reference_interval_ms": 1000.0 / 7.5})
         text = "\n".join(format_host_evidence_review_lines(snap, _en))
-        self.assertIn("Fixture Frequency 7.5 Hz", text)
+        self.assertIn("Reference Rate 7.5 Hz", text)
         self.assertIn("Configured reference interval 133.333 ms", text)
 
     def test_no_forbidden_terms_english(self):

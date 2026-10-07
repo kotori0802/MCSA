@@ -1,5 +1,143 @@
 {
-  "_reserved": {
-    "note": "Reserved for Stage 2 canonical engineering terminology. Do not add active UI or report keys here in Stage 1."
+  "_guide": {
+    "note": "Canonical engineering terms. Page files reference these with {@term.key}. Read note/help before changing wording. Do not duplicate a term's exact wording in page files."
+  },
+  "term.configured_reference": {
+    "en": "Configured reference",
+    "zh-TW": "設定參考值",
+    "note": "Configured nominal comparison reference shown on Measurement charts. IS NOT a product acceptance target or PASS/FAIL threshold.",
+    "help": "The configured comparison marker. It is not a pass or fail line."
+  },
+  "term.configured_reference_interval": {
+    "en": "Configured reference interval",
+    "zh-TW": "設定參考間隔",
+    "note": "Host Evidence numeric label for 1000 / Reference Rate. Distinct from observed Interval and from matched timing error. IS NOT a PASS/FAIL threshold.",
+    "help": "The nominal interval derived from the configured Reference Rate, used as Host Evidence context."
+  },
+  "term.hold": {
+    "en": "Hold",
+    "zh-TW": "按住",
+    "note": "Same-click release minus press. Distinct from Interval (press-to-press).",
+    "help": "How long the button stayed down for that click."
+  },
+  "term.host_observation": {
+    "en": "Host observation",
+    "zh-TW": "主機觀測",
+    "note": "An accepted Host-observed input record. IS NOT PASS, a normal/good click, or a DUT verdict.",
+    "help": "A button press the Host capture path accepted and recorded."
+  },
+  "term.host_observations": {
+    "en": "Host observations",
+    "zh-TW": "主機觀測",
+    "note": "Plural group heading for Host observation records. Grammatical variant of Host observation, not a different metric.",
+    "help": "The group of accepted Host-observed input records."
+  },
+  "term.host_observations_ambiguous": {
+    "en": "Ambiguous Host observations",
+    "zh-TW": "模糊主機觀測",
+    "note": "Schedule-association status only. IS NOT a DUT FAIL/WARN verdict.",
+    "help": "Host observations that could belong to more than one schedule slot."
+  },
+  "term.host_observations_in_capture": {
+    "en": "Host observations in capture",
+    "zh-TW": "擷取內主機觀測",
+    "note": "Count of Host observations inside the capture window. Distinct from recorded (includes outside-capture) and from matched.",
+    "help": "How many Host observations fall inside the capture window."
+  },
+  "term.host_observations_matched": {
+    "en": "Host observations matched to schedule",
+    "zh-TW": "已匹配排程的主機觀測",
+    "note": "Deterministic schedule association status. IS NOT correct DUT behavior or validation PASS.",
+    "help": "Host observations associated with exactly one schedule slot."
+  },
+  "term.host_observations_outside_capture": {
+    "en": "Host observations outside capture",
+    "zh-TW": "擷取窗外主機觀測",
+    "note": "Schedule-association status OUTSIDE_CAPTURE_WINDOW. IS NOT a DUT verdict. These records never enter matching.",
+    "help": "Host observations recorded outside the capture window."
+  },
+  "term.host_observations_recorded": {
+    "en": "Host observations recorded",
+    "zh-TW": "已記錄主機觀測",
+    "note": "Raw accepted Host observation count, including outside-capture. Distinct from in-capture and from Host Presses display on some surfaces.",
+    "help": "All accepted Host observations recorded for the run."
+  },
+  "term.host_observations_unmatched": {
+    "en": "Host observations not matched to schedule",
+    "zh-TW": "未匹配排程的主機觀測",
+    "note": "Deterministic schedule association status UNMATCHED. IS NOT a DUT FAIL.",
+    "help": "In-capture Host observations that were not associated with a schedule slot."
+  },
+  "term.host_presses": {
+    "en": "Host Presses",
+    "zh-TW": "主機按下次數",
+    "note": "Count label for accepted Host presses. Related to Host observation but kept as a count/grammar variant so UI copy stays natural. IS NOT a PASS count.",
+    "help": "How many accepted button presses the Host recorded."
+  },
+  "term.interval": {
+    "en": "Interval",
+    "zh-TW": "間隔",
+    "note": "Press-to-press interval. Distinct from Hold and from Reference Interval / matched timing error.",
+    "help": "Time from one press to the next press."
+  },
+  "term.measurement_only": {
+    "en": "Measurement only",
+    "zh-TW": "僅量測",
+    "note": "No approved Screening or Validation Profile is applied. IS NOT a run result state.",
+    "help": "This run records measurements without applying a screening or validation profile."
+  },
+  "term.mode_fixture": {
+    "en": "Fixture",
+    "zh-TW": "治具",
+    "note": "Software capture mode. Does NOT prove physical fixture actuation. Not an actuation_source.",
+    "help": "Software mode that compares Host observations to a configured schedule."
+  },
+  "term.mode_manual": {
+    "en": "Manual",
+    "zh-TW": "手動",
+    "note": "Software capture mode for operator-driven clicking. Distinct from Fixture mode.",
+    "help": "Software mode for operator-driven clicking without a fixture schedule."
+  },
+  "term.reference_interval": {
+    "en": "Reference Interval",
+    "zh-TW": "參考間隔",
+    "note": "Derived as 1000 / Reference Rate. Distinct from observed Interval, matched timing error, and the Host Evidence label Configured reference interval.",
+    "help": "The nominal interval computed from the configured Reference Rate."
+  },
+  "term.reference_rate": {
+    "en": "Reference Rate",
+    "zh-TW": "參考速率",
+    "note": "Configured nominal rate. Do not call this Fixture Frequency or Fixture Hz on Measurement surfaces. Persisted as fixture_reference_hz; calculation is unchanged.",
+    "help": "The configured rate used to derive the Reference Interval."
+  },
+  "term.run_status": {
+    "en": "Run Status",
+    "zh-TW": "執行狀態",
+    "note": "Display heading for capture/run data status. The stored tokens COMPLETE / NO_DATA / INVALID stay machine-authoritative.",
+    "help": "Whether the capture produced usable Host press data."
+  },
+  "term.run_status_complete": {
+    "en": "COMPLETE",
+    "zh-TW": "完成",
+    "note": "Display label for machine token COMPLETE: at least one accepted Host press. IS NOT validation PASS. Do not localize the stored token.",
+    "help": "The run recorded at least one accepted Host press."
+  },
+  "term.run_status_invalid": {
+    "en": "INVALID",
+    "zh-TW": "無效",
+    "note": "Display label for machine token INVALID: capture validity problem. Do not localize the stored token.",
+    "help": "The capture source or recorded button did not match the run setup."
+  },
+  "term.run_status_no_data": {
+    "en": "NO_DATA",
+    "zh-TW": "無資料",
+    "note": "Display label for machine token NO_DATA: zero accepted presses. Do not localize the stored token.",
+    "help": "The run finished with no accepted Host presses."
+  },
+  "term.schedule_association_window": {
+    "en": "Schedule Association Window",
+    "zh-TW": "排程關聯範圍",
+    "note": "Schedule-matching half-width only. IS NOT a DUT acceptance tolerance or PASS/FAIL threshold. Persisted as fixture_timing_tolerance_ms.",
+    "help": "Defines the ± time window used to associate a Host observation with a nominal schedule slot."
   }
 }

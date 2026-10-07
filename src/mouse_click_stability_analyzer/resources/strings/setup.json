@@ -13,20 +13,20 @@
     "zh-TW": "相鄰時間窗重疊"
   },
   "assoc_overlap_note": {
-    "en": "Host observations in overlapping windows may be reported as Ambiguous.",
-    "zh-TW": "位於重疊時間窗內的主機觀測可能被標示為模糊。"
+    "en": "{@term.host_observations} in overlapping windows may be reported as Ambiguous.",
+    "zh-TW": "位於重疊時間窗內的{@term.host_observation}可能被標示為模糊。"
   },
   "assoc_reference_interval": {
-    "en": "Reference Interval",
-    "zh-TW": "參考間隔"
+    "en": "{@term.reference_interval}",
+    "zh-TW": "{@term.reference_interval}"
   },
   "assoc_relative": {
     "en": "Relative to reference interval",
     "zh-TW": "相對於參考間隔"
   },
   "assoc_window": {
-    "en": "Schedule Association Window",
-    "zh-TW": "排程關聯範圍"
+    "en": "{@term.schedule_association_window}",
+    "zh-TW": "{@term.schedule_association_window}"
   },
   "assoc_yes": {
     "en": "Yes",
@@ -91,28 +91,28 @@
     "zh-TW": "編輯設定檔"
   },
   "fixture": {
-    "en": "Fixture",
-    "zh-TW": "治具"
+    "en": "{@term.mode_fixture}",
+    "zh-TW": "{@term.mode_fixture}"
   },
   "fixture_hz": {
     "en": "Fixture Hz",
     "zh-TW": "治具 Hz"
   },
   "fixture_timing_tolerance_invalid": {
-    "en": "Schedule Association Window is required: enter a finite number of ms (0 or greater).",
-    "zh-TW": "必須設定排程關聯範圍：請輸入 0 以上的有限毫秒數。"
+    "en": "{@term.schedule_association_window} is required: enter a finite number of ms (0 or greater).",
+    "zh-TW": "必須設定{@term.schedule_association_window}：請輸入 0 以上的有限毫秒數。"
   },
   "fixture_timing_tolerance_ms": {
-    "en": "Schedule Association Window (± ms)",
-    "zh-TW": "排程關聯範圍 (± ms)"
+    "en": "{@term.schedule_association_window} (± ms)",
+    "zh-TW": "{@term.schedule_association_window} (± ms)"
   },
   "fixture_timing_tolerance_placeholder": {
     "en": "e.g. 2",
     "zh-TW": "例：2"
   },
   "fixture_warn": {
-    "en": "Fixture mode needs a click fixture at the set Hz. Hand-clicking will usually WARN.",
-    "zh-TW": "治具模式需以設定 Hz 敲擊；手按通常會 WARN。"
+    "en": "{@term.mode_fixture} mode needs a click fixture at the set Hz. Hand-clicking will usually WARN.",
+    "zh-TW": "{@term.mode_fixture}模式需以設定 Hz 敲擊；手按通常會 WARN。"
   },
   "limit_actuation_short_ms": {
     "en": "Actuation short (ms)",
@@ -147,24 +147,24 @@
     "zh-TW": "寬鬆"
   },
   "manual": {
-    "en": "Manual",
-    "zh-TW": "手動"
+    "en": "{@term.mode_manual}",
+    "zh-TW": "{@term.mode_manual}"
   },
   "medium": {
     "en": "Medium",
     "zh-TW": "中等"
   },
   "mode_fixture": {
-    "en": "Fixture · Reference {ms} ms ({hz} Hz)",
-    "zh-TW": "治具 · 參考 {ms} ms（{hz} Hz）",
+    "en": "{@term.mode_fixture} · Reference {ms} ms ({hz} Hz)",
+    "zh-TW": "{@term.mode_fixture} · 參考 {ms} ms（{hz} Hz）",
     "placeholders": [
       "ms",
       "hz"
     ]
   },
   "mode_manual": {
-    "en": "Manual · Observation",
-    "zh-TW": "手動 · 觀察"
+    "en": "{@term.mode_manual} · Observation",
+    "zh-TW": "{@term.mode_manual} · 觀察"
   },
   "page_setup_subtitle": {
     "en": "Configure the test before capture.",
@@ -179,12 +179,12 @@
     "zh-TW": "模式"
   },
   "preview_reference_rate": {
-    "en": "Reference Rate",
-    "zh-TW": "參考速率"
+    "en": "{@term.reference_rate}",
+    "zh-TW": "{@term.reference_rate}"
   },
   "preview_timing_tolerance": {
-    "en": "Schedule Association Window",
-    "zh-TW": "排程關聯範圍"
+    "en": "{@term.schedule_association_window}",
+    "zh-TW": "{@term.schedule_association_window}"
   },
   "profile_status_draft": {
     "en": "Setup Draft — lock the profile before capture.",
@@ -202,12 +202,12 @@
     ]
   },
   "reference_rate_hz": {
-    "en": "Reference Rate (Hz)",
-    "zh-TW": "參考速率 (Hz)"
+    "en": "{@term.reference_rate} (Hz)",
+    "zh-TW": "{@term.reference_rate} (Hz)"
   },
   "reference_rate_invalid": {
-    "en": "Reference Rate must be a finite positive number.",
-    "zh-TW": "參考速率必須為大於 0 的有限數字。"
+    "en": "{@term.reference_rate} must be a finite positive number.",
+    "zh-TW": "{@term.reference_rate}必須為大於 0 的有限數字。"
   },
   "rules": {
     "en": "Rules",
@@ -218,8 +218,8 @@
     "zh-TW": "篩查"
   },
   "screening_measurement_only": {
-    "en": "Measurement only",
-    "zh-TW": "僅量測"
+    "en": "{@term.measurement_only}",
+    "zh-TW": "{@term.measurement_only}"
   },
   "screening_measurement_only_note": {
     "en": "No approved screening or validation profile is applied.",

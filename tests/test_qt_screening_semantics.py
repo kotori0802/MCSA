@@ -221,6 +221,8 @@ class SetupScreeningPresentationTests(unittest.TestCase):
         self.assertEqual(extra, "SHORT INTERVAL")
         self.assertEqual(rebound, "SHORT HOLD")
         self.assertEqual(delay, "LONG INTERVAL")
+        self.assertTrue(self.win.issue_title.isHidden())
+        self.assertTrue(self.win.capture_issues_grid.isHidden())
         self.assertNotIn("DOUBLE", extra)
         self.assertNotIn("EXTRA", extra)
         self.assertNotIn("REBOUND", rebound)
@@ -340,12 +342,16 @@ class MeasurementContainmentTests(unittest.TestCase):
             "TRUE_EXTRA_CLICK",
             "Double-click",
             "Chatter",
+            self.win._tr("legend_chatter"),
+            self.win._tr("legend_extra"),
+            "Cadence vs reference",
         ):
             self.assertNotIn(token, alert)
         facts = self.win._completed_run_facts()
         tags = facts["model"]["assessment"]["tags_all"]
+        self.assertEqual(alert, "")
         if "CHATTER_HARD" in tags:
-            self.assertIn(self.win._tr("legend_chatter"), alert)
+            self.assertIn("CHATTER_HARD", tags)
 
 
 if __name__ == "__main__":

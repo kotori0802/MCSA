@@ -380,7 +380,7 @@ class ReportV2QtTests(unittest.TestCase):
         expected = {
             "Host-observed average interval": f"{avg:.2f} ms",
             "Host-observed cadence": f"{1000.0 / avg:.2f} Hz",
-            "Reference interval": f"{_REF_MS:.2f} ms",
+            "Reference Interval": f"{_REF_MS:.2f} ms",
             "Average interval Δ vs reference": f"{delta:+.2f} ms" if delta else f"{delta:.2f} ms",
             "Interval CV": f"{metrics['interval_cv_pct']:.2f} %",
             "Average hold": f"{metrics['hold_avg_ms']:.2f} ms",

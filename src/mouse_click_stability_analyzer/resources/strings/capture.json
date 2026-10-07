@@ -8,20 +8,20 @@
     "zh-TW": "經過 (s)"
   },
   "axis_hold_ms": {
-    "en": "Hold (ms)",
-    "zh-TW": "按住 (ms)"
+    "en": "{@term.hold} (ms)",
+    "zh-TW": "{@term.hold} (ms)"
   },
   "axis_interval_ms": {
-    "en": "Interval (ms)",
-    "zh-TW": "間隔 (ms)"
+    "en": "{@term.interval} (ms)",
+    "zh-TW": "{@term.interval} (ms)"
   },
   "capture_run_completed": {
     "en": "Run completed.\nReview results in the Results workspace.",
     "zh-TW": "測試已完成。\n請在結果工作區檢視。"
   },
   "chart_interval": {
-    "en": "Interval over time",
-    "zh-TW": "間隔隨時間"
+    "en": "{@term.interval} over time",
+    "zh-TW": "{@term.interval}隨時間"
   },
   "chart_interval_trend": {
     "en": "Interval Trend",
@@ -92,15 +92,15 @@
     ]
   },
   "hover_hold": {
-    "en": "Hold {value} ms",
-    "zh-TW": "按住 {value} ms",
+    "en": "{@term.hold} {value} ms",
+    "zh-TW": "{@term.hold} {value} ms",
     "placeholders": [
       "value"
     ]
   },
   "hover_interval": {
-    "en": "Interval {value} ms",
-    "zh-TW": "間隔 {value} ms",
+    "en": "{@term.interval} {value} ms",
+    "zh-TW": "{@term.interval} {value} ms",
     "placeholders": [
       "value"
     ]
