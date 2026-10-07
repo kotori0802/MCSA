@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtWidgets import QToolTip, QWidget
 
+from ..duration import elapsed_axis_uses_seconds, format_elapsed_axis_tick
 from .presentation import screening_presentation_label
 from .styles import ChartPalette, LIGHT_PALETTE, chart_font
 
@@ -183,6 +184,13 @@ def axis_navigation_envelope(
     if env_hi <= env_lo:
         env_hi = env_lo + max(span, span_floor)
     return env_lo, env_hi
+
+
+def elapsed_viewport(lo: float, hi: float) -> tuple[float, float]:
+    """Elapsed-domain view never starts before t=0; padding shifts right, span is kept."""
+    if not _valid_axis(lo, hi) or lo >= 0.0:
+        return lo, hi
+    return 0.0, hi - lo
 
 
 def _clamp_axis(lo: float, hi: float, env_lo: float, env_hi: float, min_span: float) -> tuple[float, float]:
@@ -671,6 +679,8 @@ class _ChartBase(QWidget):
         y_label: str,
         map_x: Callable[[float], float],
         map_y: Callable[[float], float],
+        format_x: Callable[[float], str] | None = None,
+        format_y: Callable[[float], str] | None = None,
     ):
         pal = self.palette
         p.setPen(QPen(QColor(pal.border), 1))
@@ -691,6 +701,8 @@ class _ChartBase(QWidget):
         p.setFont(tick_font)
         p.setPen(QColor(pal.muted))
         fm = p.fontMetrics()
+        fmt_x = format_x or _fmt_tick
+        fmt_y = format_y or _fmt_tick
         for yt in y_ticks:
             y = map_y(yt)
             if y < plot.top() - 2 or y > plot.bottom() + 2:
@@ -701,13 +713,13 @@ class _ChartBase(QWidget):
             p.drawText(
                 QRectF(2, y - 8, self.LEFT - 10, 16),
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
-                _fmt_tick(yt),
+                fmt_y(yt),
             )
         for xt in x_ticks:
             x = map_x(xt)
             if x < plot.left() - 2 or x > plot.right() + 2:
                 continue
-            text = _fmt_tick(xt)
+            text = fmt_x(xt)
             tw = fm.horizontalAdvance(text)
             p.drawText(
                 QRectF(x - tw / 2 - 2, plot.bottom() + 5, tw + 4, 14),
@@ -1021,7 +1033,7 @@ class IntervalChart(_ChartBase):
         ys = _finite_values([a[1] for a in all_pts])
         extras = _reference_anchors(self.target_beat_ms)
         if self.data_aware_fit:
-            xmin, xmax = fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS)
+            xmin, xmax = elapsed_viewport(*fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS))
             ymin, ymax = fitted_range(ys, extra=extras, min_span=INTERVAL_Y_MIN_SPAN_MS)
             return xmin, xmax, ymin, ymax
         if len(self.series) < 2 and len(self.overlay_series) < 2:
@@ -1029,6 +1041,7 @@ class IntervalChart(_ChartBase):
         xmin_ms, xmax_ms = min(xs), max(xs)
         if xmax_ms <= xmin_ms:
             xmax_ms = xmin_ms + 1
+        xmin_ms, xmax_ms = elapsed_viewport(xmin_ms, xmax_ms)
         ymin, ymax = 0.0, max(40.0, max(ys) * 1.12)
         if self.target_beat_ms:
             ymax = max(ymax, float(self.target_beat_ms) * 1.25)
@@ -1096,17 +1109,23 @@ class IntervalChart(_ChartBase):
             return
         plot, bounds, map_x_ms, map_x_s, map_y = mapped
         xmin_ms, xmax_ms, ymin, ymax = bounds
-        xmin_s, xmax_s = xmin_ms / 1000.0, xmax_ms / 1000.0
+        span_ms = max(xmax_ms - xmin_ms, abs(xmax_ms), abs(xmin_ms))
+        x_label = (
+            self._label("axis_elapsed_s", "Elapsed (s)")
+            if elapsed_axis_uses_seconds(span_ms)
+            else self._label("axis_elapsed", "Elapsed")
+        )
 
         self._draw_axes(
             p,
             plot,
-            x_ticks=nice_ticks(xmin_s, xmax_s),
+            x_ticks=nice_ticks(xmin_ms, xmax_ms),
             y_ticks=nice_ticks(ymin, ymax),
-            x_label=self._label("axis_elapsed_s", "Elapsed (s)"),
+            x_label=x_label,
             y_label=self._label("axis_interval_ms", "Interval (ms)"),
-            map_x=map_x_s,
+            map_x=map_x_ms,
             map_y=map_y,
+            format_x=lambda v, span=span_ms: format_elapsed_axis_tick(v, span_ms=span),
         )
         self._draw_horizontal_guides(p, plot, map_y)
 
@@ -1130,21 +1149,24 @@ class IntervalChart(_ChartBase):
 
         if len(self.series) >= 2:
             path = QPainterPath()
+            points = []
             first = True
             for x, y in self.series[-2500:]:
                 pt = QPointF(map_x_ms(x), map_y(y))
+                points.append(pt)
                 if first:
                     path.moveTo(pt)
                     first = False
                 else:
                     path.lineTo(pt)
-            fill = QPainterPath(path)
-            fill.lineTo(QPointF(map_x_ms(self.series[-1][0]), plot.bottom()))
-            fill.lineTo(QPointF(map_x_ms(self.series[0][0]), plot.bottom()))
-            fill.closeSubpath()
-            p.fillPath(fill, QColor(pal.interval_fill))
             p.setPen(QPen(QColor(pal.interval_line), 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
+            if len(points) <= 80:
+                p.setBrush(QBrush(QColor(pal.interval_line)))
+                p.setPen(Qt.PenStyle.NoPen)
+                for pt in points:
+                    p.drawEllipse(pt, 2.4, 2.4)
         elif len(self.series) == 1:
             x, y = self.series[0]
             p.setBrush(QBrush(QColor(pal.interval_line)))
@@ -1224,7 +1246,7 @@ class HistogramChart(_ChartBase):
             x_ticks=nice_ticks(xmin, xmax),
             y_ticks=nice_ticks(0.0, ymax),
             x_label=self._label("axis_interval_ms", "Interval (ms)"),
-            y_label=self._label("clicks", "Clicks"),
+            y_label=self._label("axis_count", "Count"),
             map_x=map_x,
             map_y=map_y,
         )

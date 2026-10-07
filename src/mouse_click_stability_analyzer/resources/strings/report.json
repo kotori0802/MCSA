@@ -105,6 +105,69 @@
   "report_label_tool_version": {
     "en": "Tool version"
   },
+  "report_group_host_platform": {
+    "en": "Platform"
+  },
+  "report_group_host_os": {
+    "en": "Operating System"
+  },
+  "report_group_host_firmware": {
+    "en": "Firmware"
+  },
+  "report_group_host_usb": {
+    "en": "USB / Input Path"
+  },
+  "report_group_host_tool_runtime": {
+    "en": "Tool Runtime"
+  },
+  "report_label_host_manufacturer": {
+    "en": "Host manufacturer"
+  },
+  "report_label_host_model": {
+    "en": "Host model"
+  },
+  "report_label_os_name": {
+    "en": "Windows edition"
+  },
+  "report_label_os_version": {
+    "en": "Windows version"
+  },
+  "report_label_cpu_model": {
+    "en": "Processor"
+  },
+  "report_label_bios_vendor": {
+    "en": "BIOS/UEFI vendor"
+  },
+  "report_label_bios_version": {
+    "en": "BIOS/UEFI version"
+  },
+  "report_label_bios_date": {
+    "en": "BIOS/UEFI date"
+  },
+  "report_label_usb_host_controllers": {
+    "en": "USB host controllers"
+  },
+  "report_label_dut_usb_attribution": {
+    "en": "DUT-to-controller attribution"
+  },
+  "report_value_dut_usb_attributed": {
+    "en": "Attributed"
+  },
+  "report_value_dut_usb_not_attributed": {
+    "en": "Not attributed — listing active USB host controllers"
+  },
+  "report_label_python_runtime": {
+    "en": "Python runtime"
+  },
+  "report_label_pyside6_version": {
+    "en": "PySide6 version"
+  },
+  "report_label_qt_version": {
+    "en": "Qt version"
+  },
+  "report_value_not_available": {
+    "en": "Not available"
+  },
   "report_label_host_average_interval": {
     "en": "Host-observed average interval"
   },
@@ -219,7 +282,7 @@
     "en": "#"
   },
   "report_click_col_elapsed": {
-    "en": "Elapsed (ms)"
+    "en": "Elapsed"
   },
   "report_click_col_button": {
     "en": "Button"
@@ -245,8 +308,18 @@
   "report_chart_interval_distribution": {
     "en": "{@term.interval} distribution"
   },
+  "report_hist_press_interval_distribution": {
+    "en": "Press Interval Distribution (N={n})",
+    "placeholders": ["n"]
+  },
+  "report_hist_note": {
+    "en": "Distribution of observed press-to-press intervals. N is the number of interval observations included in the histogram."
+  },
   "report_chart_hold_vs_interval": {
     "en": "{@term.hold} vs {@term.interval}"
+  },
+  "report_axis_elapsed": {
+    "en": "Elapsed"
   },
   "report_axis_elapsed_s": {
     "en": "Elapsed (s)"

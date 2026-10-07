@@ -16,6 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mouse_click_stability_analyzer.duration import (
+    EXCEL_ELAPSED_NUMBER_FORMAT,
+    elapsed_axis_uses_seconds,
+    excel_elapsed_days,
+    format_elapsed_axis_tick,
+    format_elapsed_seconds_hms,
+)
+from mouse_click_stability_analyzer.host_inventory import NOT_AVAILABLE, field_display
+from mouse_click_stability_analyzer.schema import TOOL_VERSION
 from mouse_click_stability_analyzer.presentation import (
     matched_observations_used_text,
     screening_presentation_label,
@@ -38,6 +47,9 @@ _RUN_STATUS_FILLS = {"COMPLETE": "DDEBF7", "NO_DATA": "D9D9D9", "INVALID": "FCE4
 _XLSX_TEXT_ROW_IDS = frozenset({
     "run_id", "run_profile", "device", "hid_device_name", "operator",
     "vid", "pid", "bcd_device", "host_count_delta_vs_windows",
+    "os_version", "bios_version", "bios_date", "usb_host_controllers",
+    "host_manufacturer", "host_model", "cpu_model", "python_runtime",
+    "pyside6_version", "qt_version", "os_name",
 })
 
 
@@ -147,7 +159,7 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
         ]
     elapsed = _finite(run.get("elapsed_s"))
     rows += [
-        ("duration", _rt("report_label_duration"), f"{elapsed:.1f} s" if elapsed is not None else None),
+        ("duration", _rt("report_label_duration"), format_elapsed_seconds_hms(elapsed) if elapsed is not None else None),
         ("host_presses", _rt("report_label_host_presses"), str(int(run.get("host_press_count") or 0))),
         ("operator", _rt("report_label_operator"), run.get("operator")),
         ("report_generated", _rt("report_label_report_generated"), generated_at),
@@ -155,13 +167,62 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
     return _present(rows)
 
 
+_HOST_INFO_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    ("report_group_host_platform", (
+        ("host_manufacturer", "report_label_host_manufacturer"),
+        ("host_model", "report_label_host_model"),
+    )),
+    ("report_group_host_os", (
+        ("os_name", "report_label_os_name"),
+        ("os_version", "report_label_os_version"),
+        ("cpu_model", "report_label_cpu_model"),
+    )),
+    ("report_group_host_firmware", (
+        ("bios_vendor", "report_label_bios_vendor"),
+        ("bios_version", "report_label_bios_version"),
+        ("bios_date", "report_label_bios_date"),
+    )),
+    ("report_group_host_usb", (
+        ("usb_host_controllers", "report_label_usb_host_controllers"),
+        ("dut_usb_controller_attributed", "report_label_dut_usb_attribution"),
+        ("capture_backend", "report_label_capture_backend"),
+    )),
+    ("report_group_host_tool_runtime", (
+        ("tool_version", "report_label_tool_version"),
+        ("python_runtime", "report_label_python_runtime"),
+        ("pyside6_version", "report_label_pyside6_version"),
+        ("qt_version", "report_label_qt_version"),
+    )),
+)
+
+
+def host_information_groups(host_env: dict[str, Any] | None, *, tool_version: str) -> list[tuple[str, list[tuple[str, str, str]]]]:
+    env = dict(host_env or {})
+    if tool_version and not env.get("tool_version"):
+        env["tool_version"] = tool_version
+    groups: list[tuple[str, list[tuple[str, str, str]]]] = []
+    for group_key, fields in _HOST_INFO_GROUPS:
+        rows: list[tuple[str, str, str]] = []
+        for field_id, label_key in fields:
+            if field_id == "dut_usb_controller_attributed":
+                attributed = bool(env.get("dut_usb_controller_attributed"))
+                value = _rt("report_value_dut_usb_attributed") if attributed else _rt("report_value_dut_usb_not_attributed")
+            elif field_id == "tool_version":
+                value = field_display(env, "tool_version") if env.get("tool_version") else str(tool_version or "")
+            else:
+                value = field_display(env, field_id)
+            if value == NOT_AVAILABLE:
+                value = _rt("report_value_not_available")
+            rows.append((field_id, _rt(label_key), value))
+        groups.append((_rt(group_key), rows))
+    return groups
+
+
 def host_information_rows(host_env: dict[str, Any] | None, *, tool_version: str) -> list[tuple[str, str, str]]:
-    env = host_env or {}
-    return _present([
-        ("host_os", _rt("report_label_host_os"), env.get("platform")),
-        ("capture_backend", _rt("report_label_capture_backend"), env.get("capture_backend")),
-        ("tool_version", _rt("report_label_tool_version"), tool_version),
-    ])
+    rows: list[tuple[str, str, str]] = []
+    for _group, group_rows in host_information_groups(host_env, tool_version=tool_version):
+        rows.extend(group_rows)
+    return rows
 
 
 def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str, str]]:
@@ -237,31 +298,33 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
     ]
 
 
-def click_data_columns(manual: bool) -> list[str]:
+def click_data_columns(manual: bool, *, include_classification: bool = False) -> list[str]:
     cols = [
         _rt("report_click_col_index"),
         _rt("report_click_col_elapsed"),
         _rt("report_click_col_button"),
         _rt("report_click_col_interval"),
         _rt("report_click_col_hold"),
-        _rt("report_click_col_observation"),
-        _rt("report_click_col_flags"),
     ]
+    if include_classification:
+        cols.append(_rt("report_click_col_observation"))
+        cols.append(_rt("report_click_col_flags"))
     if not manual:
         cols.append(_rt("report_click_col_ref_delta"))
     return cols
 
 
-def _click_values(row: dict[str, Any], manual: bool) -> list[Any]:
+def _click_values(row: dict[str, Any], manual: bool, *, include_classification: bool = False) -> list[Any]:
     values: list[Any] = [
         row.get("index"),
         _finite(row.get("elapsed_ms")),
         row.get("button") or "",
         _finite(row.get("interval_ms")),
         _finite(row.get("hold_ms")),
-        report_state(row.get("state") or ""),
-        ", ".join(report_codes(list(row.get("tags") or []))),
     ]
+    if include_classification:
+        values.append(report_state(row.get("state") or ""))
+        values.append(", ".join(report_codes(list(row.get("tags") or []))))
     if not manual:
         values.append(_finite(row.get("reference_delta_ms")))
     return values
@@ -281,17 +344,26 @@ def build_report_view(
     chart_reference = None
     if ref is not None:
         chart_reference = {"interval_ms": ref}
+    frozen_host = run.get("host_information") if isinstance(run.get("host_information"), dict) else None
+    groups = host_information_groups(frozen_host, tool_version=TOOL_VERSION) if frozen_host or host_info else []
+    rows = list(host_info) if host_info is not None else (
+        host_information_rows(frozen_host, tool_version=TOOL_VERSION) if frozen_host else []
+    )
+    if not groups and rows:
+        groups = [(_rt("report_section_host_information"), rows)]
     return {
         "chart_reference": chart_reference,
         "title": _rt("report_title"),
         "run_status": run_status,
         "run_status_rows": _run_status_rows(run_status),
         "test_information": _test_information_rows(run, generated_at),
-        "host_information": list(host_info or []),
+        "host_information": rows,
+        "host_information_groups": groups,
         "measurements": _measurement_rows(model),
         "host_evidence": _host_evidence_groups(model),
         "click_columns": click_data_columns(manual),
         "click_rows": [_click_values(r, manual) for r in model["click_data"]],
+        "interval_observation_count": len(model["analysis"].get("intervals") or []),
         "manual": manual,
     }
 
@@ -320,13 +392,24 @@ def _downsample(values: list[Any]) -> list[Any]:
 _W, _H, _L, _R, _T, _B = 600, 240, 56, 12, 12, 34
 
 
-def _axis(xmin: float, xmax: float, ymin: float, ymax: float, xlabel: str, ylabel: str) -> str:
+def _axis(
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    xlabel: str,
+    ylabel: str,
+    *,
+    format_x: Any = None,
+) -> str:
     x0, x1, y0, y1 = _L, _W - _R, _H - _B, _T
+    xmin_text = format_x(xmin) if format_x else f"{xmin:.0f}"
+    xmax_text = format_x(xmax) if format_x else f"{xmax:.0f}"
     return (
         f"<line x1='{x0}' y1='{y0}' x2='{x1}' y2='{y0}' class='ax'/>"
         f"<line x1='{x0}' y1='{y0}' x2='{x0}' y2='{y1}' class='ax'/>"
-        f"<text x='{x0}' y='{y0 + 14}' class='tk'>{xmin:.0f}</text>"
-        f"<text x='{x1}' y='{y0 + 14}' class='tk' text-anchor='end'>{xmax:.0f}</text>"
+        f"<text x='{x0}' y='{y0 + 14}' class='tk'>{_e(xmin_text)}</text>"
+        f"<text x='{x1}' y='{y0 + 14}' class='tk' text-anchor='end'>{_e(xmax_text)}</text>"
         f"<text x='{x0 - 4}' y='{y0}' class='tk' text-anchor='end'>{ymin:.1f}</text>"
         f"<text x='{x0 - 4}' y='{y1 + 8}' class='tk' text-anchor='end'>{ymax:.1f}</text>"
         f"<text x='{(x0 + x1) / 2:.0f}' y='{_H - 4}' class='lb' text-anchor='middle'>{_e(xlabel)}</text>"
@@ -391,7 +474,7 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
     pts = _downsample(series)
     if len(pts) < 2:
         return _empty_chart(title)
-    xs = [p[0] / 1000.0 for p in pts]
+    xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     ymin, ymax = min(ys), max(ys)
     span = _reference_span(reference)
@@ -399,11 +482,16 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
         ymin, ymax = min(ymin, span[0]), max(ymax, span[1])
     ymin, ymax = _padded(ymin, ymax)
     xmin, xmax = min(xs), max(xs)
+    span_ms = max(xmax - xmin, abs(xmax), abs(xmin))
+    x_label = _rt("report_axis_elapsed_s") if elapsed_axis_uses_seconds(span_ms) else _rt("report_axis_elapsed")
     coords = " ".join(
         f"{_scale(x, xmin, xmax, _L, _W - _R):.1f},{_scale(y, ymin, ymax, _H - _B, _T):.1f}"
         for x, y in zip(xs, ys)
     )
-    body = _axis(xmin, xmax, ymin, ymax, _rt("report_axis_elapsed_s"), _rt("report_axis_interval_ms"))
+    body = _axis(
+        xmin, xmax, ymin, ymax, x_label, _rt("report_axis_interval_ms"),
+        format_x=lambda v, span=span_ms: format_elapsed_axis_tick(v, span_ms=span),
+    )
     if reference:
         body += _svg_reference_horizontal(reference, ymin, ymax)
     body += f"<polyline points='{coords}' class='series'><title>{_rt("report_legend_host_observation")}</title></polyline>"
@@ -486,12 +574,14 @@ table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:break-word}
 td{overflow-wrap:anywhere}
 table.kv th{width:38%;font-weight:600;color:var(--muted)}
+.note{font-size:12px;color:var(--muted);margin:0 0 8px}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px}
 .cols section{margin:0}
 .stack{margin:0 0 16px}
 .groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
 .groups table.kv th{width:auto}
 .groups table.kv td{white-space:nowrap;text-align:right}
+.groups.host-meta table.kv td{white-space:normal;text-align:left;overflow-wrap:anywhere}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px;margin-top:12px}
 figure{margin:0;border:1px solid var(--line);border-radius:8px;padding:8px;min-width:0}
 figcaption{font-weight:600;margin-bottom:4px}
@@ -526,11 +616,14 @@ def _run_status_table(view: dict[str, Any]) -> str:
 def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
     analysis = model["analysis"]
     reference = view["chart_reference"]
+    n = int(view.get("interval_observation_count") or 0)
     charts = (
         "<div class='charts'>"
         f"<figure><figcaption>{_rt("report_chart_interval_over_time")}</figcaption>{_svg_interval_series(analysis['interval_series'], reference)}"
         f"{_chart_legend(reference, 'sw-line')}</figure>"
-        f"<figure><figcaption>{_rt("report_chart_interval_distribution")}</figcaption>{_svg_histogram(analysis['histogram'], reference)}"
+        f"<figure><figcaption>{_rt("report_hist_press_interval_distribution", n=n)}</figcaption>"
+        f"<p class='note'>{_e(_rt("report_hist_note"))}</p>"
+        f"{_svg_histogram(analysis['histogram'], reference)}"
         f"{_chart_legend(reference, 'sw-bar')}</figure>"
         f"<figure><figcaption>{_rt("report_chart_hold_vs_interval")}</figcaption>{_svg_scatter(analysis['scatter_points'], reference)}"
         f"{_chart_legend(reference, 'sw-dot')}</figure>"
@@ -544,8 +637,13 @@ def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
             + "</div></section>"
         )
     host_info = ""
-    if view["host_information"]:
-        host_info = f"<section id='host-information'><h2>{_e(_rt('report_section_host_information'))}</h2>{_kv_table(view['host_information'])}</section>"
+    if view["host_information_groups"] or view["host_information"]:
+        groups = view["host_information_groups"] or [(_rt("report_section_host_information"), view["host_information"])]
+        host_body = "".join(f"<div><h3>{_e(name)}</h3>{_kv_table(rows)}</div>" for name, rows in groups)
+        host_info = (
+            f"<section id='host-information'><h2>{_e(_rt('report_section_host_information'))}</h2>"
+            f"<div class='groups host-meta'>{host_body}</div></section>"
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -661,9 +759,13 @@ def write_report_xlsx(
     status_cell.fill = PatternFill("solid", fgColor=_RUN_STATUS_FILLS.get(view["run_status"], "FFFFFF"))
     row = section(ws, row + 1, _rt("report_section_test_information"))
     row = kv(ws, row, view["test_information"])
-    if view["host_information"]:
+    if view["host_information_groups"] or view["host_information"]:
         row = section(ws, row + 1, _rt("report_section_host_information"))
-        kv(ws, row, view["host_information"])
+        groups = view["host_information_groups"] or [(_rt("report_section_host_information"), view["host_information"])]
+        for name, rows in groups:
+            ws.cell(row=row, column=1, value=name).font = bold
+            row += 1
+            row = kv(ws, row, rows) + 1
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 48
 
@@ -671,7 +773,11 @@ def write_report_xlsx(
     wm["A1"] = _rt("report_section_measurements")
     wm["A1"].font = Font(bold=True, size=14)
     row = kv(wm, 3, view["measurements"])
-    hist_row = section(wm, row + 1, _rt("report_chart_interval_distribution"))
+    n_intervals = int(view.get("interval_observation_count") or 0)
+    hist_row = section(wm, row + 1, _rt("report_hist_press_interval_distribution", n=n_intervals))
+    wm.cell(row=hist_row, column=1, value=_rt("report_hist_note")).alignment = Alignment(wrap_text=True)
+    wm.merge_cells(start_row=hist_row, start_column=1, end_row=hist_row, end_column=4)
+    hist_row += 1
     for c, name in enumerate((
         _rt("report_hist_bin_centre"),
         _rt("report_hist_low"),
@@ -710,8 +816,15 @@ def write_report_xlsx(
         h = wc.cell(row=1, column=c, value=name)
         h.font = head_font
         h.fill = head_fill
+    elapsed_col = 2
     for r, values in enumerate(view["click_rows"], start=2):
         for c, value in enumerate(values, start=1):
+            if c == elapsed_col:
+                days = excel_elapsed_days(value)
+                cell = wc.cell(row=r, column=c, value=days)
+                if days is not None:
+                    cell.number_format = EXCEL_ELAPSED_NUMBER_FORMAT
+                continue
             cell = wc.cell(row=r, column=c, value=value)
             if isinstance(value, float):
                 cell.number_format = "0.000"
@@ -783,9 +896,10 @@ def write_report_xlsx(
         last = n_rows + 1
         ys = [v for _, v in series] + (list(span) if span else [])
         line = frame(
-            ScatterChart(scatterStyle="line"), _rt("report_chart_interval_over_time"), _rt("report_axis_elapsed_ms"), _rt("report_axis_interval_ms"),
+            ScatterChart(scatterStyle="line"), _rt("report_chart_interval_over_time"), _rt("report_axis_elapsed"), _rt("report_axis_interval_ms"),
             y_range=_padded(min(ys), max(ys)),
         )
+        line.x_axis.number_format = "[h]:mm:ss"
         s = Series(Reference(wc, min_col=4, min_row=2, max_row=last), Reference(wc, min_col=2, min_row=2, max_row=last),
                    title=_rt("report_legend_host_observation"))
         s.marker.symbol = "none"
@@ -794,7 +908,9 @@ def write_report_xlsx(
         s.graphicalProperties.line.width = 15875
         line.series.append(s)
         if reference:
-            line.series.extend(reference_markers(False, series[0][0], series[-1][0]))
+            x0 = excel_elapsed_days(series[0][0])
+            x1 = excel_elapsed_days(series[-1][0])
+            line.series.extend(reference_markers(False, x0 if x0 is not None else 0.0, x1 if x1 is not None else 0.0))
             with_legend(line)
         wm.add_chart(line, "F3")
 

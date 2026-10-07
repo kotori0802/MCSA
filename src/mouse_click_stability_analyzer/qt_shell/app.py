@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QEvent, QTimer, Signal, QObject, QPoint, QRect, QSettings, QSize
-from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QCursor, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -69,6 +69,7 @@ from ..completed_result import (
     accepted_host_press_count,
     build_completed_result_model,
     completed_run_status,
+    measurement_only_run_status_detail_tags,
     run_status_for_count,
     paired_interval_histograms,
     qt_present_issue_tags,
@@ -76,8 +77,10 @@ from ..completed_result import (
     qt_visible_verdict,
 )
 from ..core import now_iso
+from ..duration import format_elapsed_hms, format_elapsed_seconds_hms
 from ..fixture_schedule import fixture_reference_interval_ms
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
+from ..host_inventory import collect_host_information, empty_host_information
 from ..i18n import LANG_LABELS, STRINGS, SUPPORTED_LANGS, normalize_lang, t
 from ..measurements import (
     actual_run_duration_s,
@@ -102,7 +105,7 @@ from .click_table_sort import (
     CLICK_TABLE_NUMERIC_COLUMNS,
     sort_permutation,
 )
-from .styles import density_for_size, get_palette, get_style, layout_metric
+from .styles import chart_nav_icon, density_for_size, get_palette, get_style, layout_metric
 
 _log = logging.getLogger(__name__)
 
@@ -1017,6 +1020,7 @@ class MainWindow(QMainWindow):
         self._profile_validation_error_key: str | None = None
         self.capture_armed = False
         self.host_evidence_snapshot: dict[str, Any] | None = None
+        self.host_information_snapshot: dict[str, Any] | None = None
         self._editing_next_run = False
         self._arming_scheduled = False
         self._ignore_arm_until = 0.0
@@ -1089,15 +1093,21 @@ class MainWindow(QMainWindow):
             self.scatter.set_measurement_only_presentation(measurement)
         if getattr(self, "interval_chart", None) is not None:
             self.interval_chart.set_measurement_only_presentation(measurement)
+        observations = getattr(self, "results_observations_card", None)
+        if observations is not None:
+            observations.setVisible(not measurement)
+        split = getattr(self, "results_analysis_split", None)
+        if split is not None:
+            split.setStretchFactor(1, 0 if measurement else 3)
         self._apply_click_table_column_visibility()
 
     def _chart_labels(self) -> dict[str, str]:
         keys = (
-            "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s",
+            "waiting_data", "axis_interval_ms", "axis_hold_ms", "axis_elapsed_s", "axis_elapsed",
             "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
             "legend_overlay", "legend_target", "chart_interval", "chart_interval_trend",
             "interval_distribution", "legend_configured_reference", "legend_host_observation",
-            "clicks", "hold_vs_interval",
+            "axis_count", "hold_vs_interval",
             "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
         )
         return {k: self._tr(k) for k in keys}
@@ -1636,21 +1646,24 @@ class MainWindow(QMainWindow):
         self.btn_view_interval = QPushButton("Interval Trend")
         self.btn_view_interval.setObjectName("Segment")
         self.btn_view_interval.setCheckable(True)
-        self.btn_chart_fit = QPushButton("Fit Data")
-        self.btn_chart_fit.setObjectName("Secondary")
-        self.btn_chart_zoom_in = QPushButton("Zoom In")
-        self.btn_chart_zoom_in.setObjectName("Secondary")
-        self.btn_chart_zoom_out = QPushButton("Zoom Out")
-        self.btn_chart_zoom_out.setObjectName("Secondary")
-        self.btn_chart_reset = QPushButton("Reset View")
-        self.btn_chart_reset.setObjectName("Secondary")
+        self.btn_chart_fit = QToolButton()
+        self.btn_chart_fit.setObjectName("ChartNav")
+        self.btn_chart_zoom_in = QToolButton()
+        self.btn_chart_zoom_in.setObjectName("ChartNav")
+        self.btn_chart_zoom_out = QToolButton()
+        self.btn_chart_zoom_out.setObjectName("ChartNav")
+        self.btn_chart_reset = QToolButton()
+        self.btn_chart_reset.setObjectName("ChartNav")
+        for btn in (self.btn_view_stability, self.btn_view_interval):
+            btn.setMinimumHeight(28)
+            btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         for btn in (
-            self.btn_view_stability, self.btn_view_interval,
             self.btn_chart_fit, self.btn_chart_zoom_in,
             self.btn_chart_zoom_out, self.btn_chart_reset,
         ):
-            btn.setMinimumHeight(28)
-            btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            btn.setAutoRaise(False)
+            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.capture_view_group = QButtonGroup(self)
         self.capture_view_group.setExclusive(True)
         self.capture_view_group.addButton(self.btn_view_stability, 0)
@@ -2374,12 +2387,14 @@ class MainWindow(QMainWindow):
         for btn in (*self.capture_action_bar._buttons, *self.capture_completed_bar._buttons):
             btn.setMinimumHeight(action_h)
         toolbar_h = layout_metric("toolbar_button_min_h", d)
+        for btn in (self.btn_view_stability, self.btn_view_interval):
+            btn.setMinimumHeight(toolbar_h)
+        nav_size = max(24, int(toolbar_h))
         for btn in (
-            self.btn_view_stability, self.btn_view_interval,
             self.btn_chart_fit, self.btn_chart_zoom_in,
             self.btn_chart_zoom_out, self.btn_chart_reset,
         ):
-            btn.setMinimumHeight(toolbar_h)
+            btn.setFixedSize(nav_size, nav_size)
         cell_h = layout_metric("stat_cell_min_h", d)
         for lab in self._stat_name_labels.values():
             cell = lab.parentWidget()
@@ -2405,6 +2420,37 @@ class MainWindow(QMainWindow):
             self.results_distribution_chart.set_theme(pal, labels)
             self.results_scatter.set_theme(pal, labels)
             self.results_occupancy_bar.set_theme(pal)
+        self._refresh_chart_nav_icons()
+
+    def _apply_chart_nav_labels(self) -> None:
+        labels = (
+            (self.btn_chart_fit, "viz_fit_data"),
+            (self.btn_chart_zoom_in, "viz_zoom_in"),
+            (self.btn_chart_zoom_out, "viz_zoom_out"),
+            (self.btn_chart_reset, "viz_reset_view"),
+        )
+        for btn, key in labels:
+            text = self._tr(key)
+            btn.setText(text)
+            btn.setToolTip(text)
+            btn.setAccessibleName(text)
+
+    def _refresh_chart_nav_icons(self) -> None:
+        dark = self.theme == "dark"
+        icons = (
+            (self.btn_chart_fit, "fit"),
+            (self.btn_chart_zoom_in, "zoom_in"),
+            (self.btn_chart_zoom_out, "zoom_out"),
+            (self.btn_chart_reset, "reset"),
+        )
+        for btn, name in icons:
+            icon = chart_nav_icon(name, dark=dark)
+            if not icon.isNull():
+                btn.setIcon(icon)
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            else:
+                btn.setIcon(QIcon())
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
 
     def _on_theme_changed(self):
         self.theme = self.theme_combo.currentData() or "light"
@@ -2769,10 +2815,7 @@ class MainWindow(QMainWindow):
         self.capture_completed_note.setText(self._tr("capture_run_completed"))
         self.btn_view_stability.setText(self._tr("viz_stability_map"))
         self.btn_view_interval.setText(self._tr("viz_interval_trend"))
-        self.btn_chart_fit.setText(self._tr("viz_fit_data"))
-        self.btn_chart_zoom_in.setText(self._tr("viz_zoom_in"))
-        self.btn_chart_zoom_out.setText(self._tr("viz_zoom_out"))
-        self.btn_chart_reset.setText(self._tr("viz_reset_view"))
+        self._apply_chart_nav_labels()
         self.scatter.title = self._tr("chart_stability_map")
         self.scatter.subtitle = self._capture_chart_subtitle(self.locked or self.profile_locked_settings)
         self.interval_chart.title = self._tr("chart_interval_trend")
@@ -3036,6 +3079,7 @@ class MainWindow(QMainWindow):
             start_time=self.start_time,
             stop_time=self.stop_time,
             host_evidence_snapshot=self.host_evidence_snapshot,
+            host_information=self.host_information_snapshot,
         )
         if model is None:
             return None
@@ -3072,7 +3116,7 @@ class MainWindow(QMainWindow):
                 parts.append(f"{self._tr('tolerance')} {format_association_window_ms(tol)}")
         elapsed = run["elapsed_s"]
         if isinstance(elapsed, (int, float)):
-            parts.append(f"{elapsed:.1f} s")
+            parts.append(format_elapsed_seconds_hms(elapsed))
         parts.append(f"{run['host_press_count']} {self._tr('results_host_clicks')}")
         return " · ".join(parts)
 
@@ -3116,6 +3160,8 @@ class MainWindow(QMainWindow):
         self.results_placeholder.setText(self._tr("results_empty"))
         if not has_run:
             self.results_observations_text.setText("")
+            if self._measurement_only_presentation():
+                self.results_observations_card.hide()
             self.results_evidence_text.clear()
             self.results_verdict_label.setText("--")
             self.results_tags_label.setText("")
@@ -3130,11 +3176,22 @@ class MainWindow(QMainWindow):
         self.results_context_label.setText(self._format_run_context(model))
         visible_tags = model["assessment"]["tags"]
         self.results_verdict_label.setText(self._run_status_display(model["run"]["run_status"]))
-        visible_aliases = screening_presentation_labels(visible_tags, self._tr)
-        self.results_tags_label.setText(
-            ", ".join(visible_aliases) if visible_aliases else self._tr("review_tags_none")
-        )
-        self.results_observations_text.setText(self._format_observation_text(model))
+        if self._measurement_only_presentation():
+            detail_tags = measurement_only_run_status_detail_tags(
+                model["run"]["run_status"],
+                model["assessment"].get("tags_all") or visible_tags,
+            )
+            visible_aliases = screening_presentation_labels(detail_tags, self._tr)
+            self.results_tags_label.setText(", ".join(visible_aliases) if visible_aliases else "")
+            self.results_observations_text.setText("")
+            self.results_observations_card.hide()
+        else:
+            visible_aliases = screening_presentation_labels(visible_tags, self._tr)
+            self.results_tags_label.setText(
+                ", ".join(visible_aliases) if visible_aliases else self._tr("review_tags_none")
+            )
+            self.results_observations_text.setText(self._format_observation_text(model))
+            self.results_observations_card.show()
         self._populate_evidence_tab(model)
         self._populate_click_table(model)
         self._fill_analysis_views(model)
@@ -3244,7 +3301,7 @@ class MainWindow(QMainWindow):
                 index_sort = None
             cells = (
                 (str(index_val or ""), index_sort),
-                ("" if row.get("elapsed_ms") is None else f"{row['elapsed_ms']:.2f}", row.get("elapsed_ms")),
+                ("" if row.get("elapsed_ms") is None else format_elapsed_hms(row.get("elapsed_ms")), row.get("elapsed_ms")),
                 (str(row.get("button") or ""), str(row.get("button") or "")),
                 ("" if row.get("interval_ms") is None else f"{row['interval_ms']:.2f}", row.get("interval_ms")),
                 ("" if row.get("hold_ms") is None else f"{row['hold_ms']:.2f}", row.get("hold_ms")),
@@ -3499,6 +3556,10 @@ class MainWindow(QMainWindow):
         self._arming_scheduled = False
         self._locked_button = str(settings.get("focus_button") or "Left")
         self.alert_label.setText("")
+        try:
+            self.host_information_snapshot = collect_host_information(settings)
+        except Exception:
+            self.host_information_snapshot = empty_host_information(settings=settings)
         self._show_workflow_page("capture")
         self.enter_listen()
         return True
@@ -3536,6 +3597,7 @@ class MainWindow(QMainWindow):
         self._arm_boundary_perf = None
         self.profile_locked_settings = None
         self.profile_locked_target = ""
+        self.host_information_snapshot = None
         self._profile_validation_error_key = None
         self.device_press_queues.clear()
         self._arming_scheduled = False
@@ -3947,6 +4009,7 @@ class MainWindow(QMainWindow):
             start_time=self.start_time,
             stop_time=self.stop_time,
             host_evidence_snapshot=self.host_evidence_snapshot,
+            host_information=self.host_information_snapshot,
         )
         metrics = copy.deepcopy((model or {}).get("assessment", {}).get("metrics") or {})
         result = str((model or {}).get("run", {}).get("run_status") or completed_run_status(events))
@@ -4014,6 +4077,7 @@ class MainWindow(QMainWindow):
         self.start_time = self.end_time = self.stop_time = None
         self.locked = None
         self.host_evidence_snapshot = None
+        self.host_information_snapshot = None
         self.capture_armed = False
         self._arm_boundary_perf = None
         self.run_id = _now_run_id()
@@ -4069,13 +4133,18 @@ class MainWindow(QMainWindow):
         now = time.perf_counter()
         self.stop_time = now
         if self.start_time is not None:
-            self.val_time.setText(f"{max(0.0, now - float(self.start_time)):.1f}s")
+            self.val_time.setText(format_elapsed_seconds_hms(max(0.0, now - float(self.start_time))))
         self.running = False
         self.listening = False
         self.completed = True
         self.stop_adapters()
         self.val_clicks.setText(str(accepted_host_press_count(self.events)))
         self._build_host_evidence_snapshot_for_completed_run()
+        if self.host_information_snapshot is None:
+            try:
+                self.host_information_snapshot = collect_host_information(self.locked)
+            except Exception:
+                self.host_information_snapshot = empty_host_information(settings=self.locked)
         self.val_phase.setText(self._tr("phase_review"))
         self.hint.hide()
         self._set_review_panel_visible(False)
@@ -4647,7 +4716,7 @@ class MainWindow(QMainWindow):
     def _tick(self):
         if self.running:
             now = time.perf_counter()
-            self.val_time.setText(f"{max(0.0, now - float(self.start_time or now)):.1f}s")
+            self.val_time.setText(format_elapsed_seconds_hms(max(0.0, now - float(self.start_time or now))))
             if self.end_time is not None and now >= float(self.end_time):
                 self.stop_run()
                 return

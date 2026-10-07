@@ -272,7 +272,12 @@ class ClickDataTableSortTests(unittest.TestCase):
         self._click_header(7)
         self.assertEqual(self._col(7), ["-5.00", "0.00", "2.00"])
         self._click_header(1)
-        self.assertEqual(self._col(1), ["9.90", "10.00", "100.00"])
+        from mouse_click_stability_analyzer.duration import format_elapsed_hms
+        self.assertEqual(self._col(1), [format_elapsed_hms(9.9), format_elapsed_hms(10.0), format_elapsed_hms(100.0)])
+        elapsed_roles = [
+            self.win.results_click_table.item(r, 1).data(Qt.ItemDataRole.UserRole) for r in range(3)
+        ]
+        self.assertEqual(elapsed_roles, [9.9, 10.0, 100.0])
         self._click_header(4)
         self.assertEqual(self._col(4), ["9.90", "10.00", "10.01"])
 

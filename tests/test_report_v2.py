@@ -47,7 +47,6 @@ _EXPLANATORY = (
     "events.csv",
     "analysis.txt",
     "report.xlsx",
-    "Python",
 )
 _LEGACY = (
     "Expected / Actual clicks",
@@ -447,7 +446,10 @@ class ReportV2QtTests(unittest.TestCase):
         _, paths = self._golden()
         html_text, _ = self._artifacts(paths)
         figures = _html_figures(html_text)
-        self.assertEqual(tuple(figures), _CHART_TITLES)
+        captions = tuple(figures)
+        self.assertEqual(captions[0], "Interval over time")
+        self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
+        self.assertEqual(captions[2], "Hold vs Interval")
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertEqual(body.count("class='ref'"), 1)
@@ -482,7 +484,10 @@ class ReportV2QtTests(unittest.TestCase):
         _, paths = self._manual()
         html_text, xlsx = self._artifacts(paths)
         figures = _html_figures(html_text)
-        self.assertEqual(tuple(figures), _CHART_TITLES)
+        captions = tuple(figures)
+        self.assertEqual(captions[0], "Interval over time")
+        self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
+        self.assertEqual(captions[2], "Hold vs Interval")
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertNotIn("class='ref'", body)
@@ -530,6 +535,8 @@ class ReportV2QtTests(unittest.TestCase):
         for label in ("HID device name", "VID", "PID", "bcdDevice", "Firmware", "Connection", "Operator",
                       "DUT", "DUT Sample ID", "Lab Host"):
             self.assertNotIn(label, info, label)
+        for label in ("HID device name", "VID", "PID", "bcdDevice", "Connection", "Operator",
+                      "DUT", "DUT Sample ID", "Lab Host"):
             self.assertNotIn(label, summary, label)
         self.assertNotIn("—", "".join(info.values()))
         self.assertNotIn(None, [summary[k] for k in info])
@@ -591,7 +598,8 @@ class ReportV2QtTests(unittest.TestCase):
             ws = wb["Click Data"]
             headers = [c.value for c in ws[1]]
             self.assertEqual(headers, report_v2.click_data_columns(False))
-            self.assertIn("Observation flag(s)", headers)
+            self.assertNotIn("Observation", headers)
+            self.assertNotIn("Observation flag(s)", headers)
             self.assertNotIn("Rule Code(s)", headers)
             self.assertNotIn("State", headers)
             self.assertEqual(ws.freeze_panes, "A2")
@@ -611,11 +619,12 @@ class ReportV2QtTests(unittest.TestCase):
         html_text, xlsx = self._artifacts(paths)
         html_kv = _html_kv(html_text, "host-information")
         xlsx_kv = _sheet_kv(xlsx, "Summary")
-        for label in ("Host OS", "Capture backend", "Tool version"):
+        for label in ("Capture backend", "Tool version"):
             self.assertTrue(html_kv.get(label), label)
             self.assertTrue(xlsx_kv.get(label), label)
         self.assertEqual(html_kv["Tool version"], legacy_app.TOOL_VERSION)
-        self.assertNotIn("Python version", html_kv)
+        self.assertIn("USB host controllers", html_kv)
+        self.assertIn("Python runtime", html_kv)
 
     def test_reports_have_no_absolute_paths(self):
         _, paths = self._golden()
@@ -780,12 +789,19 @@ class ReportV2ModelTests(unittest.TestCase):
                     self.assertNotIn(tag, text, tag)
             wb = load_workbook(xlsx_path)
             try:
-                states = [row[5] for row in wb["Click Data"].iter_rows(min_row=2, values_only=True)]
+                headers = [c.value for c in wb["Click Data"][1]]
+                click_text = " ".join(
+                    "" if v is None else str(v)
+                    for row in wb["Click Data"].iter_rows(min_row=2, values_only=True)
+                    for v in row
+                )
             finally:
                 wb.close()
-            self.assertIn("Long interval", states)
-            self.assertNotIn("LONG_INTERVAL", states)
-            self.assertNotIn("MISS_OR_SLOW", states)
+            self.assertNotIn("Observation", headers)
+            self.assertNotIn("Long interval", click_text)
+            self.assertNotIn("LONG_INTERVAL", click_text)
+            self.assertNotIn("MISS_OR_SLOW", click_text)
+            self.assertTrue(any("MISS_OR_SLOW" in (row.get("tags") or []) for row in model["click_data"]))
         self.assertEqual(model, before)
         self.assertIn("MISS_OR_SLOW", model["assessment"]["tags"])
 
@@ -806,9 +822,13 @@ class ReportV2ModelTests(unittest.TestCase):
             summary = _sheet_kv(xlsx_path, "Summary")
         self.assertEqual((summary["VID"], summary["PID"], summary["bcdDevice"]), ("03F0", "0A4B", "0102"))
         host = {label: value for _id, label, value in report_v2.host_information_rows(
-            {"platform": "P", "capture_backend": "C", "device_under_test": device}, tool_version="1",
+            {"platform": "P", "capture_backend": "C", "device_under_test": device, "schema": "MCSA_HOST_INFORMATION_V1"},
+            tool_version="1",
         )}
-        self.assertEqual(set(host), {"Host OS", "Capture backend", "Tool version"})
+        self.assertIn("Capture backend", host)
+        self.assertIn("Tool version", host)
+        self.assertIn("USB host controllers", host)
+        self.assertNotIn("Host OS", host)
 
     def test_view_does_not_mutate_model_and_keeps_observations_in_model(self):
         intervals = [100.0] * 40

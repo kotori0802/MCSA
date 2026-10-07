@@ -66,6 +66,23 @@ RUN_STATUSES = (RUN_STATUS_COMPLETE, RUN_STATUS_NO_DATA, RUN_STATUS_INVALID)
 _RUN_VALIDITY_TAGS = frozenset({"CAPTURE_SOURCE_INVALID", "WRONG_BUTTON_DETECTED"})
 
 
+def measurement_only_run_status_detail_tags(run_status: str, tags: Any) -> list[str]:
+    """Run Status secondary tags allowed under Measurement only.
+
+    COMPLETE: none (heuristics are not a status summary).
+    NO_DATA: none (the status already means zero accepted Host data).
+    INVALID: capture-validity tags only.
+    """
+    if str(run_status or "") != RUN_STATUS_INVALID:
+        return []
+    out: list[str] = []
+    for tag in tags or []:
+        name = str(tag or "").strip()
+        if name in _RUN_VALIDITY_TAGS and name not in out:
+            out.append(name)
+    return out
+
+
 def accepted_host_press_count(events: list[dict[str, Any]] | None) -> int:
     """Canonical Host Press count: accepted host Press rows in the frozen event list.
 
@@ -464,6 +481,7 @@ def build_completed_result_model(
     start_time: float | None = None,
     stop_time: float | None = None,
     host_evidence_snapshot: dict[str, Any] | None = None,
+    host_information: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return one frozen completed-run interpretation, or None if no completed snapshot."""
     if locked is None:
@@ -500,6 +518,7 @@ def build_completed_result_model(
             "timing_tolerance_ms": None if manual else _finite(settings.get("fixture_timing_tolerance_ms")),
             "auto_stop_sec": auto_stop_sec,
             "settings": settings,
+            "host_information": dict(host_information) if host_information else None,
         },
         "assessment": {
             "tags": visible_tags,

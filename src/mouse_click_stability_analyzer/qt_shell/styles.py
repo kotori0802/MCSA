@@ -402,6 +402,26 @@ QToolButton#Secondary::menu-indicator {
     height: 8px;
     image: url("@CHEVRON_ICON@");
 }
+QToolButton#ChartNav {
+    background: #ffffff;
+    border: 1px solid #c7c7cc;
+    min-width: 28px;
+    max-width: 32px;
+    min-height: 28px;
+    max-height: 32px;
+    padding: 4px;
+    border-radius: 8px;
+}
+QToolButton#ChartNav:hover {
+    background: #f2f2f7;
+    border-color: #8e8e93;
+}
+QToolButton#ChartNav:pressed {
+    background: #e5e5ea;
+}
+QToolButton#ChartNav:focus {
+    border: 2px solid #007aff;
+}
 QRadioButton, QCheckBox {
     background: transparent;
     spacing: 10px;
@@ -786,6 +806,27 @@ QToolButton#Secondary::menu-indicator {
     height: 8px;
     image: url("@CHEVRON_ICON@");
 }
+QToolButton#ChartNav {
+    background: #2c2c2e;
+    border: 1px solid #636366;
+    color: #f5f5f7;
+    min-width: 28px;
+    max-width: 32px;
+    min-height: 28px;
+    max-height: 32px;
+    padding: 4px;
+    border-radius: 8px;
+}
+QToolButton#ChartNav:hover {
+    background: #3a3a3c;
+    border-color: #8e8e93;
+}
+QToolButton#ChartNav:pressed {
+    background: #48484a;
+}
+QToolButton#ChartNav:focus {
+    border: 2px solid #0a84ff;
+}
 QRadioButton, QCheckBox {
     background: transparent;
     color: #f5f5f7;
@@ -976,6 +1017,44 @@ STYLE_ASSETS: dict[str, dict[str, str]] = {
 
 def style_asset_path(name: str) -> Path:
     return ASSET_DIR / name
+
+
+CHART_NAV_ICONS = {
+    "fit": "chart_fit.svg",
+    "zoom_in": "chart_zoom_in.svg",
+    "zoom_out": "chart_zoom_out.svg",
+    "reset": "chart_reset.svg",
+}
+
+
+def chart_nav_icon(name: str, *, dark: bool = False, size: int = 18):
+    """Monochrome SVG icon. Returns an empty QIcon if the asset cannot load."""
+    from PySide6.QtCore import QByteArray, Qt
+    from PySide6.QtGui import QIcon, QPainter, QPixmap
+
+    path = style_asset_path(CHART_NAV_ICONS.get(name, name))
+    icon = QIcon()
+    if not path.is_file():
+        return icon
+    try:
+        from PySide6.QtSvg import QSvgRenderer
+    except Exception:
+        return icon
+    try:
+        color = "#f5f5f7" if dark else "#1d1d1f"
+        data = path.read_text(encoding="utf-8").replace("currentColor", color)
+        renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
+        if not renderer.isValid():
+            return icon
+        pix = QPixmap(size * 2, size * 2)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        renderer.render(painter)
+        painter.end()
+        icon.addPixmap(pix)
+    except Exception:
+        return QIcon()
+    return icon
 
 
 def density_tokens(density: str = DENSITY_NORMAL) -> dict[str, str]:

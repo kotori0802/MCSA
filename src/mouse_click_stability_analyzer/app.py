@@ -17,6 +17,7 @@ def _agent_log(*_args, **_kwargs) -> None:
 
 
 from .schema import artifact_names, build_host_environment
+from .host_inventory import HOST_INFORMATION_SCHEMA, collect_host_information, empty_host_information
 from .report_v2 import host_information_rows, write_report_html, write_report_xlsx
 from .core import build_payload, normalize_settings, now_iso, safe_float, safe_int, make_synthetic_events
 from .adapters.raw_input_subprocess import WindowsRawInputSubprocess
@@ -663,6 +664,14 @@ def write_reports(
     report_root.mkdir(parents=True, exist_ok=True)
     if completed_model is None:
         completed_model = _report_fallback_model(target, operator, settings, events, run_id)
+    run_model = completed_model.setdefault("run", {})
+    frozen_host = run_model.get("host_information")
+    if not isinstance(frozen_host, dict) or frozen_host.get("schema") != HOST_INFORMATION_SCHEMA:
+        try:
+            frozen_host = collect_host_information(settings)
+        except Exception:
+            frozen_host = empty_host_information(settings=settings)
+        run_model["host_information"] = frozen_host
     run_status = str(completed_model["run"]["run_status"])
     settings_norm = normalize_settings(settings)
     settings_norm.update(settings)
@@ -728,6 +737,7 @@ def write_reports(
         "engineering_summary_zh": _engineering_summary(settings_norm, metrics, tags),
         "engineering_reports": paths,
         "host_test_environment": build_host_environment(settings_norm),
+        "host_information": frozen_host,
         "legacy_heuristic_assessment": {
             "authoritative": False,
             "note": LEGACY_HEURISTIC_ASSESSMENT_NOTE,
@@ -792,7 +802,7 @@ def write_reports(
     # Write engineering artifacts first, then write Summary JSON with verified artifact paths.
     detail_path.write_text(json.dumps(detail, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     _write_all_click_csv(csv_path, events)
-    host_info = host_information_rows(build_host_environment(completed_model["run"]["settings"]), tool_version=TOOL_VERSION)
+    host_info = host_information_rows(frozen_host, tool_version=TOOL_VERSION)
     report_kwargs = {"host_info": host_info, "generated_at": summary["created_at"]}
     xlsx_written = write_report_xlsx(xlsx_path, completed_model, **report_kwargs)
     if not xlsx_written:

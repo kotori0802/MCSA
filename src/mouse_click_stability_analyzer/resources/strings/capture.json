@@ -3,6 +3,14 @@
     "en": "Start Capture",
     "zh-TW": "開始擷取"
   },
+  "axis_count": {
+    "en": "Count",
+    "zh-TW": "數量"
+  },
+  "axis_elapsed": {
+    "en": "Elapsed",
+    "zh-TW": "經過"
+  },
   "axis_elapsed_s": {
     "en": "Elapsed (s)",
     "zh-TW": "經過 (s)"

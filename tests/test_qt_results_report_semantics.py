@@ -14,7 +14,10 @@ if str(_SRC) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from mouse_click_stability_analyzer.cadence import class_to_tags, classify_click
-from mouse_click_stability_analyzer.completed_result import build_completed_result_model
+from mouse_click_stability_analyzer.completed_result import (
+    build_completed_result_model,
+    measurement_only_run_status_detail_tags,
+)
 from mouse_click_stability_analyzer.i18n import STRINGS, t
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
 from mouse_click_stability_analyzer.presentation import (
@@ -396,14 +399,95 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
         self.win.stop_run()
         if self.win._post_run_input_guard_active:
             self.win._release_post_run_input_guard()
+        self.assertTrue(self.win.results_observations_card.isHidden())
         text = self.win.results_observations_text.text()
+        self.assertEqual(text, "")
         self.assertNotIn("existing chatter rule", text)
         self.assertNotIn("existing double-click rule", text)
         self.assertNotIn("CHATTER_HARD", text)
         self.assertNotIn("HIGH_PROBABILITY_DOUBLE_CLICK", text)
         self.assertNotIn("Chatter detected", text)
-        if text != self.win._tr("observations_none"):
-            self.assertIn(self.win._tr("informational_observation"), text)
+
+    def test_measurement_only_suppresses_heuristic_results_copy(self):
+        self._setup_fixture(hz="10", tol="2", auto_sec="8")
+        self.assertTrue(self.win.lock_profile())
+        self.assertTrue(self.win.arm_capture())
+        t0 = float(self.win._arm_boundary_perf) + 0.001
+        clicks = (
+            (0.0, 0.008),
+            (0.100, 0.008),
+            (0.400, 0.008),
+            (0.420, 0.003),
+            (0.520, 0.040),
+            (2.500, 0.008),
+            (2.600, 0.008),
+            (2.780, 0.008),
+        )
+        first_off, first_hold = clicks[0]
+        self.win._begin_session_from_first_click("Left", t0 + first_off, t0 + first_off + first_hold, {})
+        for off, hold in clicks[1:]:
+            press = t0 + off
+            self.win.record_click("Left", press, press + hold, {})
+        self.win.stop_run()
+        if self.win._post_run_input_guard_active:
+            self.win._release_post_run_input_guard()
+
+        facts = self.win._completed_run_facts()
+        model = facts["model"]
+        tags = set(model["assessment"]["tags_all"])
+        self.assertEqual(model["run"]["run_status"], "COMPLETE")
+        self.assertEqual(self.win.results_verdict_label.text(), "COMPLETE")
+        self.assertTrue(
+            {"MISS_OR_SLOW", "INTERVAL_JITTER_WARN", "PAUSE_GAP_EXCLUDED", "SETUP_ALIGNMENT_SUSPECT", "TIMING_JITTER_PAIR"}
+            & tags
+        )
+        self.assertTrue(model["observations"])
+        self.assertIn("INTERVAL_JITTER_WARN", {finding["rule"] for finding in model["observations"]} | tags)
+        self.assertEqual(model["run"]["settings"]["interval_cv_limit_pct"], 10.0)
+        cv = model["assessment"]["metrics"].get("interval_cv_pct")
+        self.assertIsNotNone(cv)
+        self.assertGreater(float(cv), 10.0)
+
+        self.assertTrue(self.win.results_observations_card.isHidden())
+        self.assertEqual(self.win.results_observations_text.text(), "")
+        self.assertEqual(self.win.results_tags_label.text(), "")
+        self.assertTrue(self.win.issue_title.isHidden())
+        self.assertTrue(self.win.capture_issues_grid.isHidden())
+        header = "\n".join((
+            self.win.results_verdict_label.text(),
+            self.win.results_tags_label.text(),
+            self.win.results_observations_text.text(),
+            self.win.results_context_label.text(),
+        ))
+        for banned in (
+            "Long interval",
+            "Hold variation",
+            "Pause excluded",
+            "Timing variation",
+            "Interval variation",
+            "Configured reference 10.00 %",
+            "10.00 %",
+        ):
+            self.assertNotIn(banned, header)
+        html, xlsx = self._report_text()
+        self.assertIn("Interval CV", html)
+        self.assertIn("Interval CV", xlsx)
+        self.assertNotIn("Configured reference 10.00 %", html)
+        self.assertNotIn("Configured reference 10.00 %", xlsx)
+        table = self.win.results_click_table
+        self.assertTrue(table.horizontalHeader().isSectionHidden(5))
+        self.assertTrue(table.horizontalHeader().isSectionHidden(6))
+
+    def test_measurement_only_status_detail_keeps_invalid_facts_only(self):
+        self.assertEqual(measurement_only_run_status_detail_tags("COMPLETE", ["MISS_OR_SLOW", "INTERVAL_JITTER_WARN"]), [])
+        self.assertEqual(measurement_only_run_status_detail_tags("NO_DATA", ["INSUFFICIENT_CLICKS"]), [])
+        self.assertEqual(
+            measurement_only_run_status_detail_tags(
+                "INVALID",
+                ["MISS_OR_SLOW", "CAPTURE_SOURCE_INVALID", "WRONG_BUTTON_DETECTED"],
+            ),
+            ["CAPTURE_SOURCE_INVALID", "WRONG_BUTTON_DETECTED"],
+        )
 
     def _report_text(self) -> tuple[str, str]:
         model = self.win._completed_run_facts()["model"]
@@ -427,12 +511,17 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
 class ReportViewSemanticsTests(unittest.TestCase):
     def test_click_columns_are_observation_oriented(self):
         cols = report_v2.click_data_columns(False)
-        self.assertIn("Observation", cols)
-        self.assertIn("Observation flag(s)", cols)
+        self.assertNotIn("Observation", cols)
+        self.assertNotIn("Observation flag(s)", cols)
+        self.assertIn("Elapsed", cols)
+        self.assertNotIn("Elapsed (ms)", cols)
         self.assertIn("Interval Δ vs ref. (ms)", cols)
         self.assertNotIn("State", cols)
         self.assertNotIn("Rule Code(s)", cols)
         self.assertNotIn("Δ vs reference (ms)", cols)
+        classified = report_v2.click_data_columns(False, include_classification=True)
+        self.assertIn("Observation", classified)
+        self.assertIn("Observation flag(s)", classified)
 
     def test_zero_matched_omits_zero_quality_metrics(self):
         events = []
