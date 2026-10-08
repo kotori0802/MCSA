@@ -26,11 +26,20 @@ Future characterization analysis may use only these fields from MCSA report arti
 |---|---|---|
 | `settings.manual_mode` | `_evidence.json` `settings` | Software mode. `false` is Fixture **software** mode, not proof of physical Fixture actuation |
 | `settings.focus_button` | `_evidence.json` `settings` | Target button |
-| `settings.duration_sec` | `_evidence.json` `settings` | Configured Auto Stop duration in seconds (`0` / absent means Auto Stop off) |
+| `settings.duration_sec` | `_evidence.json` `settings` | Configured duration in seconds. A duration/configuration fact only; **not** Auto Stop provenance (see below) |
 | `settings.fixture_reference_hz` | `_evidence.json` `settings` | Configured Reference Rate. Defines the **nominal configured schedule** for characterization |
 | `settings.fixture_timing_tolerance_ms` | `_evidence.json` `settings` | Operational Schedule Association Window for that run (numeric ms) |
 
 Configured Interval Range fields are not characterization inputs. See section 8.
+
+#### Auto Stop provenance
+
+- `duration_sec` may reflect current producer behavior (for example, the current Qt capture path writes `0` when Auto Stop is off). That is an implementation detail, not authoritative Auto Stop provenance.
+- Current `MCSA_EVIDENCE_V1` has **no explicit Auto Stop enabled/disabled state**.
+- Characterization must not infer `auto_stop_on = true` or `auto_stop_on = false` from `duration_sec`, run length, timestamps, or run status.
+- Characterization therefore records `auto_stop_on_evidence = null` unless a future evidence contract records Auto Stop explicitly. `auto_stop_on_manifest` comes from the lab manifest only.
+- **4E-B2 blocker:** real eligible physical-fixture runs are currently blocked (`ERROR auto_stop_unverifiable`) because Auto Stop ON cannot be independently verified from `MCSA_EVIDENCE_V1`.
+- A future evidence-format change must record Auto Stop state explicitly before eligible physical-fixture runs can enter the characterization aggregate.
 
 ### Primary observation timeline
 
@@ -157,19 +166,23 @@ A human-hand run can still lock Fixture mode. Do not infer:
 
 from Fixture software mode alone.
 
-Physical actuation source is **external lab metadata** until a later design adds a persisted field. Do not fabricate `actuation_source` in artifacts.
+Physical actuation source is **external lab metadata**. Do not fabricate `actuation_source` in `evidence.json`.
 
-Future characterization datasets must record, outside the artifact for now:
+4E-B1 records actuation in a separate lab manifest CSV (`docs/ASSOCIATION_WINDOW_CHARACTERIZATION.md`):
 
-    actuation_source = fixture | human | other | unknown
+    actuation_source = physical_fixture | human | software | unknown
 
-Pilot run `20261005_172910` (lab metadata, not a DUT verdict):
+Eligible characterization aggregate requires `physical_fixture` **and** `characterization_eligible = yes` plus factual evidence checks. Fixture software mode alone is never enough.
+
+Pilot / pipeline runs:
 
     purpose = artifact pipeline pilot
-    actuation_source = human
+    actuation_source = human   (or software)
     characterization_eligible = no
 
-That run used Fixture software mode with hand actuation. It is valid only as an artifact/data-pipeline pilot. Its timing distribution must not be used to choose fixed-ms / percentage / hybrid.
+Those packages may exercise discovery, parsing, math, and output generation. They must be labelled **NOT CHARACTERIZATION EVIDENCE** and must not enter the eligible aggregate. Their timing distribution must not be used to choose fixed-ms / percentage / hybrid.
+
+Characterization outputs are written to a separate directory (`characterization_out/<campaign>/`), never into the normal four-file field-test package.
 
 ---
 
@@ -219,3 +232,5 @@ Frozen evidence (when enabled) also stores derived `tolerance_pct`, `tolerance_m
 Do not infer interval comparison from `fixture_timing_tolerance_ms`. Do not use `fixture_timing_tolerance_ms` as the comparison range.
 
 Characterization does not depend on these fields. Eligibility, inputs, and math are identical whether comparison was enabled, disabled, or absent (pre-Stage 2D artifacts). Readers may ignore every `interval_comparison*` key. They are not characterization inputs, filters, or weights.
+
+Primary 4E-B1 residual analysis is also independent of `fixture_timing_tolerance_ms`. That value is capture-time Association Window **context** only. Changing it must not change W-independent nearest-slot residuals. The analyzer reconstructs the nominal schedule from `press_elapsed_ms`, `fixture_reference_hz`, and `duration_sec` using the documented half-open nearest-slot rule. It does not inherit Host Evidence matched/unmatched arithmetic.

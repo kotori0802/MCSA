@@ -11,6 +11,7 @@ venv/
 # Local test output (never commit real device sessions)
 reports/*
 !reports/.gitkeep
+characterization_out/
 *.log
 
 # Build / install artifacts

@@ -1,0 +1,2 @@
+run_id,package_path,campaign_id,purpose,actuation_source,characterization_eligible,exclusion_reason,fixture_vendor,fixture_model,fixture_unit_id,fixture_firmware,control_dut_id,host_label,usb_port_label,expected_rate_hz,expected_duration_sec,repeat_index,auto_stop_on,notes,vendor_timing_accuracy_ms,vendor_spec_reference
+20261005_pilot,reports/mcsa_20261005_pilot,aw-pipeline-check,artifact pipeline pilot,human,no,hand actuation in Fixture software mode,,,,,DUT-CONTROL,lab-pc-1,,5,30,1,yes,NOT CHARACTERIZATION EVIDENCE — pipeline only,,
