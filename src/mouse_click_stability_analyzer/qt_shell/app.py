@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..adapters.raw_input_subprocess import WindowsRawInputSubprocess
+from ..artifact_contract import AUTO_STOP_ENABLED_KEY
 from ..app import (
     ARMING_SEC,
     RULE_PRESETS,
@@ -612,6 +613,16 @@ def stamp_qt_fixture_timing_tolerance(
     return out
 
 
+def stamp_qt_auto_stop_enabled(settings: dict[str, Any], *, enabled: bool) -> dict[str, Any]:
+    """Stamp the explicit Auto Stop ON/OFF choice after legacy normalize.
+
+    Independent of ``duration_sec``; the boolean comes from the Setup toggle only.
+    """
+    out = dict(settings)
+    out[AUTO_STOP_ENABLED_KEY] = bool(enabled)
+    return out
+
+
 def stamp_qt_interval_comparison(
     settings: dict[str, Any],
     *,
@@ -764,6 +775,17 @@ def locked_profile_preview_rows(
     else:
         rows.append((tr("auto_stop"), tr("preview_auto_stop_off")))
     return rows
+
+
+class WheelSafeComboBox(QComboBox):
+    """Setup combo that never changes value on mouse wheel, even when focused.
+
+    The ignored wheel event propagates to the parent so the Setup page scrolls.
+    Values change only by opening the popup or by keyboard.
+    """
+
+    def wheelEvent(self, event):  # noqa: N802
+        event.ignore()
 
 
 class ResponsiveCardGrid(QWidget):
@@ -1381,7 +1403,7 @@ class MainWindow(QMainWindow):
         device_l.addSpacing(10)
         self.lbl_button = self._field_label("Button")
         device_l.addWidget(self.lbl_button)
-        self.button_combo = QComboBox()
+        self.button_combo = WheelSafeComboBox()
         populate_focus_button_combo(self.button_combo)
         self._setup_field(self.button_combo)
         device_l.addWidget(self.button_combo)
@@ -1409,7 +1431,7 @@ class MainWindow(QMainWindow):
         config_l.addSpacing(10)
         self.hz_label = self._field_label("Reference Rate (Hz)")
         config_l.addWidget(self.hz_label)
-        self.hz_combo = QComboBox()
+        self.hz_combo = WheelSafeComboBox()
         self.hz_combo.setEditable(True)
         self.hz_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.hz_combo.setCompleter(None)
@@ -1498,7 +1520,7 @@ class MainWindow(QMainWindow):
         detail_l.setSpacing(6)
         self.interval_cmp_unit_label = self._field_label("Range unit")
         detail_l.addWidget(self.interval_cmp_unit_label)
-        self.interval_cmp_unit = QComboBox()
+        self.interval_cmp_unit = WheelSafeComboBox()
         self.interval_cmp_unit.addItem("Percent", BASIS_PERCENT)
         self.interval_cmp_unit.addItem("Milliseconds", BASIS_MILLISECONDS)
         self._setup_field(self.interval_cmp_unit)
@@ -1556,7 +1578,7 @@ class MainWindow(QMainWindow):
         config_l.addSpacing(10)
         self.auto_stop_sec_label = self._field_label("Duration")
         config_l.addWidget(self.auto_stop_sec_label)
-        self.auto_stop_sec_combo = QComboBox()
+        self.auto_stop_sec_combo = WheelSafeComboBox()
         self.auto_stop_sec_combo.setEditable(True)
         self.auto_stop_sec_combo.addItems(["00:00:20", "00:00:30", "00:01:00", "00:02:00", "00:05:00", "01:00:00"])
         self.auto_stop_sec_combo.setCurrentText("00:01:00")
@@ -4044,6 +4066,7 @@ class MainWindow(QMainWindow):
             except ValueError:
                 tolerance_ms = None
         stamped = stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=tolerance_ms)
+        stamped = stamp_qt_auto_stop_enabled(stamped, enabled=self.auto_stop_on.isChecked())
         cmp_value = None
         try:
             cmp_value = parse_comparison_value(self.interval_cmp_value.text())

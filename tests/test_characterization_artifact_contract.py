@@ -286,6 +286,101 @@ class BackwardCompatibilityTests(unittest.TestCase):
             self.assertEqual(_xlsx_summary(xlsx_path).get("Schedule Association Window"), "±20.00 ms")
 
 
+_AUTO_STOP_KEY = "auto_stop_enabled"
+
+
+def _write_bundle(settings, events, run_id, *, model=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        if model is None:
+            model = build_completed_result_model(
+                locked=settings, events=events, run_id=run_id, target="DUT", operator="op",
+            )
+        paths = legacy_app.write_reports(
+            Path(tmp), "DUT", "op", settings, events, run_id, completed_model=model,
+        )
+        package = Path(paths["evidence_json"]).parent
+        return {
+            "evidence": json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8")),
+            "events_csv": Path(paths["all_click_log_csv"]).read_text(encoding="utf-8"),
+            "html_info": _html_info(Path(paths["engineering_html"]).read_text(encoding="utf-8")),
+            "xlsx": _xlsx_summary(Path(paths["engineering_xlsx"])) if paths.get("engineering_xlsx") else {},
+            "files": sorted(p.name for p in package.iterdir()),
+            "model": model,
+        }
+
+
+def _without_generated(info: dict) -> dict:
+    return {k: v for k, v in info.items() if "generated" not in str(k).lower()}
+
+
+class AutoStopEvidenceTests(unittest.TestCase):
+    def test_auto_stop_on_serializes_true_with_separate_duration(self):
+        out = _write_bundle(_fixture_settings(duration_sec=60.0, **{_AUTO_STOP_KEY: True}), _events(), "as_on")
+        settings = out["evidence"]["settings"]
+        self.assertIs(settings[_AUTO_STOP_KEY], True)
+        self.assertEqual(settings["duration_sec"], 60.0)
+        self.assertIs(out["model"]["run"][_AUTO_STOP_KEY], True)
+        self.assertIn('"auto_stop_enabled": true', json.dumps(settings))
+
+    def test_auto_stop_off_serializes_false(self):
+        out = _write_bundle(_fixture_settings(duration_sec=0, **{_AUTO_STOP_KEY: False}), _events(), "as_off")
+        self.assertIs(out["evidence"]["settings"][_AUTO_STOP_KEY], False)
+        self.assertIs(out["model"]["run"][_AUTO_STOP_KEY], False)
+
+    def test_boolean_is_independent_of_duration_sec(self):
+        out = _write_bundle(_fixture_settings(duration_sec=60.0, **{_AUTO_STOP_KEY: False}), _events(), "as_indep")
+        self.assertIs(out["evidence"]["settings"][_AUTO_STOP_KEY], False)
+        self.assertEqual(out["evidence"]["settings"]["duration_sec"], 60.0)
+
+    def test_completed_value_is_frozen_against_live_setup_change(self):
+        locked = _fixture_settings(duration_sec=60.0, **{_AUTO_STOP_KEY: True})
+        events = _events()
+        model = build_completed_result_model(
+            locked=dict(locked), events=events, run_id="as_frozen", target="DUT", operator="op",
+        )
+        live = dict(locked, **{_AUTO_STOP_KEY: False})
+        out = _write_bundle(live, events, "as_frozen", model=model)
+        self.assertIs(out["evidence"]["settings"][_AUTO_STOP_KEY], True)
+
+    def test_old_input_without_field_stays_absent(self):
+        out = _write_bundle(_fixture_settings(duration_sec=60.0), _events(), "as_old")
+        self.assertNotIn(_AUTO_STOP_KEY, out["evidence"]["settings"])
+        self.assertIsNone(out["model"]["run"][_AUTO_STOP_KEY])
+
+    def test_non_boolean_frozen_value_is_not_persisted(self):
+        out = _write_bundle(_fixture_settings(**{_AUTO_STOP_KEY: "yes"}), _events(), "as_bad")
+        self.assertNotIn(_AUTO_STOP_KEY, out["evidence"]["settings"])
+
+    def test_stamp_reads_frozen_model_only(self):
+        stamp = legacy_app.stamp_frozen_auto_stop_enabled
+        self.assertIs(stamp({}, {"run": {_AUTO_STOP_KEY: True}})[_AUTO_STOP_KEY], True)
+        self.assertIs(stamp({}, {"run": {_AUTO_STOP_KEY: False}})[_AUTO_STOP_KEY], False)
+        self.assertNotIn(_AUTO_STOP_KEY, stamp({}, {"run": {_AUTO_STOP_KEY: None}}))
+        self.assertNotIn(_AUTO_STOP_KEY, stamp({_AUTO_STOP_KEY: True}, {"run": {}}))
+        self.assertNotIn(_AUTO_STOP_KEY, stamp({"duration_sec": 60.0}, {"run": {"auto_stop_sec": 60.0}}))
+
+    def test_field_does_not_change_other_artifacts(self):
+        events = _events()
+        base = _fixture_settings(duration_sec=60.0)
+        with_field = _write_bundle(dict(base, **{_AUTO_STOP_KEY: True}), events, "as_same")
+        without = _write_bundle(dict(base), events, "as_same")
+        self.assertEqual(with_field["events_csv"], without["events_csv"])
+        self.assertEqual(with_field["files"], without["files"])
+        self.assertEqual(len(with_field["files"]), 4)
+        self.assertEqual(_without_generated(with_field["html_info"]), _without_generated(without["html_info"]))
+        self.assertEqual(_without_generated(with_field["xlsx"]), _without_generated(without["xlsx"]))
+        ev_a, ev_b = with_field["evidence"], without["evidence"]
+        self.assertEqual(ev_a["schema"], "MCSA_EVIDENCE_V1")
+        self.assertEqual(ev_a["run_status"], ev_b["run_status"])
+        self.assertEqual(ev_a["measurements"], ev_b["measurements"])
+        self.assertEqual(ev_a["events"], ev_b["events"])
+        self.assertEqual(ev_a.get("interval_comparison"), ev_b.get("interval_comparison"))
+        self.assertEqual(ev_a.get("host_evidence"), ev_b.get("host_evidence"))
+        a_settings = dict(ev_a["settings"])
+        a_settings.pop(_AUTO_STOP_KEY)
+        self.assertEqual(a_settings, ev_b["settings"])
+
+
 class LegacyAndMatcherContainmentTests(unittest.TestCase):
     def test_authoritative_run_status_and_no_legacy_verdict_block(self):
         settings = _fixture_settings(12.49)

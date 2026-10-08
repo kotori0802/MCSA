@@ -27,6 +27,7 @@ Future characterization analysis may use only these fields from MCSA report arti
 | `settings.manual_mode` | `_evidence.json` `settings` | Software mode. `false` is Fixture **software** mode, not proof of physical Fixture actuation |
 | `settings.focus_button` | `_evidence.json` `settings` | Target button |
 | `settings.duration_sec` | `_evidence.json` `settings` | Configured duration in seconds. A duration/configuration fact only; **not** Auto Stop provenance (see below) |
+| `settings.auto_stop_enabled` | `_evidence.json` `settings` | Explicit Auto Stop state for the completed run: JSON `true` (enabled) or `false` (disabled). Absent in older evidence |
 | `settings.fixture_reference_hz` | `_evidence.json` `settings` | Configured Reference Rate. Defines the **nominal configured schedule** for characterization |
 | `settings.fixture_timing_tolerance_ms` | `_evidence.json` `settings` | Operational Schedule Association Window for that run (numeric ms) |
 
@@ -34,12 +35,22 @@ Configured Interval Range fields are not characterization inputs. See section 8.
 
 #### Auto Stop provenance
 
-- `duration_sec` may reflect current producer behavior (for example, the current Qt capture path writes `0` when Auto Stop is off). That is an implementation detail, not authoritative Auto Stop provenance.
-- Current `MCSA_EVIDENCE_V1` has **no explicit Auto Stop enabled/disabled state**.
-- Characterization must not infer `auto_stop_on = true` or `auto_stop_on = false` from `duration_sec`, run length, timestamps, or run status.
-- Characterization therefore records `auto_stop_on_evidence = null` unless a future evidence contract records Auto Stop explicitly. `auto_stop_on_manifest` comes from the lab manifest only.
-- **4E-B2 blocker:** real eligible physical-fixture runs are currently blocked (`ERROR auto_stop_unverifiable`) because Auto Stop ON cannot be independently verified from `MCSA_EVIDENCE_V1`.
-- A future evidence-format change must record Auto Stop state explicitly before eligible physical-fixture runs can enter the characterization aggregate.
+Upstream origin: the Setup Auto Stop ON/OFF toggle, captured when the run profile is locked, frozen into the completed-run model as `run.auto_stop_enabled` (with the locked snapshot in `run.settings`):
+
+    Setup Auto Stop ON/OFF toggle
+      -> locked run settings: auto_stop_enabled
+           -> completed model (frozen): run.auto_stop_enabled
+                -> _evidence.json settings.auto_stop_enabled
+
+The report writer reads only the frozen completed-run value. Changing Setup after completion does not change an already completed run's evidence. Only a real JSON boolean is written. A missing or non-boolean frozen value leaves the key absent.
+
+- `settings.auto_stop_enabled` and `settings.duration_sec` are **independent facts**. `duration_sec` may reflect current producer behavior (for example, the Qt capture path writes `0` when Auto Stop is off), but it is not authoritative Auto Stop provenance.
+- Characterization reads `auto_stop_on_evidence` **only** from `settings.auto_stop_enabled`: `true` → `true`, `false` → `false`, missing / `null` / non-boolean → `null`.
+- Characterization never infers Auto Stop from `duration_sec`, run length, timestamps, or run status.
+- `auto_stop_on_manifest` comes from the lab manifest only. Both values are kept separately so manifest expectation and captured evidence can be audited against each other.
+- **Older evidence** (written before `settings.auto_stop_enabled` existed) is still readable, is not rewritten, and is not rejected as a normal report. For characterization its Auto Stop state is `null`, so an eligible physical-fixture run from older evidence remains `ERROR auto_stop_unverifiable`.
+- **New evidence** can independently verify Auto Stop enabled / disabled.
+- The field is an additive `MCSA_EVIDENCE_V1` settings key, like `fixture_timing_tolerance_ms` and the Configured Interval Range keys. The schema identifier is unchanged.
 
 ### Primary observation timeline
 

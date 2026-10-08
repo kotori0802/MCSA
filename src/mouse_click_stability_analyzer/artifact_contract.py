@@ -48,10 +48,13 @@ FACTUAL_EVENT_FIELDS = (
     "device_source",
 )
 
+AUTO_STOP_ENABLED_KEY = "auto_stop_enabled"
+
 SETTINGS_WHITELIST = (
     "manual_mode",
     "focus_button",
     "duration_sec",
+    AUTO_STOP_ENABLED_KEY,
     "fixture_reference_hz",
     "fixture_hz",
     "fixture_timing_tolerance_ms",

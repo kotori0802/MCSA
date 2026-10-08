@@ -7,13 +7,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from mouse_click_stability_analyzer.characterization import analysis as analysis_module
 from mouse_click_stability_analyzer.characterization.analysis import (
     ROLE_ELIGIBLE,
     ROLE_PIPELINE,
@@ -40,7 +38,11 @@ def _event(index: int, press_ms: float, *, accepted: bool = True, button: str = 
     }
 
 
-def _settings(*, hz=5.0, duration=1.0, window=10.0, manual=False, extra=None) -> dict:
+_ABSENT = object()
+
+
+def _settings(*, hz=5.0, duration=1.0, window=10.0, manual=False, auto_stop=True, extra=None) -> dict:
+    """``auto_stop=_ABSENT`` models historical evidence without ``auto_stop_enabled``."""
     payload = {
         "manual_mode": manual,
         "focus_button": "Left",
@@ -49,6 +51,8 @@ def _settings(*, hz=5.0, duration=1.0, window=10.0, manual=False, extra=None) ->
         "fixture_timing_tolerance_ms": window,
         "capture_mode": "Windows Raw Input",
     }
+    if auto_stop is not _ABSENT:
+        payload["auto_stop_enabled"] = auto_stop
     if extra:
         payload.update(extra)
     return payload
@@ -132,18 +136,10 @@ def _presses(*times: float) -> list[dict]:
     return [_event(i + 1, t) for i, t in enumerate(times)]
 
 
-def _simulate_explicit_evidence_auto_stop(test: unittest.TestCase, value: bool | None) -> None:
-    """MCSA_EVIDENCE_V1 has no explicit Auto Stop field; simulate one for eligible-path tests."""
-    patcher = mock.patch.object(analysis_module, "auto_stop_from_evidence", return_value=value)
-    patcher.start()
-    test.addCleanup(patcher.stop)
-
-
 class ManifestEligibilityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        _simulate_explicit_evidence_auto_stop(self, True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -228,7 +224,6 @@ class ResidualContractTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        _simulate_explicit_evidence_auto_stop(self, True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -303,7 +298,6 @@ class CrossRunTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        _simulate_explicit_evidence_auto_stop(self, True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -443,11 +437,10 @@ class CliReportTests(unittest.TestCase):
         self.assertEqual(run["package_ref"], "../reports/mcsa_rel")
         self.assertEqual(run["evidence_file"], "mcsa_rel_evidence.json")
         self.assertIs(run["auto_stop_on_manifest"], True)
-        self.assertIsNone(run["auto_stop_on_evidence"])
+        self.assertIs(run["auto_stop_on_evidence"], True)
         self.assertEqual(run["role"], ROLE_PIPELINE)
         codes = {(i["code"], i["level"]) for i in data["issues"]}
         self.assertIn(("manifest_not_eligible", "EXCLUDED"), codes)
-        self.assertIn(("auto_stop_evidence_unavailable", "INFO"), codes)
         self.assertFalse(any(i["level"] == "ERROR" for i in data["issues"]))
         self.assertEqual(data["unusable_run_count"], 0)
         self.assertEqual(data["eligible_run_count"], 0)
@@ -456,7 +449,7 @@ class CliReportTests(unittest.TestCase):
         self.assertGreater(run["analyzed_residual_count"], 0)
 
     def test_auto_stop_provenance_absent_is_not_synthesized(self):
-        settings = _settings()
+        settings = _settings(auto_stop=_ABSENT)
         del settings["duration_sec"]
         pkg = _write_evidence(self.root, "nodur", _presses(0.0, 200.0), settings)
         row = _manifest_row("nodur", pkg, auto_stop_on=None, expected_duration_sec=None)
@@ -464,21 +457,32 @@ class CliReportTests(unittest.TestCase):
         self.assertIsNone(summary["auto_stop_on_manifest"])
         self.assertIsNone(summary["auto_stop_on_evidence"])
 
-    def test_duration_sec_does_not_imply_evidence_auto_stop(self):
+    def test_old_evidence_duration_sec_does_not_imply_evidence_auto_stop(self):
         for duration in (60.0, 0.0, None):
-            settings = _settings(duration=duration)
+            settings = _settings(duration=duration, auto_stop=_ABSENT)
             if duration is None:
                 del settings["duration_sec"]
             payload = {"schema": "MCSA_EVIDENCE_V1", "settings": settings}
             self.assertIsNone(auto_stop_from_evidence(payload), msg=f"duration_sec={duration}")
-        pkg = _write_evidence(self.root, "d60", _presses(0.0, 200.0), _settings(duration=60.0))
+        pkg = _write_evidence(self.root, "d60", _presses(0.0, 200.0), _settings(duration=60.0, auto_stop=_ABSENT))
         row = _manifest_row("d60", pkg, actuation_source="human", characterization_eligible=False,
                             expected_duration_sec=60.0)
         summary = analyze_campaign([row])["analyzed"][0]["summary"]
         self.assertIsNone(summary["auto_stop_on_evidence"])
 
+    def test_reader_uses_only_explicit_boolean_field(self):
+        def read(settings):
+            return auto_stop_from_evidence({"schema": "MCSA_EVIDENCE_V1", "settings": settings})
+
+        self.assertIs(read({"auto_stop_enabled": True, "duration_sec": 0}), True)
+        self.assertIs(read({"auto_stop_enabled": False, "duration_sec": 60}), False)
+        for invalid in (None, "yes", "true", 1, 0):
+            self.assertIsNone(read({"auto_stop_enabled": invalid, "duration_sec": 60}), msg=repr(invalid))
+        self.assertIsNone(read({"auto_stop_on": True, "duration_sec": 60}))
+        self.assertIsNone(auto_stop_from_evidence({"schema": "MCSA_EVIDENCE_V1"}))
+
     def test_eligible_physical_with_unverifiable_evidence_auto_stop_is_error(self):
-        pkg = _write_evidence(self.root, "unv", _presses(0.0, 207.0, 396.0), _settings())
+        pkg = _write_evidence(self.root, "unv", _presses(0.0, 207.0, 396.0), _settings(auto_stop=_ABSENT))
         campaign = analyze_campaign([_manifest_row("unv", pkg, auto_stop_on=True)])
         found = [i for i in campaign["issues"] if i["code"] == "auto_stop_unverifiable"]
         self.assertEqual([i["level"] for i in found], ["ERROR"])
@@ -497,16 +501,42 @@ class CliReportTests(unittest.TestCase):
         self.assertEqual(campaign["eligible_run_count"], 0)
 
     def test_explicit_evidence_auto_stop_true_matches_manifest(self):
-        _simulate_explicit_evidence_auto_stop(self, True)
-        pkg = _write_evidence(self.root, "ok", _presses(0.0, 207.0, 396.0), _settings())
+        pkg = _write_evidence(self.root, "ok", _presses(0.0, 207.0, 396.0), _settings(auto_stop=True))
         campaign = analyze_campaign([_manifest_row("ok", pkg, auto_stop_on=True)])
         self.assertFalse(any(i["code"].startswith("auto_stop") for i in campaign["issues"]))
         self.assertEqual(campaign["eligible_run_count"], 1)
-        self.assertIs(campaign["analyzed"][0]["summary"]["auto_stop_on_evidence"], True)
+        self.assertEqual(campaign["analyzed"][0]["role"], ROLE_ELIGIBLE)
+        summary = campaign["analyzed"][0]["summary"]
+        self.assertIs(summary["auto_stop_on_manifest"], True)
+        self.assertIs(summary["auto_stop_on_evidence"], True)
+
+    def test_eligible_physical_blank_manifest_auto_stop_is_unverifiable(self):
+        pkg = _write_evidence(self.root, "blank", _presses(0.0, 207.0, 396.0), _settings(auto_stop=True))
+        campaign = analyze_campaign([_manifest_row("blank", pkg, auto_stop_on=None)])
+        found = [i for i in campaign["issues"] if i["code"] == "auto_stop_unverifiable"]
+        self.assertEqual([i["level"] for i in found], ["ERROR"])
+        self.assertEqual(campaign["eligible_run_count"], 0)
+
+    def test_tier0_human_stays_pipeline_only_for_any_evidence_auto_stop(self):
+        for value in (True, False, _ABSENT):
+            with self.subTest(auto_stop=value):
+                run_id = f"t0_{'absent' if value is _ABSENT else str(value).lower()}"
+                pkg = _write_evidence(self.root, run_id, _presses(0.0, 207.0, 396.0), _settings(auto_stop=value))
+                row = _manifest_row(
+                    run_id, pkg, actuation_source="human", characterization_eligible=False,
+                    exclusion_reason="hand actuation", purpose="artifact pipeline pilot", auto_stop_on=True,
+                )
+                campaign = analyze_campaign([row])
+                self.assertEqual(campaign["analyzed"][0]["role"], ROLE_PIPELINE)
+                self.assertEqual(campaign["eligible_run_count"], 0)
+                self.assertEqual(campaign["unusable_run_count"], 0)
+                self.assertEqual(campaign["groups"], [])
+                self.assertFalse(any(i["level"] == "ERROR" for i in campaign["issues"]))
+                expected = None if value is _ABSENT else value
+                self.assertIs(campaign["analyzed"][0]["summary"]["auto_stop_on_evidence"], expected)
 
     def test_explicit_evidence_auto_stop_false_is_mismatch_for_eligible_physical(self):
-        _simulate_explicit_evidence_auto_stop(self, False)
-        pkg = _write_evidence(self.root, "asm", _presses(0.0, 200.0), _settings())
+        pkg = _write_evidence(self.root, "asm", _presses(0.0, 200.0), _settings(auto_stop=False))
         campaign = analyze_campaign([_manifest_row("asm", pkg, auto_stop_on=True)])
         mismatch = [i for i in campaign["issues"] if i["code"] == "auto_stop_mismatch"]
         self.assertEqual([i["level"] for i in mismatch], ["ERROR"])

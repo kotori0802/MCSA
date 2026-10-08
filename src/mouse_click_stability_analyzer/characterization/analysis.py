@@ -11,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from ..artifact_contract import AUTO_STOP_ENABLED_KEY
 from ..core import percentile
 from ..schema import EVIDENCE_SCHEMA
 from .evidence import (
@@ -87,14 +88,13 @@ def evidence_file_ref(package: Path | None, evidence_path: Path | None) -> str:
 
 
 def auto_stop_from_evidence(payload: dict[str, Any] | None) -> bool | None:
-    """Explicit Auto Stop state recorded in evidence, or None when not recorded.
+    """Explicit ``settings.auto_stop_enabled`` from evidence, or None.
 
-    MCSA_EVIDENCE_V1 has no explicit Auto Stop field. duration_sec is a duration
-    fact and must not be read as Auto Stop state, so this is always None until
-    the evidence contract records the state directly.
+    Missing, null, or non-boolean values are None. Older evidence has no such
+    field. ``duration_sec`` is a duration fact and is never read as Auto Stop state.
     """
-    _ = payload
-    return None
+    value = settings_of(payload or {}).get(AUTO_STOP_ENABLED_KEY)
+    return value if isinstance(value, bool) else None
 
 
 def classify_role(row: dict[str, Any], issues: list[dict[str, Any]]) -> str:
@@ -265,6 +265,13 @@ def validate_run(row: dict[str, Any]) -> tuple[dict[str, Any] | None, Path | Non
             LEVEL_ERROR,
             "auto_stop_off",
             "evidence records Auto Stop off; controlled characterization requires Auto Stop ON",
+            run_id=run_id,
+        ))
+    elif wants_real and manifest_auto_stop is None:
+        issues.append(issue(
+            LEVEL_ERROR,
+            "auto_stop_unverifiable",
+            "manifest auto_stop_on is blank; controlled characterization requires manifest Auto Stop ON",
             run_id=run_id,
         ))
     if "pipeline" in purpose.lower() or "pilot" in purpose.lower():

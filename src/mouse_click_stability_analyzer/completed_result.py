@@ -16,6 +16,7 @@ from .app import (
     annotate_events,
     build_payload,
 )
+from .artifact_contract import AUTO_STOP_ENABLED_KEY
 from .cadence import cadence_ms, is_extreme_cadence
 from .interval_comparison import classify_interval, freeze_interval_comparison
 from .measurements import actual_run_duration_s
@@ -509,6 +510,8 @@ def build_completed_result_model(
     hz = _finite(settings.get("fixture_reference_hz") or settings.get("fixture_hz"))
     duration = _finite(settings.get("duration_sec"))
     auto_stop_sec = duration if (duration is not None and duration > 0) else None
+    auto_stop_raw = settings.get(AUTO_STOP_ENABLED_KEY)
+    auto_stop_enabled = auto_stop_raw if isinstance(auto_stop_raw, bool) else None
     snapshot = host_evidence_snapshot if host_evidence_snapshot else None
     comparison = freeze_interval_comparison(settings, manual=manual)
     return {
@@ -525,6 +528,7 @@ def build_completed_result_model(
             "reference_interval_ms": None if manual else reference_ms,
             "timing_tolerance_ms": None if manual else _finite(settings.get("fixture_timing_tolerance_ms")),
             "auto_stop_sec": auto_stop_sec,
+            AUTO_STOP_ENABLED_KEY: auto_stop_enabled,
             "settings": settings,
             "host_information": dict(host_information) if host_information else None,
             "interval_comparison": comparison,

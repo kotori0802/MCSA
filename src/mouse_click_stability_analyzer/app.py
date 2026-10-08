@@ -17,6 +17,7 @@ def _agent_log(*_args, **_kwargs) -> None:
 
 
 from .artifact_contract import (
+    AUTO_STOP_ENABLED_KEY,
     build_evidence_payload,
     factual_settings,
     portable_artifact_references,
@@ -632,6 +633,23 @@ def stamp_frozen_schedule_association_window(
     return out
 
 
+def stamp_frozen_auto_stop_enabled(
+    settings_norm: dict[str, Any],
+    completed_model: dict[str, Any],
+) -> dict[str, Any]:
+    """Stamp JSON ``settings.auto_stop_enabled`` from the frozen completed model.
+
+    Only a real boolean ``run.auto_stop_enabled`` is persisted. Otherwise the key
+    stays absent (old input / unknown). Never derived from ``duration_sec``.
+    """
+    out = dict(settings_norm)
+    out.pop(AUTO_STOP_ENABLED_KEY, None)
+    value = (completed_model.get("run") or {}).get(AUTO_STOP_ENABLED_KEY)
+    if isinstance(value, bool):
+        out[AUTO_STOP_ENABLED_KEY] = value
+    return out
+
+
 def _report_fallback_model(target: str, operator: str, settings: dict[str, Any], events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
     """Canonical model for callers without a frozen Results model (no expected-count promotion)."""
     from .completed_result import build_completed_result_model
@@ -677,6 +695,7 @@ def write_reports(
     frozen_settings = dict(run_model.get("settings") or settings or {})
     evidence_settings = factual_settings(frozen_settings)
     evidence_settings = stamp_frozen_schedule_association_window(evidence_settings, completed_model)
+    evidence_settings = stamp_frozen_auto_stop_enabled(evidence_settings, completed_model)
     host_snapshot = (completed_model.get("host_evidence") or {}).get("snapshot")
     if not isinstance(host_snapshot, dict):
         host_snapshot = None

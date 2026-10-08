@@ -1,6 +1,7 @@
 """Focused tests for the Phase 2B-3d2a.1 Fixture Timing Tolerance run setting."""
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -17,9 +18,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from mouse_click_stability_analyzer.core import normalize_settings
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
+from mouse_click_stability_analyzer.artifact_contract import AUTO_STOP_ENABLED_KEY
 from mouse_click_stability_analyzer.qt_shell.app import (
     FIXTURE_TIMING_TOLERANCE_KEY,
     parse_fixture_timing_tolerance_ms,
+    stamp_qt_auto_stop_enabled,
     stamp_qt_fixture_timing_tolerance,
 )
 
@@ -86,6 +89,18 @@ class StampFixtureTimingToleranceTests(unittest.TestCase):
     def test_input_not_mutated(self):
         src = {"x": 1}
         stamp_qt_fixture_timing_tolerance(src, manual=False, tolerance_ms=1.0)
+        self.assertEqual(src, {"x": 1})
+
+
+class StampAutoStopEnabledTests(unittest.TestCase):
+    def test_explicit_boolean_independent_of_duration(self):
+        self.assertIs(stamp_qt_auto_stop_enabled({"duration_sec": 60}, enabled=True)[AUTO_STOP_ENABLED_KEY], True)
+        self.assertIs(stamp_qt_auto_stop_enabled({"duration_sec": 60}, enabled=False)[AUTO_STOP_ENABLED_KEY], False)
+        self.assertIs(stamp_qt_auto_stop_enabled({"duration_sec": 0}, enabled=True)[AUTO_STOP_ENABLED_KEY], True)
+
+    def test_input_not_mutated(self):
+        src = {"x": 1}
+        stamp_qt_auto_stop_enabled(src, enabled=True)
         self.assertEqual(src, {"x": 1})
 
 
@@ -289,6 +304,27 @@ class MainWindowToleranceTests(unittest.TestCase):
         s = self.win.settings()
         self.assertIn(s.get("fixture_match_tolerance_ms", 0.0), (0.0, None))
         self.assertEqual(s[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+
+    def test_settings_auto_stop_enabled_follows_toggle(self):
+        self._fixture("2.5", auto_stop=True)
+        self.assertIs(self.win.settings()[AUTO_STOP_ENABLED_KEY], True)
+        self._fixture("2.5", auto_stop=False)
+        self.assertIs(self.win.settings()[AUTO_STOP_ENABLED_KEY], False)
+
+    def test_auto_stop_enabled_is_locked_and_reaches_evidence(self):
+        for auto_stop in (True, False):
+            with self.subTest(auto_stop=auto_stop):
+                self._fixture("2.5", auto_stop=auto_stop)
+                self._begin()
+                self.assertIs(self.win.locked[AUTO_STOP_ENABLED_KEY], auto_stop)
+                self.win.stop_run()
+                (self.win.auto_stop_off if auto_stop else self.win.auto_stop_on).setChecked(True)
+                self.assertIs(self.win.settings()[AUTO_STOP_ENABLED_KEY], not auto_stop)
+                self.win.finish_report(notify=False)
+                evidence = json.loads(Path(self.win.report_paths["evidence_json"]).read_text(encoding="utf-8"))
+                self.assertIs(evidence["settings"][AUTO_STOP_ENABLED_KEY], auto_stop)
+                self.win.new_run()
+                self.win.edit_setup_new_run()
 
 
 if __name__ == "__main__":
