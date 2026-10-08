@@ -80,6 +80,60 @@
   "report_label_schedule_association_window": {
     "en": "{@term.schedule_association_window}"
   },
+  "report_label_interval_comparison": {
+    "en": "{@term.interval_comparison}"
+  },
+  "report_value_interval_comparison_enabled": {
+    "en": "Enabled"
+  },
+  "report_label_range_basis": {
+    "en": "Range basis"
+  },
+  "report_value_basis_percent": {
+    "en": "Percent"
+  },
+  "report_value_basis_milliseconds": {
+    "en": "Milliseconds"
+  },
+  "report_label_configured_tolerance": {
+    "en": "Configured tolerance"
+  },
+  "report_label_derived_equivalent": {
+    "en": "Derived equivalent"
+  },
+  "report_label_configured_interval_range": {
+    "en": "{@term.configured_interval_range}"
+  },
+  "report_label_comparable_intervals": {
+    "en": "Comparable intervals"
+  },
+  "report_label_within_configured_range": {
+    "en": "{@term.within_configured_range}"
+  },
+  "report_label_outside_configured_range": {
+    "en": "{@term.outside_configured_range}"
+  },
+  "report_label_below_configured_range": {
+    "en": "{@term.below_configured_range}"
+  },
+  "report_label_above_configured_range": {
+    "en": "{@term.above_configured_range}"
+  },
+  "report_label_within_configured_range_pct": {
+    "en": "{@term.within_configured_range} (%)"
+  },
+  "report_fmt_tolerance_pct": {
+    "en": "±{value} %",
+    "placeholders": ["value"]
+  },
+  "report_fmt_tolerance_ms": {
+    "en": "±{value} ms",
+    "placeholders": ["value"]
+  },
+  "report_fmt_interval_range": {
+    "en": "{lo}–{hi} ms",
+    "placeholders": ["lo", "hi"]
+  },
   "report_label_association_relative": {
     "en": "Window relative to reference interval (derived, informational)",
     "note": "Derived informational value. Not a decision threshold."
@@ -302,6 +356,21 @@
   "report_click_col_ref_delta": {
     "en": "Interval Δ vs ref. (ms)"
   },
+  "report_click_col_range_position": {
+    "en": "{@term.range_position}"
+  },
+  "report_value_range_within": {
+    "en": "{@term.within_configured_range}"
+  },
+  "report_value_range_below": {
+    "en": "{@term.below_configured_range}"
+  },
+  "report_value_range_above": {
+    "en": "{@term.above_configured_range}"
+  },
+  "report_value_range_blank": {
+    "en": "—"
+  },
   "report_chart_interval_over_time": {
     "en": "{@term.interval} over time"
   },
@@ -317,6 +386,9 @@
   },
   "report_chart_hold_vs_interval": {
     "en": "{@term.hold} vs {@term.interval}"
+  },
+  "report_chart_hold_over_time": {
+    "en": "{@term.hold} over time"
   },
   "report_axis_elapsed": {
     "en": "Elapsed"
@@ -343,6 +415,15 @@
   "report_legend_configured_reference": {
     "en": "{@term.configured_reference}",
     "note": "Configured reference only. Not a PASS/FAIL threshold."
+  },
+  "report_legend_configured_range": {
+    "en": "{@term.configured_range}"
+  },
+  "report_legend_within_configured_range": {
+    "en": "{@term.within_configured_range}"
+  },
+  "report_legend_outside_configured_range": {
+    "en": "{@term.outside_configured_range}"
   },
   "report_hist_bin_centre": {
     "en": "Bin centre (ms)"

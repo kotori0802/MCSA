@@ -848,12 +848,12 @@ class ResultsWorkspaceTests(unittest.TestCase):
             snap = self.win.host_evidence_snapshot
             events_before = list(self.win.events)
             completed = self.win.completed
-            for data in ("interval", "distribution", "scatter", "timing"):
+            for data in ("interval", "distribution", "hold", "scatter", "timing"):
                 idx = self.win.results_view_combo.findData(data)
                 self.assertGreaterEqual(idx, 0, data)
                 self.win.results_view_combo.setCurrentIndex(idx)
                 self._settle()
-            self.assertEqual(self.win.results_view_combo.findData("timing"), 3)
+            self.assertEqual(self.win.results_view_combo.findData("timing"), 4)
             self.assertEqual(
                 self.win._completed_run_facts()["model"]["analysis"]["timing_error_reason"],
                 TIMING_ERROR_UNAVAILABLE_REASON,

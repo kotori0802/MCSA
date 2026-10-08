@@ -17,6 +17,7 @@ from .app import (
     build_payload,
 )
 from .cadence import cadence_ms, is_extreme_cadence
+from .interval_comparison import classify_interval, freeze_interval_comparison
 from .measurements import actual_run_duration_s
 
 _QT_HIDDEN_PRESENTATION_TAGS = frozenset({"OPERATOR_FATIGUE", "HOLD_VARIATION_WARN"})
@@ -413,6 +414,7 @@ def _click_rows(
     *,
     manual: bool,
     reference_ms: float | None,
+    comparison: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for event in annotated:
@@ -434,6 +436,7 @@ def _click_rows(
             "state": str(event.get("click_class") or ""),
             "tags": visible,
             "reference_delta_ms": ref_delta,
+            "range_position": classify_interval(interval, comparison),
         })
     return rows
 
@@ -447,6 +450,7 @@ def _analysis_payload(
     series: list[tuple[float, float]] = []
     points: list[tuple[float, float, str]] = []
     intervals: list[float] = []
+    hold_series: list[tuple[float, float]] = []
     for event in annotated:
         if not event.get("accepted"):
             continue
@@ -454,6 +458,8 @@ def _analysis_payload(
         hold = _finite(event.get("hold_ms"))
         elapsed = _finite(event.get("press_elapsed_ms"))
         cls = str(event.get("click_class") or "ON_CADENCE")
+        if hold is not None and elapsed is not None and hold >= 0 and elapsed >= 0:
+            hold_series.append((elapsed, hold))
         if interval is not None:
             intervals.append(interval)
             if elapsed is not None:
@@ -463,6 +469,7 @@ def _analysis_payload(
     return {
         "interval_series": series,
         "scatter_points": points,
+        "hold_series": hold_series,
         "intervals": intervals,
         "histogram": interval_histogram_bins(intervals),
         "reference_interval_ms": None if manual else reference_ms,
@@ -503,6 +510,7 @@ def build_completed_result_model(
     duration = _finite(settings.get("duration_sec"))
     auto_stop_sec = duration if (duration is not None and duration > 0) else None
     snapshot = host_evidence_snapshot if host_evidence_snapshot else None
+    comparison = freeze_interval_comparison(settings, manual=manual)
     return {
         "run": {
             "run_id": run_id,
@@ -519,6 +527,7 @@ def build_completed_result_model(
             "auto_stop_sec": auto_stop_sec,
             "settings": settings,
             "host_information": dict(host_information) if host_information else None,
+            "interval_comparison": comparison,
         },
         "assessment": {
             "tags": visible_tags,
@@ -534,5 +543,8 @@ def build_completed_result_model(
             "snapshot": snapshot,
             "timing_error_chart": "unavailable_aggregate_only" if snapshot is not None else "not_applicable",
         },
-        "click_data": _click_rows(annotated, manual=manual, reference_ms=reference_ms),
+        "interval_comparison": comparison,
+        "click_data": _click_rows(
+            annotated, manual=manual, reference_ms=reference_ms, comparison=comparison,
+        ),
     }

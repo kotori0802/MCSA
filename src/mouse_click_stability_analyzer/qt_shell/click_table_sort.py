@@ -13,12 +13,15 @@ CLICK_TABLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("state", "col_state"),
     ("tags", "col_tags"),
     ("reference_delta_ms", "col_ref_delta"),
+    ("range_position", "col_range_position"),
 )
 CLICK_TABLE_COLUMN_IDS: tuple[str, ...] = tuple(column_id for column_id, _key in CLICK_TABLE_COLUMNS)
 CLICK_TABLE_LABEL_KEYS: dict[str, str] = {column_id: key for column_id, key in CLICK_TABLE_COLUMNS}
 CLICK_TABLE_ID_TO_INDEX: dict[str, int] = {column_id: index for index, column_id in enumerate(CLICK_TABLE_COLUMN_IDS)}
 CLICK_TABLE_INDEX_TO_ID: dict[int, str] = {index: column_id for column_id, index in CLICK_TABLE_ID_TO_INDEX.items()}
-CLICK_TABLE_NUMERIC_IDS = frozenset({"index", "elapsed_ms", "interval_ms", "hold_ms", "reference_delta_ms"})
+CLICK_TABLE_NUMERIC_IDS = frozenset({
+    "index", "elapsed_ms", "interval_ms", "hold_ms", "reference_delta_ms", "range_position",
+})
 CLICK_TABLE_NUMERIC_COLUMNS = frozenset(CLICK_TABLE_ID_TO_INDEX[column_id] for column_id in CLICK_TABLE_NUMERIC_IDS)
 CLICK_TABLE_MEASUREMENT_VISIBLE_IDS: tuple[str, ...] = (
     "index",

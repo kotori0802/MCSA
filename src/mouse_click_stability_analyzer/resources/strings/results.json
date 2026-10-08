@@ -72,6 +72,54 @@
     "zh-TW": "觀測間隔 − 設定參考間隔",
     "note": "Observed interval minus configured reference interval. Not matched timing error."
   },
+  "col_range_position": {
+    "en": "{@term.range_position}",
+    "zh-TW": "{@term.range_position}"
+  },
+  "col_range_position_tooltip": {
+    "en": "Factual position of this observed interval versus the configured interval range. Not a DUT result.",
+    "zh-TW": "此觀測間隔相對設定間隔範圍的事實位置。不是 DUT 結果。"
+  },
+  "cmp_comparable_intervals": {
+    "en": "Comparable intervals",
+    "zh-TW": "可比較間隔"
+  },
+  "cmp_within": {
+    "en": "{@term.within_configured_range}",
+    "zh-TW": "{@term.within_configured_range}"
+  },
+  "cmp_outside": {
+    "en": "{@term.outside_configured_range}",
+    "zh-TW": "{@term.outside_configured_range}"
+  },
+  "cmp_below": {
+    "en": "{@term.below_configured_range}",
+    "zh-TW": "{@term.below_configured_range}"
+  },
+  "cmp_above": {
+    "en": "{@term.above_configured_range}",
+    "zh-TW": "{@term.above_configured_range}"
+  },
+  "cmp_within_pct": {
+    "en": "{@term.within_configured_range} (%)",
+    "zh-TW": "{@term.within_configured_range} (%)"
+  },
+  "range_position_within": {
+    "en": "{@term.within_configured_range}",
+    "zh-TW": "{@term.within_configured_range}"
+  },
+  "range_position_below": {
+    "en": "{@term.below_configured_range}",
+    "zh-TW": "{@term.below_configured_range}"
+  },
+  "range_position_above": {
+    "en": "{@term.above_configured_range}",
+    "zh-TW": "{@term.above_configured_range}"
+  },
+  "range_position_blank": {
+    "en": "—",
+    "zh-TW": "—"
+  },
   "col_state": {
     "en": "Timing observation",
     "zh-TW": "時序觀測"
@@ -182,6 +230,10 @@
       "single",
       "multi"
     ]
+  },
+  "hold_over_time": {
+    "en": "{@term.hold} over time",
+    "zh-TW": "{@term.hold}隨時間變化"
   },
   "hold_vs_interval": {
     "en": "{@term.hold} vs {@term.interval}",

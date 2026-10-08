@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import cv_pct, now_iso, percentile
+from .interval_comparison import evidence_interval_comparison, freeze_interval_comparison
 from .schema import (
     EVIDENCE_SCHEMA,
     TOOL_ID,
@@ -57,6 +58,9 @@ SETTINGS_WHITELIST = (
     "profile_name",
     "capture_mode",
     "language",
+    "interval_comparison_enabled",
+    "interval_comparison_basis",
+    "interval_comparison_value",
 )
 
 MEASUREMENT_FIELDS = (
@@ -278,6 +282,10 @@ def build_evidence_payload(
         "host_evidence": host_evidence,
         "events": factual_events(events),
     }
+    comparison = (completed_model or {}).get("interval_comparison")
+    if comparison is None:
+        comparison = freeze_interval_comparison(settings, manual=bool(run.get("manual")))
+    payload["interval_comparison"] = evidence_interval_comparison(comparison, events=events)
     if artifacts is not None:
         payload["artifacts"] = dict(artifacts)
     if verification is not None:

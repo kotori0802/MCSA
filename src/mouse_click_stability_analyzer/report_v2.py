@@ -35,6 +35,13 @@ from mouse_click_stability_analyzer.presentation import (
     screening_presentation_label,
     screening_presentation_labels,
 )
+from mouse_click_stability_analyzer.interval_comparison import (
+    POSITION_ABOVE,
+    POSITION_BELOW,
+    POSITION_WITHIN,
+    classify_interval,
+    summarize_positions,
+)
 from mouse_click_stability_analyzer.strings.loader import report_text as _rt
 
 REPORT_TITLE = _rt("report_title")
@@ -162,6 +169,7 @@ def _test_information_rows(run: dict[str, Any], generated_at: str) -> list[tuple
             ("schedule_association_window", _rt("report_label_schedule_association_window"), f"±{tol:.2f} ms" if tol is not None else None),
             ("association_relative", _rt("report_label_association_relative"), f"{relative:.1f} %" if relative is not None else None),
         ]
+        rows.extend(_interval_comparison_info_rows(run.get("interval_comparison")))
     elapsed = _finite(run.get("elapsed_s"))
     rows += [
         ("duration", _rt("report_label_duration"), format_elapsed_seconds_hms(elapsed) if elapsed is not None else None),
@@ -248,7 +256,67 @@ def _measurement_rows(model: dict[str, Any]) -> list[tuple[str, str, str]]:
         rows.append(("interval_cv", _rt("report_label_interval_cv"), _fmt(cv, 2, "%")))
     rows.append(("average_hold", _rt("report_label_average_hold"), _fmt(metrics.get("hold_avg_ms"), 2, "ms")))
     rows.append(("host_press_count", _rt("report_label_host_press_count"), str(len(model["click_data"]))))
+    rows.extend(_interval_comparison_measurement_rows(model))
     return rows
+
+
+def _comparison_enabled(contract: dict[str, Any] | None) -> bool:
+    return bool(contract and contract.get("enabled"))
+
+
+def _interval_comparison_info_rows(contract: dict[str, Any] | None) -> list[tuple[str, str, Any]]:
+    if not _comparison_enabled(contract):
+        return []
+    basis = str(contract.get("basis") or "")
+    configured = _finite(contract.get("configured_value"))
+    if basis == "percent":
+        tolerance = _rt("report_fmt_tolerance_pct", value=f"{configured:.2f}") if configured is not None else None
+        derived = _rt("report_fmt_tolerance_ms", value=f"{float(contract['tolerance_ms']):.2f}")
+        basis_label = _rt("report_value_basis_percent")
+    else:
+        tolerance = _rt("report_fmt_tolerance_ms", value=f"{configured:.2f}") if configured is not None else None
+        derived = _rt("report_fmt_tolerance_pct", value=f"{float(contract['tolerance_pct']):.2f}")
+        basis_label = _rt("report_value_basis_milliseconds")
+    bounds = _rt(
+        "report_fmt_interval_range",
+        lo=f"{float(contract['lower_bound_ms']):.2f}",
+        hi=f"{float(contract['upper_bound_ms']):.2f}",
+    )
+    return [
+        ("interval_comparison", _rt("report_label_interval_comparison"), _rt("report_value_interval_comparison_enabled")),
+        ("range_basis", _rt("report_label_range_basis"), basis_label),
+        ("configured_tolerance", _rt("report_label_configured_tolerance"), tolerance),
+        ("derived_equivalent", _rt("report_label_derived_equivalent"), derived),
+        ("configured_interval_range", _rt("report_label_configured_interval_range"), bounds),
+    ]
+
+
+def _interval_comparison_measurement_rows(model: dict[str, Any]) -> list[tuple[str, str, str]]:
+    contract = model.get("interval_comparison") or (model.get("run") or {}).get("interval_comparison")
+    if not _comparison_enabled(contract):
+        return []
+    positions = [str(row.get("range_position") or "") for row in model.get("click_data") or []]
+    summary = summarize_positions(positions)
+    within_pct = summary.get("within_pct")
+    pct_text = f"{within_pct:.2f} %" if within_pct is not None else _NONE
+    return [
+        ("comparable_intervals", _rt("report_label_comparable_intervals"), str(int(summary["comparable_interval_count"] or 0))),
+        ("within_configured_range", _rt("report_label_within_configured_range"), str(int(summary["within_count"] or 0))),
+        ("outside_configured_range", _rt("report_label_outside_configured_range"), str(int(summary["outside_count"] or 0))),
+        ("below_configured_range", _rt("report_label_below_configured_range"), str(int(summary["below_count"] or 0))),
+        ("above_configured_range", _rt("report_label_above_configured_range"), str(int(summary["above_count"] or 0))),
+        ("within_configured_range_pct", _rt("report_label_within_configured_range_pct"), pct_text),
+    ]
+
+
+def _range_position_text(token: str) -> str:
+    mapping = {
+        POSITION_WITHIN: "report_value_range_within",
+        POSITION_BELOW: "report_value_range_below",
+        POSITION_ABOVE: "report_value_range_above",
+    }
+    key = mapping.get(str(token or ""))
+    return _rt(key) if key else _rt("report_value_range_blank")
 
 
 def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[str, str, str]]]]:
@@ -303,7 +371,12 @@ def _host_evidence_groups(model: dict[str, Any]) -> list[tuple[str, list[tuple[s
     ]
 
 
-def click_data_columns(manual: bool, *, include_classification: bool = False) -> list[str]:
+def click_data_columns(
+    manual: bool,
+    *,
+    include_classification: bool = False,
+    include_range_position: bool = False,
+) -> list[str]:
     cols = [
         _rt("report_click_col_index"),
         _rt("report_click_col_elapsed"),
@@ -316,10 +389,18 @@ def click_data_columns(manual: bool, *, include_classification: bool = False) ->
         cols.append(_rt("report_click_col_flags"))
     if not manual:
         cols.append(_rt("report_click_col_ref_delta"))
+    if include_range_position:
+        cols.append(_rt("report_click_col_range_position"))
     return cols
 
 
-def _click_values(row: dict[str, Any], manual: bool, *, include_classification: bool = False) -> list[Any]:
+def _click_values(
+    row: dict[str, Any],
+    manual: bool,
+    *,
+    include_classification: bool = False,
+    include_range_position: bool = False,
+) -> list[Any]:
     values: list[Any] = [
         row.get("index"),
         _finite(row.get("elapsed_ms")),
@@ -332,6 +413,8 @@ def _click_values(row: dict[str, Any], manual: bool, *, include_classification: 
         values.append(", ".join(report_codes(list(row.get("tags") or []))))
     if not manual:
         values.append(_finite(row.get("reference_delta_ms")))
+    if include_range_position:
+        values.append(_range_position_text(str(row.get("range_position") or "")))
     return values
 
 
@@ -346,9 +429,14 @@ def build_report_view(
     manual = bool(run.get("manual"))
     run_status = str(run["run_status"])
     ref = None if manual else _finite(model["analysis"].get("reference_interval_ms"))
+    comparison = model.get("interval_comparison") or run.get("interval_comparison")
     chart_reference = None
     if ref is not None:
         chart_reference = {"interval_ms": ref}
+        if _comparison_enabled(comparison):
+            chart_reference["lower_bound_ms"] = float(comparison["lower_bound_ms"])
+            chart_reference["upper_bound_ms"] = float(comparison["upper_bound_ms"])
+    include_range = (not manual) and _comparison_enabled(comparison)
     frozen_host = run.get("host_information") if isinstance(run.get("host_information"), dict) else None
     groups = host_information_groups(frozen_host, tool_version=TOOL_VERSION) if frozen_host or host_info else []
     rows = list(host_info) if host_info is not None else (
@@ -366,8 +454,9 @@ def build_report_view(
         "host_information_groups": groups,
         "measurements": _measurement_rows(model),
         "host_evidence": _host_evidence_groups(model),
-        "click_columns": click_data_columns(manual),
-        "click_rows": [_click_values(r, manual) for r in model["click_data"]],
+        "click_columns": click_data_columns(manual, include_range_position=include_range),
+        "click_rows": [_click_values(r, manual, include_range_position=include_range) for r in model["click_data"]],
+        "click_range_positions": [str(r.get("range_position") or "") for r in model["click_data"]] if include_range else [],
         "interval_observation_count": len(model["analysis"].get("intervals") or []),
         "manual": manual,
     }
@@ -443,17 +532,75 @@ def _empty_chart(title: str) -> str:
     return _svg(f"<text x='{_W / 2:.0f}' y='{_H / 2:.0f}' class='lb' text-anchor='middle'>{_e(_rt('report_chart_no_data'))}</text>", title)
 
 
-# Report charts are interval-domain: they draw only the configured reference.
-# The Schedule Association Window applies to timestamps and has no interval band.
+# Report charts are interval-domain: they draw the configured reference and,
+# when enabled, the configured interval range. Schedule Association Window
+# applies to timestamps and has no interval band.
+def _configured_bounds(reference: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not reference:
+        return None
+    lo = _finite(reference.get("lower_bound_ms"))
+    hi = _finite(reference.get("upper_bound_ms"))
+    if lo is None or hi is None:
+        return None
+    return lo, hi
+
+
 def _reference_span(reference: dict[str, Any] | None) -> tuple[float, float] | None:
     if not reference:
         return None
     ref = reference["interval_ms"]
+    bounds = _configured_bounds(reference)
+    if bounds:
+        return min(bounds[0], ref), max(bounds[1], ref)
     return ref, ref
+
+
+def _range_contract(reference: dict[str, Any] | None) -> dict[str, Any] | None:
+    bounds = _configured_bounds(reference)
+    if not bounds:
+        return None
+    return {"enabled": True, "lower_bound_ms": bounds[0], "upper_bound_ms": bounds[1]}
 
 
 def _reference_label(reference: dict[str, Any]) -> str:
     return f"{reference['interval_ms']:.2f} ms"
+
+
+def _svg_diamond(cx: float, cy: float, *, r: float = 3.2) -> str:
+    return (
+        f"<polygon class='out' points='{cx:.1f},{cy - r:.1f} {cx + r:.1f},{cy:.1f} "
+        f"{cx:.1f},{cy + r:.1f} {cx - r:.1f},{cy:.1f}'/>"
+    )
+
+
+def _svg_range_band_horizontal(reference: dict[str, Any], ymin: float, ymax: float) -> str:
+    bounds = _configured_bounds(reference)
+    if not bounds:
+        return ""
+    lo, hi = bounds
+    y0 = _scale(hi, ymin, ymax, _H - _B, _T)
+    y1 = _scale(lo, ymin, ymax, _H - _B, _T)
+    top, bot = (y0, y1) if y0 <= y1 else (y1, y0)
+    return (
+        f"<rect class='band' x='{_L}' y='{top:.1f}' width='{_W - _R - _L}' height='{max(0.0, bot - top):.1f}'/>"
+        f"<line x1='{_L}' y1='{y0:.1f}' x2='{_W - _R}' y2='{y0:.1f}' class='bnd'/>"
+        f"<line x1='{_L}' y1='{y1:.1f}' x2='{_W - _R}' y2='{y1:.1f}' class='bnd'/>"
+    )
+
+
+def _svg_range_band_vertical(reference: dict[str, Any], xmin: float, xmax: float) -> str:
+    bounds = _configured_bounds(reference)
+    if not bounds:
+        return ""
+    lo, hi = bounds
+    x0 = _scale(lo, xmin, xmax, _L, _W - _R)
+    x1 = _scale(hi, xmin, xmax, _L, _W - _R)
+    left, right = (x0, x1) if x0 <= x1 else (x1, x0)
+    return (
+        f"<rect class='band' x='{left:.1f}' y='{_T}' width='{max(0.0, right - left):.1f}' height='{_H - _B - _T}'/>"
+        f"<line x1='{x0:.1f}' y1='{_T}' x2='{x0:.1f}' y2='{_H - _B}' class='bnd'/>"
+        f"<line x1='{x1:.1f}' y1='{_T}' x2='{x1:.1f}' y2='{_H - _B}' class='bnd'/>"
+    )
 
 
 def _svg_reference_horizontal(reference: dict[str, Any], ymin: float, ymax: float) -> str:
@@ -498,8 +645,17 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
         format_x=lambda v, span=span_ms: format_elapsed_axis_tick(v, span_ms=span),
     )
     if reference:
+        body += _svg_range_band_horizontal(reference, ymin, ymax)
         body += _svg_reference_horizontal(reference, ymin, ymax)
     body += f"<polyline points='{coords}' class='series'><title>{_rt("report_legend_host_observation")}</title></polyline>"
+    contract = _range_contract(reference)
+    if contract:
+        for x, y in zip(xs, ys):
+            if classify_interval(y, contract) in (POSITION_BELOW, POSITION_ABOVE):
+                body += _svg_diamond(
+                    _scale(x, xmin, xmax, _L, _W - _R),
+                    _scale(y, ymin, ymax, _H - _B, _T),
+                )
     return _svg(body, title)
 
 
@@ -513,6 +669,8 @@ def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None)
         lo, hi = min(lo, span[0]), max(hi, span[1])
     peak = max(int(b["count"]) for b in bins) or 1
     body = _axis(lo, hi, 0, peak, _rt("report_axis_interval_ms"), _rt("report_axis_count"))
+    if reference:
+        body += _svg_range_band_vertical(reference, lo, hi)
     for b in bins:
         h = (int(b["count"]) / peak) * (_H - _B - _T)
         x0 = _scale(float(b["lo"]), lo, hi, _L, _W - _R)
@@ -542,22 +700,68 @@ def _svg_scatter(points: list[tuple[float, float, str]], reference: dict[str, An
     ymin, ymax = domain_axis_bounds(*_padded(min(ys), max(ys)), domain=DOMAIN_HOLD, values=ys)
     body = _axis(xmin, xmax, ymin, ymax, _rt("report_axis_interval_ms"), _rt("report_axis_hold_ms"))
     if reference:
+        body += _svg_range_band_vertical(reference, xmin, xmax)
         body += _svg_reference_vertical(reference, xmin, xmax)
+    contract = _range_contract(reference)
     for x, y in zip(xs, ys):
-        body += (
-            f"<circle cx='{_scale(x, xmin, xmax, _L, _W - _R):.1f}' "
-            f"cy='{_scale(y, ymin, ymax, _H - _B, _T):.1f}' r='2.2' class='dot'/>"
-        )
+        cx = _scale(x, xmin, xmax, _L, _W - _R)
+        cy = _scale(y, ymin, ymax, _H - _B, _T)
+        if contract and classify_interval(x, contract) in (POSITION_BELOW, POSITION_ABOVE):
+            body += _svg_diamond(cx, cy)
+        else:
+            body += f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='2.2' class='dot'/>"
     return _svg(body, title)
 
 
-def _chart_legend(reference: dict[str, Any] | None, host_swatch: str) -> str:
+def _svg_hold_series(series: list[tuple[float, float]]) -> str:
+    title = _rt("report_chart_hold_over_time")
+    pts = _downsample(series)
+    if not pts:
+        return _empty_chart(title)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    ymin, ymax = domain_axis_bounds(*_padded(min(ys), max(ys)), domain=DOMAIN_HOLD, values=ys)
+    xmin, xmax = min(xs), max(xs)
+    if xmax <= xmin:
+        xmax = xmin + 1.0
+    span_ms = max(xmax - xmin, abs(xmax), abs(xmin))
+    x_label = _rt("report_axis_elapsed_s") if elapsed_axis_uses_seconds(span_ms) else _rt("report_axis_elapsed")
+    body = _axis(
+        xmin, xmax, ymin, ymax, x_label, _rt("report_axis_hold_ms"),
+        format_x=lambda v, span=span_ms: format_elapsed_axis_tick(v, span_ms=span),
+    )
+    mapped = [
+        (_scale(x, xmin, xmax, _L, _W - _R), _scale(y, ymin, ymax, _H - _B, _T))
+        for x, y in zip(xs, ys)
+    ]
+    if len(mapped) >= 2:
+        coords = " ".join(f"{cx:.1f},{cy:.1f}" for cx, cy in mapped)
+        body += f"<polyline points='{coords}' class='series'><title>{_rt("report_legend_host_observation")}</title></polyline>"
+    if len(mapped) <= 80:
+        body += "".join(f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='2.2' class='dot'/>" for cx, cy in mapped)
+    return _svg(body, title)
+
+
+def _chart_legend(reference: dict[str, Any] | None, host_swatch: str, *, markers: bool = True) -> str:
     if not reference:
         return ""
     items = [
         f"<span class='li'><i class='sw {host_swatch}'></i>{_rt("report_legend_host_observation")}</span>",
-        f"<span class='li'><i class='sw sw-ref'></i>{_rt("report_legend_configured_reference")} {_e(_reference_label(reference))}</span>",
     ]
+    if _configured_bounds(reference):
+        items.append(
+            f"<span class='li'><i class='sw sw-band'></i>{_rt("report_legend_configured_range")}</span>"
+        )
+    if markers and _configured_bounds(reference):
+        items.append(
+            f"<span class='li'><i class='sw sw-dot'></i>{_rt("report_legend_within_configured_range")}</span>"
+        )
+        items.append(
+            f"<span class='li'><i class='sw sw-out'></i>{_rt("report_legend_outside_configured_range")}</span>"
+        )
+    items.append(
+        f"<span class='li'><i class='sw sw-ref'></i>{_rt("report_legend_configured_reference")} {_e(_reference_label(reference))}</span>"
+    )
     return f"<div class='legend'>{''.join(items)}</div>"
 
 
@@ -597,15 +801,20 @@ svg .lb{font-size:14px;fill:#3e4c59}
 svg .series{fill:none;stroke:var(--accent);stroke-width:1.4}
 svg .ref{stroke:#16a34a;stroke-width:1.4;stroke-dasharray:6 4}
 svg .rl{font-size:12px;font-weight:600;fill:#15803d;paint-order:stroke;stroke:#fff;stroke-width:3px}
+svg .band{fill:#6f9a7b;fill-opacity:.14}
+svg .bnd{stroke:#7f9c88;stroke-width:1}
 svg .bar{fill:#60a5fa}
 svg .dot{fill:#2563eb;fill-opacity:.55}
+svg .out{fill:#dc2626}
 .legend{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:6px;font-size:12px;color:var(--muted)}
 .legend .li{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .sw{display:inline-block;flex:none;width:18px;height:10px}
 .sw-line{height:0;border-top:2px solid var(--accent)}
 .sw-bar{background:#60a5fa}
 .sw-dot{width:8px;height:8px;border-radius:50%;background:#2563eb;opacity:.7}
+.sw-out{width:8px;height:8px;background:#dc2626;transform:rotate(45deg)}
 .sw-ref{height:0;border-top:2px dashed #16a34a}
+.sw-band{background:rgba(111,154,123,.22);border-left:1px solid #7f9c88;border-right:1px solid #7f9c88}
 @media (max-width:640px){main{padding:12px 8px 32px}section{padding:12px}table.kv th{width:45%}}
 """
 
@@ -629,7 +838,9 @@ def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
         f"<figure><figcaption>{_rt("report_hist_press_interval_distribution", n=n)}</figcaption>"
         f"<p class='note'>{_e(_rt("report_hist_note"))}</p>"
         f"{_svg_histogram(analysis['histogram'], reference)}"
-        f"{_chart_legend(reference, 'sw-bar')}</figure>"
+        f"{_chart_legend(reference, 'sw-bar', markers=False)}</figure>"
+        f"<figure><figcaption>{_rt("report_chart_hold_over_time")}</figcaption>"
+        f"{_svg_hold_series(analysis.get('hold_series') or [])}</figure>"
         f"<figure><figcaption>{_rt("report_chart_hold_vs_interval")}</figcaption>{_svg_scatter(analysis['scatter_points'], reference)}"
         f"{_chart_legend(reference, 'sw-dot')}</figure>"
         "</div>"
@@ -822,6 +1033,9 @@ def write_report_xlsx(
         h.font = head_font
         h.fill = head_fill
     elapsed_col = 2
+    range_col = len(cols) if view.get("click_range_positions") else None
+    outside_labels = {_rt("report_value_range_below"), _rt("report_value_range_above")}
+    outside_font = Font(color="C00000")
     for r, values in enumerate(view["click_rows"], start=2):
         for c, value in enumerate(values, start=1):
             if c == elapsed_col:
@@ -833,10 +1047,12 @@ def write_report_xlsx(
             cell = wc.cell(row=r, column=c, value=value)
             if isinstance(value, float):
                 cell.number_format = "0.000"
+            if range_col is not None and c == range_col and str(value) in outside_labels:
+                cell.font = outside_font
     n_rows = len(view["click_rows"])
     wc.freeze_panes = "A2"
     wc.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{n_rows + 1}"
-    for c, width in enumerate((8, 14, 10, 14, 12, 18, 34, 20)[: len(cols)], start=1):
+    for c, width in enumerate((8, 14, 10, 14, 12, 18, 34, 20, 28)[: len(cols)], start=1):
         wc.column_dimensions[get_column_letter(c)].width = width
 
     def frame(chart, title: str, x_title: str, y_title: str, x_range=None, y_range=None):
@@ -861,7 +1077,7 @@ def write_report_xlsx(
     # Reference marker coordinates live in hidden helper columns of the Measurements sheet.
     helper_row = [0]
 
-    def marker_series(xs: list[float | None], ys: list[float | None], title: str, dash: str):
+    def marker_series(xs: list[float | None], ys: list[float | None], title: str, dash: str, color: str = "16A34A"):
         helper_row[0] += 1
         r = helper_row[0]
         for i, (x, y) in enumerate(zip(xs, ys)):
@@ -875,10 +1091,25 @@ def write_report_xlsx(
         )
         s.marker.symbol = "none"
         s.smooth = False
-        s.graphicalProperties.line.solidFill = "16A34A"
+        s.graphicalProperties.line.solidFill = color
         s.graphicalProperties.line.width = 15875
         s.graphicalProperties.line.dashStyle = dash
         return s
+
+    def bound_markers(vertical: bool, lo: float, hi: float) -> list:
+        bounds = _configured_bounds(reference)
+        if not bounds:
+            return []
+        lower, upper = bounds
+        if vertical:
+            return [
+                marker_series([lower, lower], [lo, hi], f"{_rt("report_label_configured_interval_range")} {lower:.2f} ms", "dash", "64748B"),
+                marker_series([upper, upper], [lo, hi], f"{_rt("report_label_configured_interval_range")} {upper:.2f} ms", "dash", "64748B"),
+            ]
+        return [
+            marker_series([lo, hi], [lower, lower], f"{_rt("report_label_configured_interval_range")} {lower:.2f} ms", "dash", "64748B"),
+            marker_series([lo, hi], [upper, upper], f"{_rt("report_label_configured_interval_range")} {upper:.2f} ms", "dash", "64748B"),
+        ]
 
     def reference_markers(vertical: bool, lo: float, hi: float) -> list:
         ref = reference["interval_ms"]
@@ -915,7 +1146,10 @@ def write_report_xlsx(
         if reference:
             x0 = excel_elapsed_days(series[0][0])
             x1 = excel_elapsed_days(series[-1][0])
-            line.series.extend(reference_markers(False, x0 if x0 is not None else 0.0, x1 if x1 is not None else 0.0))
+            x_lo = x0 if x0 is not None else 0.0
+            x_hi = x1 if x1 is not None else 0.0
+            line.series.extend(bound_markers(False, x_lo, x_hi))
+            line.series.extend(reference_markers(False, x_lo, x_hi))
             with_legend(line)
         wm.add_chart(line, "F3")
 
@@ -937,9 +1171,28 @@ def write_report_xlsx(
         p.graphicalProperties.line.noFill = True
         scatter.series.append(p)
         if reference:
-            scatter.series.extend(reference_markers(True, math.floor(y_range[0]), math.ceil(y_range[1])))
+            y_lo, y_hi = math.floor(y_range[0]), math.ceil(y_range[1])
+            scatter.series.extend(bound_markers(True, y_lo, y_hi))
+            scatter.series.extend(reference_markers(True, y_lo, y_hi))
             with_legend(scatter)
         wm.add_chart(scatter, "F37")
+    hold_series = model["analysis"].get("hold_series") or []
+    if n_rows >= 2 and hold_series:
+        last = n_rows + 1
+        hold_values = [v for _, v in hold_series]
+        hold_line = frame(
+            ScatterChart(scatterStyle="line"), _rt("report_chart_hold_over_time"), _rt("report_axis_elapsed"), _rt("report_axis_hold_ms"),
+            y_range=domain_axis_bounds(*_padded(min(hold_values), max(hold_values)), domain=DOMAIN_HOLD, values=hold_values),
+        )
+        hold_line.x_axis.number_format = "[h]:mm:ss"
+        hs = Series(Reference(wc, min_col=5, min_row=2, max_row=last), Reference(wc, min_col=2, min_row=2, max_row=last),
+                    title=_rt("report_legend_host_observation"))
+        hs.marker.symbol = "none"
+        hs.smooth = False
+        hs.graphicalProperties.line.solidFill = "64748B"
+        hs.graphicalProperties.line.width = 15875
+        hold_line.series.append(hs)
+        wm.add_chart(hold_line, "F54")
     if bins:
         bar = frame(BarChart(), _rt("report_chart_interval_distribution"), _rt("report_axis_interval_ms"), _rt("report_axis_count"))
         bar.x_axis.axPos = "b"
@@ -965,6 +1218,7 @@ def write_report_xlsx(
                 axis.majorTickMark = "none"
                 axis.number_format = ";;;"
                 axis.spPr = GraphicalProperties(ln=LineProperties(noFill=True))
+            overlay.series.extend(bound_markers(True, 0, 1))
             overlay.series.extend(reference_markers(True, 0, 1))
             bar += overlay
             with_legend(bar)

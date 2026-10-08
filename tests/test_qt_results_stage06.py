@@ -379,7 +379,8 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.assertFalse(header.isSectionHidden(0))
         self.assertFalse(header.isSectionHidden(3))
         self.assertFalse(header.isSectionHidden(7))
-        self.assertEqual(self.win.results_click_table.columnCount(), 8)
+        self.assertTrue(header.isSectionHidden(8))
+        self.assertEqual(self.win.results_click_table.columnCount(), 9)
 
     def test_legacy_classes_remain_internal(self):
         self.assertEqual(classify_click(5.0, 80.0, {"chatter_threshold_ms": 8}), "CHATTER_BOUNCE")

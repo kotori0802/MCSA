@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QEvent, QTimer, Signal, QObject, QPoint, QRect, QSettings, QSize, QUrl
-from PySide6.QtGui import QCursor, QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -81,6 +81,27 @@ from ..duration import format_duration_hms, format_elapsed_hms, format_elapsed_s
 from ..fixture_schedule import fixture_reference_interval_ms
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
 from ..host_inventory import collect_host_information, empty_host_information
+from ..interval_comparison import (
+    BASIS_MILLISECONDS,
+    BASIS_PERCENT,
+    POSITION_ABOVE,
+    POSITION_BELOW,
+    POSITION_NOT_COMPARABLE,
+    POSITION_WITHIN,
+    RANGE_POSITION_SORT_RANK,
+    SETTINGS_BASIS,
+    SETTINGS_ENABLED,
+    SETTINGS_VALUE,
+    IntervalComparisonError,
+    convert_authoritative_value,
+    freeze_interval_comparison,
+    parse_comparison_value,
+    range_bounds,
+    read_settings_fields,
+    resolve_configured_range,
+    settings_comparison_fields,
+    summarize_positions,
+)
 from ..i18n import LANG_LABELS, STRINGS, SUPPORTED_LANGS, normalize_lang, t
 from ..measurements import (
     actual_run_duration_s,
@@ -89,7 +110,7 @@ from ..measurements import (
 )
 from ..overlay_io import OverlayLoadError, extract_overlay_events, load_overlay_payload
 from ..schema import TOOL_NAME
-from .charts import HistogramChart, IntervalChart, OccupancyBar, ScatterChart
+from .charts import HistogramChart, HoldChart, IntervalChart, OccupancyBar, ScatterChart
 from .presentation import (
     SCREENING_PRESENTATION_KEYS,
     measurement_only_timing_observation_label,
@@ -591,6 +612,19 @@ def stamp_qt_fixture_timing_tolerance(
     return out
 
 
+def stamp_qt_interval_comparison(
+    settings: dict[str, Any],
+    *,
+    enabled: bool,
+    basis: str,
+    value: float | None,
+) -> dict[str, Any]:
+    """Persist Configured Interval Range keys. Inactive in Manual; value may be omitted when Off."""
+    out = dict(settings)
+    out.update(settings_comparison_fields(enabled=enabled, basis=basis, value=value))
+    return out
+
+
 _HOST_EVIDENCE_NONE_TEXT = "—"
 
 
@@ -714,6 +748,17 @@ def locked_profile_preview_rows(
             tr("preview_timing_tolerance"),
             format_association_window_ms(tol) if isinstance(tol, (int, float)) else "—",
         ))
+        comparison = freeze_interval_comparison(settings, manual=False)
+        if comparison.get("enabled"):
+            basis = comparison["basis"]
+            configured = comparison["configured_value"]
+            unit = "%" if basis == BASIS_PERCENT else "ms"
+            rows.append((
+                tr("preview_interval_comparison"),
+                f"±{configured:.2f} {unit} ({comparison['lower_bound_ms']:.2f}–{comparison['upper_bound_ms']:.2f} ms)",
+            ))
+        else:
+            rows.append((tr("preview_interval_comparison"), tr("preview_interval_comparison_off")))
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
         rows.append((tr("auto_stop"), f"{float(duration):g} s"))
     else:
@@ -1137,8 +1182,12 @@ class MainWindow(QMainWindow):
             "legend_on_cadence", "legend_extra", "legend_chatter", "legend_miss",
             "legend_overlay", "legend_target", "chart_interval", "chart_interval_trend",
             "interval_distribution", "legend_configured_reference", "legend_host_observation",
-            "axis_count", "hold_vs_interval",
+            "axis_count", "hold_vs_interval", "hold_over_time", "legend_configured_range",
             "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
+            "legend_within_configured_range", "legend_outside_configured_range",
+            "hover_observed_interval", "hover_configured_range", "hover_position",
+            "hover_distance_above", "hover_distance_below",
+            "range_position_below", "range_position_above",
         )
         return {k: self._tr(k) for k in keys}
 
@@ -1376,6 +1425,8 @@ class MainWindow(QMainWindow):
         self.hz_combo.currentTextChanged.connect(self._refresh_fixture_mode_label)
 
         config_l.addSpacing(10)
+        self.lbl_schedule_association = self._field_label("Schedule association")
+        config_l.addWidget(self.lbl_schedule_association)
         self.timing_tol_label = self._field_label("Schedule Association Window (± ms)")
         config_l.addWidget(self.timing_tol_label)
         self.timing_tol_edit = QLineEdit()
@@ -1412,6 +1463,73 @@ class MainWindow(QMainWindow):
         config_l.addWidget(self.assoc_context_box)
         self.hz_combo.currentTextChanged.connect(self._refresh_association_context)
         self.timing_tol_edit.textChanged.connect(self._refresh_association_context)
+
+        config_l.addSpacing(14)
+        self.interval_cmp_box = QWidget()
+        cmp_l = QVBoxLayout(self.interval_cmp_box)
+        cmp_l.setContentsMargins(0, 0, 0, 0)
+        cmp_l.setSpacing(6)
+        self.lbl_interval_comparison = self._field_label("Interval comparison")
+        cmp_l.addWidget(self.lbl_interval_comparison)
+        self.interval_cmp_enable_label = self._field_label("Compare intervals")
+        cmp_l.addWidget(self.interval_cmp_enable_label)
+        cmp_toggle = QHBoxLayout()
+        cmp_toggle.setSpacing(8)
+        self.interval_cmp_off = QPushButton("")
+        self.interval_cmp_on = QPushButton("")
+        for btn in (self.interval_cmp_off, self.interval_cmp_on):
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMinimumHeight(38)
+            btn.setMinimumWidth(80)
+            cmp_toggle.addWidget(btn)
+        self.interval_cmp_off.setChecked(True)
+        self.interval_cmp_on.setChecked(False)
+        self.interval_cmp_group = QButtonGroup(self)
+        self.interval_cmp_group.setExclusive(True)
+        self.interval_cmp_group.addButton(self.interval_cmp_off)
+        self.interval_cmp_group.addButton(self.interval_cmp_on)
+        self.interval_cmp_on.toggled.connect(self._sync_interval_comparison_widgets)
+        cmp_toggle.addStretch(1)
+        cmp_l.addLayout(cmp_toggle)
+        self.interval_cmp_detail = QWidget()
+        detail_l = QVBoxLayout(self.interval_cmp_detail)
+        detail_l.setContentsMargins(0, 4, 0, 0)
+        detail_l.setSpacing(6)
+        self.interval_cmp_unit_label = self._field_label("Range unit")
+        detail_l.addWidget(self.interval_cmp_unit_label)
+        self.interval_cmp_unit = QComboBox()
+        self.interval_cmp_unit.addItem("Percent", BASIS_PERCENT)
+        self.interval_cmp_unit.addItem("Milliseconds", BASIS_MILLISECONDS)
+        self._setup_field(self.interval_cmp_unit)
+        detail_l.addWidget(self.interval_cmp_unit)
+        self.interval_cmp_value_label = self._field_label("Configured tolerance")
+        detail_l.addWidget(self.interval_cmp_value_label)
+        self.interval_cmp_value = QLineEdit()
+        self.interval_cmp_value.setPlaceholderText("e.g. 20")
+        self._setup_field(self.interval_cmp_value)
+        detail_l.addWidget(self.interval_cmp_value)
+        self.interval_cmp_derived = QLabel("")
+        self.interval_cmp_derived.setObjectName("DerivedValue")
+        self.interval_cmp_derived.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.interval_cmp_derived.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        detail_l.addWidget(self.interval_cmp_derived)
+        self.interval_cmp_bounds = QLabel("")
+        self.interval_cmp_bounds.setObjectName("DerivedValue")
+        self.interval_cmp_bounds.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.interval_cmp_bounds.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        detail_l.addWidget(self.interval_cmp_bounds)
+        self.interval_cmp_error = QLabel("")
+        self.interval_cmp_error.setObjectName("Alert")
+        self.interval_cmp_error.setWordWrap(True)
+        self.interval_cmp_error.hide()
+        detail_l.addWidget(self.interval_cmp_error)
+        cmp_l.addWidget(self.interval_cmp_detail)
+        config_l.addWidget(self.interval_cmp_box)
+        self._interval_cmp_updating = False
+        self.interval_cmp_unit.currentIndexChanged.connect(self._on_interval_comparison_unit_changed)
+        self.interval_cmp_value.textChanged.connect(self._refresh_interval_comparison_context)
+        self.hz_combo.currentTextChanged.connect(self._refresh_interval_comparison_context)
 
         config_l.addSpacing(10)
         self.auto_stop_label = self._field_label("Auto Stop")
@@ -1502,7 +1620,7 @@ class MainWindow(QMainWindow):
         preview_grid.setHorizontalSpacing(28)
         preview_grid.setVerticalSpacing(12)
         self._preview_cells: list[tuple[QWidget, QLabel, QLabel]] = []
-        for index in range(6):
+        for index in range(8):
             cell = QWidget()
             cell_l = QVBoxLayout(cell)
             cell_l.setContentsMargins(0, 0, 0, 0)
@@ -1906,6 +2024,11 @@ class MainWindow(QMainWindow):
         self.results_overlay_status.setObjectName("OverlayDelta")
         self.results_overlay_status.setWordWrap(True)
         analysis_l.addWidget(self.results_overlay_status)
+        self.results_comparison_summary = QLabel("")
+        self.results_comparison_summary.setObjectName("Muted")
+        self.results_comparison_summary.setWordWrap(True)
+        self.results_comparison_summary.hide()
+        analysis_l.addWidget(self.results_comparison_summary)
 
         self.results_analysis_split = QSplitter(Qt.Orientation.Horizontal)
         chart_host = QWidget()
@@ -1915,12 +2038,10 @@ class MainWindow(QMainWindow):
         self.results_interval_chart = IntervalChart()
         self.results_distribution_chart = HistogramChart()
         self.results_scatter = ScatterChart()
-        self.results_interval_chart.set_measurement_only_presentation(True)
-        self.results_distribution_chart.set_measurement_only_presentation(True)
-        self.results_scatter.set_measurement_only_presentation(True)
-        self.results_interval_chart.set_data_aware_fit(True)
-        self.results_distribution_chart.set_data_aware_fit(True)
-        self.results_scatter.set_data_aware_fit(True)
+        self.results_hold_chart = HoldChart()
+        for chart in self._results_nav_charts():
+            chart.set_measurement_only_presentation(True)
+            chart.set_data_aware_fit(True)
         self.results_timing_panel = QWidget()
         timing_l = QVBoxLayout(self.results_timing_panel)
         timing_l.setContentsMargins(12, 12, 12, 12)
@@ -1936,6 +2057,7 @@ class MainWindow(QMainWindow):
         self.results_chart_stack.addWidget(self.results_distribution_chart)
         self.results_chart_stack.addWidget(self.results_scatter)
         self.results_chart_stack.addWidget(self.results_timing_panel)
+        self.results_chart_stack.addWidget(self.results_hold_chart)
         chart_l.addWidget(self.results_chart_stack, 1)
         self.results_chart_legend_help = QLabel("")
         self.results_chart_legend_help.setObjectName("Muted")
@@ -2477,9 +2599,8 @@ class MainWindow(QMainWindow):
         self.scatter.set_theme(pal, labels)
         self.interval_chart.set_theme(pal, labels)
         if getattr(self, "results_interval_chart", None) is not None:
-            self.results_interval_chart.set_theme(pal, labels)
-            self.results_distribution_chart.set_theme(pal, labels)
-            self.results_scatter.set_theme(pal, labels)
+            for chart in self._results_nav_charts():
+                chart.set_theme(pal, labels)
             self.results_occupancy_bar.set_theme(pal)
         self._refresh_chart_nav_icons()
 
@@ -2863,6 +2984,7 @@ class MainWindow(QMainWindow):
             self._tr("col_state"),
             self._tr("col_tags"),
             self._tr("col_ref_delta"),
+            self._tr("col_range_position"),
         ]
         self.results_click_table.setHorizontalHeaderLabels(headers)
         state_header = self.results_click_table.horizontalHeaderItem(5)
@@ -2871,11 +2993,13 @@ class MainWindow(QMainWindow):
         header_item = self.results_click_table.horizontalHeaderItem(7)
         if header_item is not None:
             header_item.setToolTip(self._tr("col_ref_delta_tooltip"))
+        range_header = self.results_click_table.horizontalHeaderItem(8)
+        if range_header is not None:
+            range_header.setToolTip(self._tr("col_range_position_tooltip"))
         help_text = self._tr("results_chart_legend_help")
         self.results_chart_legend_help.setText(help_text)
-        self.results_scatter.setToolTip(help_text)
-        self.results_interval_chart.setToolTip(help_text)
-        self.results_distribution_chart.setToolTip(help_text)
+        for chart in self._results_nav_charts():
+            chart.setToolTip(help_text)
         self.btn_new.setText(self._tr("run_again"))
         self.btn_edit_setup_new_run.setText(qt_button_label(self._tr("edit_setup_new_run")))
         self.btn_capture_new_run.setText(self._tr("new_run"))
@@ -2901,6 +3025,18 @@ class MainWindow(QMainWindow):
         self.timing_tol_label.setText(self._tr("fixture_timing_tolerance_ms"))
         self.timing_tol_edit.setPlaceholderText(self._tr("fixture_timing_tolerance_placeholder"))
         self._refresh_association_context()
+        if getattr(self, "lbl_schedule_association", None) is not None:
+            self.lbl_schedule_association.setText(self._tr("schedule_association_section").upper())
+        if getattr(self, "lbl_interval_comparison", None) is not None:
+            self.lbl_interval_comparison.setText(self._tr("interval_comparison_section").upper())
+            self.interval_cmp_enable_label.setText(self._tr("compare_intervals"))
+            self.interval_cmp_off.setText(self._tr("auto_stop_off_button"))
+            self.interval_cmp_on.setText(self._tr("auto_stop_on_button"))
+            self.interval_cmp_unit_label.setText(self._tr("range_unit"))
+            self.interval_cmp_unit.setItemText(0, self._tr("range_unit_percent"))
+            self.interval_cmp_unit.setItemText(1, self._tr("range_unit_milliseconds"))
+            self.interval_cmp_value_label.setText(self._tr("configured_tolerance"))
+            self._refresh_interval_comparison_context()
         self.auto_stop_label.setText(self._tr("auto_stop"))
         self.auto_stop_off.setText(self._tr("auto_stop_off_button"))
         self.auto_stop_on.setText(self._tr("auto_stop_on_button"))
@@ -2982,7 +3118,12 @@ class MainWindow(QMainWindow):
         self.timing_tol_label.setVisible(not manual)
         self.timing_tol_edit.setVisible(not manual)
         self.assoc_context_box.setVisible(not manual)
+        if getattr(self, "lbl_schedule_association", None) is not None:
+            self.lbl_schedule_association.setVisible(not manual)
+        if getattr(self, "interval_cmp_box", None) is not None:
+            self.interval_cmp_box.setVisible(not manual)
         self._sync_auto_stop_widgets()
+        self._sync_interval_comparison_widgets()
         if self._ui_is_manual():
             self.mode_label.setText(self._tr("mode_manual"))
         else:
@@ -3024,6 +3165,82 @@ class MainWindow(QMainWindow):
         self.assoc_overlap_note.setVisible(bool(overlap))
         self.assoc_derived_note.setText(self._tr("assoc_derived_note"))
 
+    def _interval_comparison_enabled_ui(self) -> bool:
+        return bool(getattr(self, "interval_cmp_on", None) and self.interval_cmp_on.isChecked())
+
+    def _interval_comparison_basis_ui(self) -> str:
+        data = self.interval_cmp_unit.currentData() if getattr(self, "interval_cmp_unit", None) else None
+        return str(data or BASIS_PERCENT)
+
+    def _sync_interval_comparison_widgets(self, _checked: bool = False) -> None:
+        if getattr(self, "interval_cmp_detail", None) is None:
+            return
+        on = self._interval_comparison_enabled_ui()
+        self.interval_cmp_detail.setVisible(on and not self._ui_is_manual())
+        self.interval_cmp_off.setObjectName("Primary" if not on else "Secondary")
+        self.interval_cmp_on.setObjectName("Primary" if on else "Secondary")
+        for btn in (self.interval_cmp_off, self.interval_cmp_on):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+        self._refresh_interval_comparison_context()
+
+    def _on_interval_comparison_unit_changed(self, _index: int = 0) -> None:
+        if self._interval_cmp_updating:
+            return
+        new_basis = self._interval_comparison_basis_ui()
+        try:
+            hz = parse_reference_rate_hz(self.hz_combo.currentText())
+            old_basis = BASIS_MILLISECONDS if new_basis == BASIS_PERCENT else BASIS_PERCENT
+            value = parse_comparison_value(self.interval_cmp_value.text())
+            converted = convert_authoritative_value(
+                reference_hz=hz, from_basis=old_basis, value=value, to_basis=new_basis,
+            )
+        except (ValueError, IntervalComparisonError):
+            self._refresh_interval_comparison_context()
+            return
+        self._interval_cmp_updating = True
+        self.interval_cmp_value.setText(f"{converted:g}")
+        self._interval_cmp_updating = False
+        self._refresh_interval_comparison_context()
+
+    def _refresh_interval_comparison_context(self, _text: str = "") -> None:
+        if getattr(self, "interval_cmp_derived", None) is None:
+            return
+        derived_label = self._tr("derived_equivalent")
+        bounds_label = self._tr("interval_bounds")
+        self.interval_cmp_error.setText("")
+        self.interval_cmp_error.hide()
+        if not self._interval_comparison_enabled_ui() or self._ui_is_manual():
+            self.interval_cmp_derived.setText(f"{derived_label}: —")
+            self.interval_cmp_bounds.setText(f"{bounds_label}: —")
+            return
+        try:
+            hz = parse_reference_rate_hz(self.hz_combo.currentText())
+            rng = resolve_configured_range(
+                reference_hz=hz,
+                basis=self._interval_comparison_basis_ui(),
+                value=self.interval_cmp_value.text(),
+            )
+        except (ValueError, IntervalComparisonError) as exc:
+            self.interval_cmp_derived.setText(f"{derived_label}: —")
+            self.interval_cmp_bounds.setText(f"{bounds_label}: —")
+            if isinstance(exc, IntervalComparisonError) and self.interval_cmp_value.text().strip():
+                self.interval_cmp_error.setText(self._tr(exc.key))
+                self.interval_cmp_error.show()
+            return
+        if rng["basis"] == BASIS_PERCENT:
+            derived = self._tr("interval_comparison_derived_ms", ms=f"{rng['tolerance_ms']:.2f}")
+        else:
+            derived = self._tr("interval_comparison_derived_pct", pct=f"{rng['tolerance_pct']:.2f}")
+        bounds = self._tr(
+            "interval_comparison_bounds",
+            lo=f"{rng['lower_bound_ms']:.2f}",
+            hi=f"{rng['upper_bound_ms']:.2f}",
+        )
+        self.interval_cmp_derived.setText(f"{derived_label}: {derived}")
+        self.interval_cmp_bounds.setText(f"{bounds_label}: {bounds}")
+
     def _sync_auto_stop_widgets(self):
         on = self.auto_stop_on.isChecked()
         self.auto_stop_label.setVisible(True)
@@ -3060,6 +3277,16 @@ class MainWindow(QMainWindow):
                 parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
             except ValueError as exc:
                 raise ProfileValidationError("fixture_timing_tolerance_invalid") from exc
+            if self._interval_comparison_enabled_ui():
+                try:
+                    hz = parse_reference_rate_hz(self.hz_combo.currentText())
+                    resolve_configured_range(
+                        reference_hz=hz,
+                        basis=self._interval_comparison_basis_ui(),
+                        value=self.interval_cmp_value.text(),
+                    )
+                except IntervalComparisonError as exc:
+                    raise ProfileValidationError(exc.key) from exc
         return copy.deepcopy(self.settings())
 
     def _lifecycle_state(self) -> str:
@@ -3232,6 +3459,8 @@ class MainWindow(QMainWindow):
             self.results_tags_label.setText("")
             self.results_overlay_status.setText("")
             self.results_context_label.setText("")
+            self.results_comparison_summary.setText("")
+            self.results_comparison_summary.hide()
             self.results_evidence_na.show()
             self.results_evidence_body.hide()
             self.results_click_table.setRowCount(0)
@@ -3239,6 +3468,7 @@ class MainWindow(QMainWindow):
         model = facts["model"]
         self.val_clicks.setText(str(int(model["run"]["host_press_count"])))
         self.results_context_label.setText(self._format_run_context(model))
+        self._refresh_comparison_summary(model)
         visible_tags = model["assessment"]["tags"]
         self.results_verdict_label.setText(self._run_status_display(model["run"]["run_status"]))
         if self._measurement_only_presentation():
@@ -3265,6 +3495,28 @@ class MainWindow(QMainWindow):
             self.results_overlay_status.setText(self.overlay_delta_label.text())
         else:
             self.results_overlay_status.setText("")
+
+    def _refresh_comparison_summary(self, model: dict[str, Any]) -> None:
+        comparison = self._completed_interval_comparison(model)
+        if not comparison.get("enabled"):
+            self.results_comparison_summary.setText("")
+            self.results_comparison_summary.hide()
+            return
+        positions = [str(row.get("range_position") or "") for row in model.get("click_data") or []]
+        summary = summarize_positions(positions)
+        comparable = int(summary["comparable_interval_count"] or 0)
+        within_pct = summary.get("within_pct")
+        pct_text = f"{within_pct:.2f}%" if within_pct is not None else self._tr("na")
+        counts = (
+            f"{self._tr('cmp_comparable_intervals')}: {comparable}"
+            f"  ·  {self._tr('cmp_within')}: {int(summary['within_count'] or 0)}"
+            f"  ·  {self._tr('cmp_outside')}: {int(summary['outside_count'] or 0)}"
+            f" ({self._tr('cmp_below')}: {int(summary['below_count'] or 0)},"
+            f" {self._tr('cmp_above')}: {int(summary['above_count'] or 0)})"
+        )
+        pct = f"{self._tr('cmp_within_pct')}: {pct_text}"
+        self.results_comparison_summary.setText(f"{counts}\n{pct}")
+        self.results_comparison_summary.show()
 
     def _populate_evidence_tab(self, model: dict[str, Any]) -> None:
         snapshot = model["host_evidence"]["snapshot"]
@@ -3376,27 +3628,63 @@ class MainWindow(QMainWindow):
                     "" if row.get("reference_delta_ms") is None else f"{row['reference_delta_ms']:.2f}",
                     row.get("reference_delta_ms"),
                 ),
+                (
+                    self._range_position_label(str(row.get("range_position") or POSITION_NOT_COMPARABLE)),
+                    RANGE_POSITION_SORT_RANK.get(str(row.get("range_position") or ""), None),
+                ),
             )
             for c, (display, sort_value) in enumerate(cells):
                 item = QTableWidgetItem(display)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 item.setData(Qt.ItemDataRole.UserRole, sort_value)
                 item.setData(Qt.ItemDataRole.UserRole + 1, r)
+                if c == CLICK_TABLE_ID_TO_INDEX.get("range_position") and str(row.get("range_position") or "") in {
+                    POSITION_BELOW, POSITION_ABOVE,
+                }:
+                    item.setForeground(QColor(get_palette(self.theme).extra))
                 table.setItem(r, c, item)
-        self._apply_click_table_column_visibility()
+        self._apply_click_table_column_visibility(model)
         self._set_click_sort("index", False)
 
-    def _click_table_visible_ids(self) -> tuple[str, ...]:
-        if self._measurement_only_presentation():
-            return CLICK_TABLE_MEASUREMENT_VISIBLE_IDS
-        return CLICK_TABLE_COLUMN_IDS
+    def _completed_interval_comparison(self, model: dict[str, Any] | None = None) -> dict[str, Any]:
+        if model and model.get("interval_comparison"):
+            return dict(model["interval_comparison"])
+        facts = self._completed_run_facts() if model is None else None
+        if facts and facts.get("model"):
+            return dict(facts["model"].get("interval_comparison") or {"enabled": False})
+        settings = self.locked or {}
+        return freeze_interval_comparison(settings, manual=_is_manual_profile(settings))
 
-    def _apply_click_table_column_visibility(self) -> None:
+    def _configured_range_bounds(self, settings: dict[str, Any] | None = None, model: dict[str, Any] | None = None):
+        if model is not None:
+            return range_bounds(self._completed_interval_comparison(model))
+        src = settings if settings is not None else (self.locked or self.settings())
+        return range_bounds(freeze_interval_comparison(src, manual=_is_manual_profile(src)))
+
+    def _range_position_label(self, token: str) -> str:
+        mapping = {
+            POSITION_WITHIN: "range_position_within",
+            POSITION_BELOW: "range_position_below",
+            POSITION_ABOVE: "range_position_above",
+        }
+        key = mapping.get(token)
+        return self._tr(key) if key else self._tr("range_position_blank")
+
+    def _click_table_visible_ids(self, model: dict[str, Any] | None = None) -> tuple[str, ...]:
+        ids = list(CLICK_TABLE_MEASUREMENT_VISIBLE_IDS if self._measurement_only_presentation() else CLICK_TABLE_COLUMN_IDS)
+        comparison = self._completed_interval_comparison(model)
+        if comparison.get("enabled") and "range_position" not in ids:
+            ids.append("range_position")
+        elif not comparison.get("enabled"):
+            ids = [column_id for column_id in ids if column_id != "range_position"]
+        return tuple(ids)
+
+    def _apply_click_table_column_visibility(self, model: dict[str, Any] | None = None) -> None:
         table = getattr(self, "results_click_table", None)
         if table is None:
             return
         header = table.horizontalHeader()
-        visible = set(self._click_table_visible_ids())
+        visible = set(self._click_table_visible_ids(model))
         for index, column_id in enumerate(CLICK_TABLE_COLUMN_IDS):
             hidden = column_id not in visible
             header.setSectionHidden(index, hidden)
@@ -3524,6 +3812,7 @@ class MainWindow(QMainWindow):
         combo.clear()
         combo.addItem(self._tr("interval_over_time"), "interval")
         combo.addItem(self._tr("interval_distribution"), "distribution")
+        combo.addItem(self._tr("hold_over_time"), "hold")
         combo.addItem(self._tr("hold_vs_interval"), "scatter")
         if not model["run"]["manual"] and model["host_evidence"]["snapshot"] is not None:
             combo.addItem(self._tr("timing_error"), "timing")
@@ -3536,7 +3825,7 @@ class MainWindow(QMainWindow):
 
     def _on_analysis_view_changed(self, _index: int = 0):
         key = self.results_view_combo.currentData()
-        mapping = {"interval": 0, "distribution": 1, "scatter": 2, "timing": 3}
+        mapping = {"interval": 0, "distribution": 1, "scatter": 2, "timing": 3, "hold": 4}
         self.results_chart_stack.setCurrentIndex(mapping.get(key, 1))
         facts = self._completed_run_facts()
         if facts:
@@ -3555,12 +3844,12 @@ class MainWindow(QMainWindow):
         pal = get_palette(self.theme)
         run_id = str((model.get("run") or {}).get("run_id") or "")
         reset_nav = getattr(self, "_results_nav_run_id", None) != run_id
-        for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
+        for chart in self._results_nav_charts():
             chart.set_theme(pal, labels)
             chart.set_pan_enabled(True)
         if reset_nav:
             self._results_nav_run_id = run_id
-            for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
+            for chart in self._results_nav_charts():
                 chart.clear_navigation()
                 chart.set_data_aware_fit(True)
         self.results_occupancy_bar.set_theme(pal)
@@ -3573,27 +3862,37 @@ class MainWindow(QMainWindow):
                     capture_duration_ms = elapsed_s * 1000.0
         except (TypeError, ValueError):
             capture_duration_ms = None
+        configured = range_bounds(self._completed_interval_comparison(model))
         self.results_interval_chart.set_series(
             analysis["interval_series"],
             title=self._tr("interval_over_time"),
             overlay=ov_series,
             target_beat_ms=beat,
             capture_duration_ms=capture_duration_ms,
+            configured_range=configured,
         )
         self.results_distribution_chart.set_bins(
             current_hist,
             title=self._tr("interval_distribution"),
             overlay=overlay_hist,
             target_beat_ms=beat,
+            configured_range=configured,
         )
         self.results_scatter.set_points(
             analysis["scatter_points"],
             title=self._tr("hold_vs_interval"),
             overlay=ov_pts,
             target_beat_ms=beat,
+            configured_range=configured,
+        )
+        self.results_hold_chart.set_series(
+            analysis.get("hold_series") or [],
+            title=self._tr("hold_over_time"),
+            overlay=self._hold_series(overlay_ann),
+            capture_duration_ms=capture_duration_ms,
         )
         if reset_nav:
-            for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
+            for chart in self._results_nav_charts():
                 chart.fit_data()
                 chart.set_pan_enabled(True)
         snapshot = model["host_evidence"]["snapshot"]
@@ -3744,7 +4043,18 @@ class MainWindow(QMainWindow):
                 tolerance_ms = parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
             except ValueError:
                 tolerance_ms = None
-        return stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=tolerance_ms)
+        stamped = stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=tolerance_ms)
+        cmp_value = None
+        try:
+            cmp_value = parse_comparison_value(self.interval_cmp_value.text())
+        except IntervalComparisonError:
+            cmp_value = None
+        return stamp_qt_interval_comparison(
+            stamped,
+            enabled=self._interval_comparison_enabled_ui(),
+            basis=self._interval_comparison_basis_ui(),
+            value=cmp_value,
+        )
 
     # ── Overlay ─────────────────────────────────────────────────────
     def _run_result_and_clicks(
@@ -4011,6 +4321,21 @@ class MainWindow(QMainWindow):
                 series.append((float(elapsed), float(iv)))
         return pts, series
 
+    @staticmethod
+    def _hold_series(annotated: list[dict[str, Any]]) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for e in annotated:
+            if not e.get("accepted"):
+                continue
+            try:
+                hold = float(e.get("hold_ms"))
+                elapsed = float(e.get("press_elapsed_ms"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(hold) and math.isfinite(elapsed) and hold >= 0 and elapsed >= 0:
+                out.append((elapsed, hold))
+        return out
+
     def _on_capture_view_id(self, index: int) -> None:
         self._set_capture_view("stability" if index == 0 else "interval")
 
@@ -4072,7 +4397,17 @@ class MainWindow(QMainWindow):
             return self.results_distribution_chart
         if key == "scatter":
             return self.results_scatter
+        if key == "hold":
+            return self.results_hold_chart
         return None
+
+    def _results_nav_charts(self) -> tuple:
+        return (
+            self.results_interval_chart,
+            self.results_distribution_chart,
+            self.results_scatter,
+            self.results_hold_chart,
+        )
 
     def _on_results_fit_data(self) -> None:
         chart = self._active_results_chart()
@@ -4103,9 +4438,8 @@ class MainWindow(QMainWindow):
         ):
             btn.setEnabled(enabled)
         if getattr(self, "results_interval_chart", None) is not None:
-            self.results_interval_chart.set_pan_enabled(True)
-            self.results_distribution_chart.set_pan_enabled(True)
-            self.results_scatter.set_pan_enabled(True)
+            for chart in self._results_nav_charts():
+                chart.set_pan_enabled(True)
 
     # ── Capture lifecycle ───────────────────────────────────────────
     def _reset_live_values_for_listen(self):
@@ -4293,6 +4627,23 @@ class MainWindow(QMainWindow):
             tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
             if tol is not None:
                 self.timing_tol_edit.setText(f"{float(tol):g}")
+        fields = read_settings_fields(settings)
+        self._interval_cmp_updating = True
+        idx = self.interval_cmp_unit.findData(fields["basis"])
+        if idx >= 0:
+            self.interval_cmp_unit.setCurrentIndex(idx)
+        if fields["value"] is not None:
+            try:
+                self.interval_cmp_value.setText(f"{float(fields['value']):g}")
+            except (TypeError, ValueError):
+                self.interval_cmp_value.clear()
+        else:
+            self.interval_cmp_value.clear()
+        if fields["enabled"]:
+            self.interval_cmp_on.setChecked(True)
+        else:
+            self.interval_cmp_off.setChecked(True)
+        self._interval_cmp_updating = False
         duration = settings.get("duration_sec")
         if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
             self.auto_stop_on.setChecked(True)
@@ -4561,6 +4912,7 @@ class MainWindow(QMainWindow):
         for w in (
             self.radio_manual, self.radio_fixture, self.button_combo, self.hz_combo,
             self.timing_tol_edit, self.auto_stop_off, self.auto_stop_on, self.auto_stop_sec_combo,
+            self.interval_cmp_off, self.interval_cmp_on, self.interval_cmp_unit, self.interval_cmp_value,
             self.device_edit, *self._limit_edits.values(),
         ):
             w.setEnabled(editable)
@@ -4814,6 +5166,10 @@ class MainWindow(QMainWindow):
             self.button_combo,
             self.hz_combo,
             self.timing_tol_edit,
+            self.interval_cmp_off,
+            self.interval_cmp_on,
+            self.interval_cmp_unit,
+            self.interval_cmp_value,
             self.auto_stop_off,
             self.auto_stop_on,
             self.auto_stop_sec_combo,
@@ -5007,12 +5363,15 @@ class MainWindow(QMainWindow):
         capture_duration_ms = None
         if isinstance(duration_s, (int, float)) and not isinstance(duration_s, bool) and duration_s > 0:
             capture_duration_ms = float(duration_s) * 1000.0
+        frozen = freeze_interval_comparison(settings, manual=_is_manual_profile(settings))
+        configured = range_bounds(frozen)
         self.scatter.set_points(
             pts,
             title=self._tr("chart_stability_map"),
             subtitle=subtitle,
             overlay=ov_pts,
             target_beat_ms=reference,
+            configured_range=configured,
         )
         self.interval_chart.set_series(
             series,
@@ -5020,6 +5379,7 @@ class MainWindow(QMainWindow):
             overlay=ov_series,
             target_beat_ms=reference,
             capture_duration_ms=capture_duration_ms,
+            configured_range=configured,
         )
 
     def closeEvent(self, event):

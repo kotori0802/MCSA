@@ -74,11 +74,59 @@
     "note": "Count label for accepted Host presses. Related to Host observation but kept as a count/grammar variant so UI copy stays natural. IS NOT a PASS count.",
     "help": "How many accepted button presses the Host recorded."
   },
+  "term.above_configured_range": {
+    "en": "Above configured range",
+    "zh-TW": "高於設定範圍",
+    "note": "Observed interval is greater than the configured upper bound. Factual position only. IS NOT FAIL, abnormal, or a DUT verdict.",
+    "help": "This interval is longer than the upper bound of the engineer-configured range."
+  },
+  "term.below_configured_range": {
+    "en": "Below configured range",
+    "zh-TW": "低於設定範圍",
+    "note": "Observed interval is less than the configured lower bound. Factual position only. IS NOT FAIL, abnormal, or a DUT verdict.",
+    "help": "This interval is shorter than the lower bound of the engineer-configured range."
+  },
+  "term.configured_interval_range": {
+    "en": "Configured interval range",
+    "zh-TW": "設定間隔範圍",
+    "note": "Engineer-configured inclusive bounds around the Reference Interval. Distinct from Schedule Association Window. IS NOT a PASS/FAIL criterion.",
+    "help": "The interval bounds the engineer configured for comparison."
+  },
+  "term.configured_range": {
+    "en": "Configured range",
+    "zh-TW": "設定範圍",
+    "note": "Short chart/legend form of Configured interval range. Presentation band only. IS NOT a pass range, acceptable range, or failure zone.",
+    "help": "The engineer-configured interval bounds drawn on the chart."
+  },
   "term.interval": {
     "en": "Interval",
     "zh-TW": "間隔",
     "note": "Press-to-press interval. Distinct from Hold and from Reference Interval / matched timing error.",
     "help": "Time from one press to the next press."
+  },
+  "term.interval_comparison": {
+    "en": "Interval comparison",
+    "zh-TW": "間隔比較",
+    "note": "Optional Fixture comparison of observed press intervals against a configured range. Distinct from Schedule Association. IS NOT a DUT verdict.",
+    "help": "Compares each observed press-to-press interval with the engineer-configured range."
+  },
+  "term.outside_configured_range": {
+    "en": "Outside configured range",
+    "zh-TW": "超出設定範圍",
+    "note": "Observed interval is below or above the configured bounds. Factual position only. IS NOT FAIL.",
+    "help": "This interval is outside the engineer-configured range."
+  },
+  "term.range_position": {
+    "en": "Range position",
+    "zh-TW": "範圍位置",
+    "note": "Factual Within / Below / Above / not comparable label for one observed interval. IS NOT a DUT result column.",
+    "help": "Where this observed interval sits relative to the configured range."
+  },
+  "term.within_configured_range": {
+    "en": "Within configured range",
+    "zh-TW": "在設定範圍內",
+    "note": "Observed interval is inside the inclusive configured bounds. Factual position only. IS NOT PASS or a good click.",
+    "help": "This interval is inside the engineer-configured range."
   },
   "term.measurement_only": {
     "en": "Measurement only",

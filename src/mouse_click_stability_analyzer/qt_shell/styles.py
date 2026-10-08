@@ -157,6 +157,8 @@ class ChartPalette:
     target_line: str
     interval_line: str
     interval_fill: str
+    range_band: str
+    range_edge: str
 
 
 LIGHT_PALETTE = ChartPalette(
@@ -176,6 +178,8 @@ LIGHT_PALETTE = ChartPalette(
     target_line="#34c759",
     interval_line="#007aff",
     interval_fill="#007aff22",
+    range_band="#6f9a7b",
+    range_edge="#7f9c88",
 )
 
 DARK_PALETTE = ChartPalette(
@@ -195,6 +199,8 @@ DARK_PALETTE = ChartPalette(
     target_line="#30d158",
     interval_line="#0a84ff",
     interval_fill="#0a84ff33",
+    range_band="#9cc4a8",
+    range_edge="#7d9a86",
 )
 
 LIGHT_STYLE = """

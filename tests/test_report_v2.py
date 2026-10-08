@@ -447,7 +447,12 @@ class ReportV2QtTests(unittest.TestCase):
         captions = tuple(figures)
         self.assertEqual(captions[0], "Interval over time")
         self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
-        self.assertEqual(captions[2], "Hold vs Interval")
+        self.assertEqual(captions[2], "Hold over time")
+        self.assertEqual(captions[3], "Hold vs Interval")
+        hold_body = figures.pop("Hold over time")
+        for neutral in ("class='ref'", "class='band'", "class='bnd'", "class='out'", "class='legend'"):
+            self.assertNotIn(neutral, hold_body)
+        self.assertIn("Hold (ms)", hold_body)
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertEqual(body.count("class='ref'"), 1)
@@ -485,7 +490,8 @@ class ReportV2QtTests(unittest.TestCase):
         captions = tuple(figures)
         self.assertEqual(captions[0], "Interval over time")
         self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
-        self.assertEqual(captions[2], "Hold vs Interval")
+        self.assertEqual(captions[2], "Hold over time")
+        self.assertEqual(captions[3], "Hold vs Interval")
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertNotIn("class='ref'", body)
@@ -503,6 +509,10 @@ class ReportV2QtTests(unittest.TestCase):
     def test_xlsx_charts_keep_axis_sources_and_add_reference_series(self):
         _, paths = self._golden()
         charts = _xlsx_charts(Path(paths["engineering_xlsx"]))
+        hold_over_time = charts.pop("Hold over time")
+        self.assertEqual([s["title"] for s in hold_over_time], ["Host observation"])
+        self.assertRegex(hold_over_time[0]["x"], r"^'Click Data'!\$B\$2:\$B\$\d+$")
+        self.assertRegex(hold_over_time[0]["y"], r"^'Click Data'!\$E\$2:\$E\$\d+$")
         self.assertEqual(set(charts), set(_CHART_TITLES))
         interval, hold = charts["Interval over time"][0], charts["Hold vs Interval"][0]
         self.assertRegex(interval["x"], r"^'Click Data'!\$B\$2:\$B\$\d+$")

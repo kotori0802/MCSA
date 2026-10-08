@@ -30,6 +30,8 @@ Future characterization analysis may use only these fields from MCSA report arti
 | `settings.fixture_reference_hz` | `_evidence.json` `settings` | Configured Reference Rate. Defines the **nominal configured schedule** for characterization |
 | `settings.fixture_timing_tolerance_ms` | `_evidence.json` `settings` | Operational Schedule Association Window for that run (numeric ms) |
 
+Configured Interval Range fields are not characterization inputs. See section 8.
+
 ### Primary observation timeline
 
 | Field | Artifact | Meaning |
@@ -173,7 +175,7 @@ That run used Fixture software mode with hand actuation. It is valid only as an 
 
 ## 6. Schema version
 
-Stage 2C standard machine-readable contract:
+Stage 2C/2D standard machine-readable contract:
 
 - evidence: `MCSA_EVIDENCE_V1` (`schema` / `schema_version`)
 
@@ -201,3 +203,19 @@ reports/
 - `artifacts` and `report_artifacts_verified` inside the evidence JSON hold package-relative file names only (`evidence_json`, `events_csv`, `report_html`, `report_xlsx`). No absolute machine path is stored.
 - `report_generated_at` is the report-writer wall-clock time. It is not a run completion time; no frozen completion timestamp exists. Run duration is `elapsed_s`.
 - Historical flat files directly under `reports/` (`mcsa_<id>_evidence.json`, `_detail.json`, `_summary.json`) are not migrated and remain readable. Discovery prefers the nested package evidence, then flat evidence, then flat detail; one entry per run id. Siblings are resolved relative to the discovered file's folder.
+
+## 8. Configured Interval Range (Stage 2D)
+
+Independent of Schedule Association Window. Persisted settings keys:
+
+- `interval_comparison_enabled`
+- `interval_comparison_basis` (`percent` | `milliseconds`)
+- `interval_comparison_value` (one authoritative number)
+
+Frozen evidence (when enabled) also stores derived `tolerance_pct`, `tolerance_ms`, `lower_bound_ms`, `upper_bound_ms`, and factual counts. This is observation-versus-range evidence only. It is not a DUT verdict and does not change `run_status`.
+
+`events.csv` does not store range position. Reconstruct it from `press_interval_ms` plus the frozen comparison contract.
+
+Do not infer interval comparison from `fixture_timing_tolerance_ms`. Do not use `fixture_timing_tolerance_ms` as the comparison range.
+
+Characterization does not depend on these fields. Eligibility, inputs, and math are identical whether comparison was enabled, disabled, or absent (pre-Stage 2D artifacts). Readers may ignore every `interval_comparison*` key. They are not characterization inputs, filters, or weights.

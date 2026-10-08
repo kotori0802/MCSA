@@ -5,7 +5,7 @@ import math
 from typing import Callable
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QPolygonF
 from PySide6.QtWidgets import QToolTip, QWidget
 
 from ..chart_domain import (
@@ -13,6 +13,13 @@ from ..chart_domain import (
     DOMAIN_HOLD,
     DOMAIN_INTERVAL,
     domain_axis_bounds,
+)
+from ..interval_comparison import (
+    POSITION_ABOVE,
+    POSITION_BELOW,
+    POSITION_NOT_COMPARABLE,
+    POSITION_WITHIN,
+    classify_interval,
 )
 from ..duration import elapsed_axis_uses_seconds, format_elapsed_axis_tick
 from .presentation import screening_presentation_label
@@ -32,6 +39,8 @@ NAV_CONTEXT_FACTOR = 4.0
 AXIS_CONTEXT = "context"
 AXIS_ELAPSED = "elapsed"
 HOVER_HIT_PX = 12.0
+# Low-emphasis fill so the band never competes with observation markers.
+RANGE_BAND_ALPHA = 38
 
 
 def nice_ticks(vmin: float, vmax: float, target: int = 5) -> list[float]:
@@ -131,6 +140,20 @@ def fitted_range(
     if hi <= lo:
         return lo, lo + span_floor
     return lo, hi
+
+
+def _range_anchors(bounds: tuple[float, float] | None) -> list[float]:
+    if not bounds:
+        return []
+    try:
+        lo, hi = float(bounds[0]), float(bounds[1])
+    except (TypeError, ValueError, IndexError):
+        return []
+    return [v for v in (lo, hi) if math.isfinite(v)]
+
+
+def _guide_anchors(center: float | None, bounds: tuple[float, float] | None = None) -> list[float]:
+    return _reference_anchors(center) + _range_anchors(bounds)
 
 
 def _reference_anchors(center: float | None) -> list[float]:
@@ -237,6 +260,7 @@ class _ChartBase(QWidget):
         self.factual_guides = False
         self.measurement_only_presentation = False
         self.target_beat_ms: float | None = None
+        self.configured_range: tuple[float, float] | None = None
         self.zoom_locked = False
         self._user_view: tuple[float, float, float, float] | None = None
         self._nav_home: tuple[float, float, float, float] | None = None
@@ -635,16 +659,159 @@ class _ChartBase(QWidget):
             self.unsetCursor()
         super().leaveEvent(event)
 
+    def _comparison_contract(self) -> dict | None:
+        if not self.configured_range:
+            return None
+        lo, hi = self.configured_range
+        return {"enabled": True, "lower_bound_ms": lo, "upper_bound_ms": hi}
+
+    def _range_position(self, interval_ms: float) -> str:
+        return classify_interval(interval_ms, self._comparison_contract())
+
+    def range_layers(self) -> list[tuple[str, float]]:
+        """Semantic guide layers drawn for the configured range, in paint order."""
+        layers: list[tuple[str, float]] = []
+        if self.configured_range:
+            lo, hi = self.configured_range
+            layers += [("band_lower", lo), ("band_upper", hi), ("lower_bound", lo), ("upper_bound", hi)]
+        for ref in _reference_anchors(self.target_beat_ms):
+            layers.append(("reference", ref))
+        return layers
+
+    def _range_legend_items(self) -> list[tuple[str, str]]:
+        if not self.configured_range:
+            return []
+        return [(self.palette.range_edge, self._label("legend_configured_range", "Configured range"))]
+
+    def _comparison_legend_items(self) -> list[tuple[str, str]]:
+        if not self.configured_range:
+            return []
+        pal = self.palette
+        return self._range_legend_items() + [
+            (pal.on_cadence, self._label("legend_within_configured_range", "Within configured range")),
+            (pal.extra, self._label("legend_outside_configured_range", "Outside configured range")),
+        ]
+
     def _guide_legend_items(self) -> list[tuple[str, str]]:
         items: list[tuple[str, str]] = []
         pal = self.palette
-        if not self.target_beat_ms:
+        if not self.target_beat_ms and not self.configured_range:
             return items
         if self.factual_guides or self.measurement_only_presentation:
-            items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+            if self.target_beat_ms:
+                items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
         else:
-            items.append((pal.target_line, self._label("legend_target", "Target beat")))
+            if self.target_beat_ms:
+                items.append((pal.target_line, self._label("legend_target", "Target beat")))
         return items
+
+    def _draw_range_band(
+        self,
+        p: QPainter,
+        plot: QRectF,
+        *,
+        map_lo: float,
+        map_hi: float,
+        vertical: bool,
+    ) -> None:
+        if not self.configured_range:
+            return
+        pal = self.palette
+        fill = QColor(pal.range_band)
+        fill.setAlpha(RANGE_BAND_ALPHA)
+        a, b = (map_lo, map_hi) if map_lo <= map_hi else (map_hi, map_lo)
+        if vertical:
+            x0 = max(plot.left(), a)
+            x1 = min(plot.right(), b)
+            if x1 > x0:
+                p.fillRect(QRectF(x0, plot.top(), x1 - x0, plot.height()), fill)
+        else:
+            y0 = max(plot.top(), a)
+            y1 = min(plot.bottom(), b)
+            if y1 > y0:
+                p.fillRect(QRectF(plot.left(), y0, plot.width(), y1 - y0), fill)
+        p.setPen(QPen(QColor(pal.range_edge), 1, Qt.PenStyle.SolidLine))
+        for edge in (map_lo, map_hi):
+            if vertical and plot.left() <= edge <= plot.right():
+                p.drawLine(QPointF(edge, plot.top()), QPointF(edge, plot.bottom()))
+            elif not vertical and plot.top() <= edge <= plot.bottom():
+                p.drawLine(QPointF(plot.left(), edge), QPointF(plot.right(), edge))
+
+    def _draw_vertical_range(self, p: QPainter, plot: QRectF, map_x: Callable[[float], float]) -> None:
+        if not self.configured_range:
+            return
+        lo, hi = self.configured_range
+        self._draw_range_band(p, plot, map_lo=map_x(lo), map_hi=map_x(hi), vertical=True)
+
+    def _draw_horizontal_range(self, p: QPainter, plot: QRectF, map_y: Callable[[float], float]) -> None:
+        if not self.configured_range:
+            return
+        lo, hi = self.configured_range
+        self._draw_range_band(p, plot, map_lo=map_y(lo), map_hi=map_y(hi), vertical=False)
+
+    def _draw_comparison_marker(self, p: QPainter, pt: QPointF, position: str, *, radius: float = 3.4) -> None:
+        pal = self.palette
+        outside = position in (POSITION_BELOW, POSITION_ABOVE)
+        color = QColor(pal.extra if outside else pal.on_cadence)
+        p.setBrush(QBrush(color))
+        p.setPen(QPen(color.darker(120), 1))
+        if outside:
+            diamond = QPolygonF([
+                QPointF(pt.x(), pt.y() - radius - 0.6),
+                QPointF(pt.x() + radius + 0.6, pt.y()),
+                QPointF(pt.x(), pt.y() + radius + 0.6),
+                QPointF(pt.x() - radius - 0.6, pt.y()),
+            ])
+            p.drawPolygon(diamond)
+        else:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(pt, radius, radius)
+
+    def _comparison_tooltip_lines(self, interval_ms: float) -> list[str]:
+        contract = self._comparison_contract()
+        if not contract:
+            return []
+        position = self._range_position(interval_ms)
+        lo, hi = self.configured_range or (0.0, 0.0)
+        pos_key = {
+            POSITION_WITHIN: "legend_within_configured_range",
+            POSITION_BELOW: "range_position_below",
+            POSITION_ABOVE: "range_position_above",
+        }.get(position)
+        pos_label = {
+            POSITION_WITHIN: "Within configured range",
+            POSITION_BELOW: "Below configured range",
+            POSITION_ABOVE: "Above configured range",
+        }.get(position, "")
+        lines = [
+            self._label("hover_observed_interval", "Observed interval: {value} ms").replace(
+                "{value}", f"{interval_ms:.2f}"
+            ),
+            self._label("hover_configured_range", "Configured range: {lo}–{hi} ms")
+            .replace("{lo}", f"{lo:.2f}")
+            .replace("{hi}", f"{hi:.2f}"),
+        ]
+        if pos_key:
+            lines.append(
+                self._label("hover_position", "Range position: {position}").replace(
+                    "{position}", self._label(pos_key, pos_label)
+                )
+            )
+        if position == POSITION_ABOVE:
+            delta = interval_ms - hi
+            lines.append(
+                self._label("hover_distance_above", "Distance above upper bound: +{value} ms").replace(
+                    "{value}", f"{delta:.2f}"
+                )
+            )
+        elif position == POSITION_BELOW:
+            delta = lo - interval_ms
+            lines.append(
+                self._label("hover_distance_below", "Distance below lower bound: {value} ms").replace(
+                    "{value}", f"{delta:.2f}"
+                )
+            )
+        return lines
 
     def _draw_title(self, p: QPainter) -> None:
         pal = self.palette
@@ -659,6 +826,7 @@ class _ChartBase(QWidget):
     # Interval-domain charts draw only the configured reference. The Schedule
     # Association Window applies to timestamps, so it has no interval-axis band.
     def _draw_vertical_guides(self, p: QPainter, plot: QRectF, map_x: Callable[[float], float]) -> None:
+        self._draw_vertical_range(p, plot, map_x)
         if not self.target_beat_ms:
             return
         pal = self.palette
@@ -667,6 +835,7 @@ class _ChartBase(QWidget):
         p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
 
     def _draw_horizontal_guides(self, p: QPainter, plot: QRectF, map_y: Callable[[float], float]) -> None:
+        self._draw_horizontal_range(p, plot, map_y)
         if not self.target_beat_ms:
             return
         pal = self.palette
@@ -801,6 +970,7 @@ class ScatterChart(_ChartBase):
         subtitle: str = "",
         overlay: list[tuple] | None = None,
         target_beat_ms: float | None = None,
+        configured_range: tuple[float, float] | None = None,
     ):
         self.points = list(points or [])
         self.overlay_points = list(overlay or [])
@@ -808,7 +978,14 @@ class ScatterChart(_ChartBase):
             self.title = title
         self.subtitle = subtitle or ""
         self.target_beat_ms = target_beat_ms
+        self.configured_range = configured_range
         self.update()
+
+    def point_range_positions(self) -> list[str]:
+        """Range positions for the base points only; overlay is never classified."""
+        if not self.configured_range:
+            return []
+        return [self._range_position(pt[0]) for pt in self.points]
 
     def _class_color(self, cls: str) -> str:
         pal = self.palette
@@ -829,7 +1006,10 @@ class ScatterChart(_ChartBase):
 
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
-        if self.measurement_only_presentation:
+        comparison_items = self._comparison_legend_items()
+        if comparison_items:
+            items = list(comparison_items)
+        elif self.measurement_only_presentation:
             items = [
                 (pal.on_cadence, self._label("legend_host_observation", "Host observation")),
             ]
@@ -852,7 +1032,7 @@ class ScatterChart(_ChartBase):
 
     def autofit_bounds(self) -> tuple[float, float, float, float] | None:
         xs, ys = self._xy_values()
-        extras = _reference_anchors(self.target_beat_ms)
+        extras = _guide_anchors(self.target_beat_ms, self.configured_range)
         if not xs and not extras:
             return fitted_range([], min_span=SCATTER_X_MIN_SPAN_MS) + fitted_range([], min_span=SCATTER_Y_MIN_SPAN_MS)
         if self.data_aware_fit:
@@ -935,7 +1115,9 @@ class ScatterChart(_ChartBase):
         lines.append(
             self._label("hover_hold", "Hold {value} ms").replace("{value}", f"{info['hold_ms']:.2f}")
         )
-        if self.factual_guides and self.target_beat_ms is not None:
+        if self.configured_range:
+            lines.extend(self._comparison_tooltip_lines(info["interval_ms"]))
+        elif self.factual_guides and self.target_beat_ms is not None:
             delta = info["interval_ms"] - float(self.target_beat_ms)
             lines.append(
                 self._label("hover_interval_delta", "Interval Δ vs reference {value} ms").replace(
@@ -995,15 +1177,23 @@ class ScatterChart(_ChartBase):
 
         for row in self.points[-2500:]:
             x, y = float(row[0]), float(row[1])
-            cls = str(row[2]) if len(row) > 2 else "ON_CADENCE"
-            p.setBrush(QBrush(QColor(self._point_color(cls))))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(map_x(x), map_y(y)), 3.4, 3.4)
+            pt = QPointF(map_x(x), map_y(y))
+            if self.configured_range:
+                self._draw_comparison_marker(p, pt, self._range_position(x))
+            else:
+                cls = str(row[2]) if len(row) > 2 else "ON_CADENCE"
+                p.setBrush(QBrush(QColor(self._point_color(cls))))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(pt, 3.4, 3.4)
         p.restore()
 
 
 class IntervalChart(_ChartBase):
     """Interval over elapsed time."""
+
+    y_domain = DOMAIN_INTERVAL
+    y_label_key = "axis_interval_ms"
+    y_label_default = "Interval (ms)"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1020,6 +1210,7 @@ class IntervalChart(_ChartBase):
         overlay: list[tuple[float, float]] | None = None,
         target_beat_ms: float | None = None,
         capture_duration_ms: float | None = None,
+        configured_range: tuple[float, float] | None = None,
     ):
         self.series = list(series or [])
         self.overlay_series = list(overlay or [])
@@ -1027,6 +1218,7 @@ class IntervalChart(_ChartBase):
             self.title = title
         self.target_beat_ms = target_beat_ms
         self.capture_duration_ms = capture_duration_ms
+        self.configured_range = configured_range
         self.update()
 
     def _min_spans(self) -> tuple[float, float]:
@@ -1039,11 +1231,11 @@ class IntervalChart(_ChartBase):
         all_pts = list(self.series) + list(self.overlay_series)
         xs = _finite_values([a[0] for a in all_pts])
         ys = _finite_values([a[1] for a in all_pts])
-        extras = _reference_anchors(self.target_beat_ms)
+        extras = _guide_anchors(self.target_beat_ms, self.configured_range)
         if self.data_aware_fit:
             xmin, xmax = elapsed_viewport(*fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS))
             ymin, ymax = fitted_range(ys, extra=extras, min_span=INTERVAL_Y_MIN_SPAN_MS)
-            ymin, ymax = domain_axis_bounds(ymin, ymax, domain=DOMAIN_INTERVAL, values=ys)
+            ymin, ymax = domain_axis_bounds(ymin, ymax, domain=self.y_domain, values=ys)
             return xmin, xmax, ymin, ymax
         if len(self.series) < 2 and len(self.overlay_series) < 2:
             return None
@@ -1088,6 +1280,7 @@ class IntervalChart(_ChartBase):
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
         items = [(pal.interval_line, self._interval_legend_label())]
+        items.extend(self._comparison_legend_items())
         if self.overlay_series:
             items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
         items.extend(self._guide_legend_items())
@@ -1131,7 +1324,7 @@ class IntervalChart(_ChartBase):
             x_ticks=nice_ticks(xmin_ms, xmax_ms),
             y_ticks=nice_ticks(ymin, ymax),
             x_label=x_label,
-            y_label=self._label("axis_interval_ms", "Interval (ms)"),
+            y_label=self._label(self.y_label_key, self.y_label_default),
             map_x=map_x_ms,
             map_y=map_y,
             format_x=lambda v, span=span_ms: format_elapsed_axis_tick(v, span_ms=span),
@@ -1171,17 +1364,102 @@ class IntervalChart(_ChartBase):
             p.setPen(QPen(QColor(pal.interval_line), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
-            if len(points) <= 80:
+            samples = list(self.series[-2500:])
+            if self.configured_range:
+                for (x, y), pt in zip(samples, points):
+                    self._draw_comparison_marker(p, pt, self._range_position(y), radius=2.8)
+            elif len(points) <= 80:
                 p.setBrush(QBrush(QColor(pal.interval_line)))
                 p.setPen(Qt.PenStyle.NoPen)
                 for pt in points:
                     p.drawEllipse(pt, 2.4, 2.4)
         elif len(self.series) == 1:
             x, y = self.series[0]
-            p.setBrush(QBrush(QColor(pal.interval_line)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(map_x_ms(x), map_y(y)), 3.4, 3.4)
+            pt = QPointF(map_x_ms(x), map_y(y))
+            if self.configured_range:
+                self._draw_comparison_marker(p, pt, self._range_position(y))
+            else:
+                p.setBrush(QBrush(QColor(pal.interval_line)))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(pt, 3.4, 3.4)
         p.restore()
+
+    def nearest_observation(self, pos, *, max_px: float = HOVER_HIT_PX):
+        mapped = self._maps()
+        if mapped is None:
+            return None
+        _plot, _bounds, map_x_ms, _map_x_s, map_y = mapped
+        px, py = pos.x(), pos.y()
+        best = None
+        best_d = float(max_px)
+        for x, y in self.series[-2500:]:
+            dx = map_x_ms(x) - px
+            dy = map_y(y) - py
+            dist = math.hypot(dx, dy)
+            if dist <= best_d:
+                best_d = dist
+                best = {"elapsed_ms": x, "interval_ms": y}
+        return best
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        if not self.data_aware_fit or self._panning or not self.configured_range:
+            return
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        info = self.nearest_observation(pos)
+        if info is None:
+            QToolTip.hideText()
+            return
+        lines = self._comparison_tooltip_lines(info["interval_ms"])
+        QToolTip.showText(
+            event.globalPosition().toPoint() if hasattr(event, "globalPosition") else self.mapToGlobal(pos),
+            "\n".join(lines),
+            self,
+        )
+
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+    def point_range_positions(self) -> list[str]:
+        """Range positions for the base series only; overlay is never classified."""
+        if not self.configured_range:
+            return []
+        return [self._range_position(y) for _x, y in self.series[-2500:]]
+
+
+class HoldChart(IntervalChart):
+    """Hold over elapsed press time. Neutral factual view: no range, no reference."""
+
+    y_domain = DOMAIN_HOLD
+    y_label_key = "axis_hold_ms"
+    y_label_default = "Hold (ms)"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.title = "Hold over time"
+
+    def set_series(
+        self,
+        series: list[tuple[float, float]],
+        *,
+        title: str = "",
+        overlay: list[tuple[float, float]] | None = None,
+        target_beat_ms: float | None = None,
+        capture_duration_ms: float | None = None,
+        configured_range: tuple[float, float] | None = None,
+    ):
+        super().set_series(
+            series,
+            title=title,
+            overlay=overlay,
+            target_beat_ms=None,
+            capture_duration_ms=capture_duration_ms,
+            configured_range=None,
+        )
+
+    def _interval_legend_label(self) -> str:
+        return self._label("hold_over_time", "Hold over time")
 
 
 HIST_X_MIN_SPAN_MS = 8.0
@@ -1206,12 +1484,14 @@ class HistogramChart(_ChartBase):
         title: str = "",
         overlay: list[dict] | None = None,
         target_beat_ms: float | None = None,
+        configured_range: tuple[float, float] | None = None,
     ):
         self.bins = list(bins or [])
         self.overlay_bins = list(overlay or [])
         if title:
             self.title = title
         self.target_beat_ms = target_beat_ms
+        self.configured_range = configured_range
         self.update()
 
     def _min_spans(self) -> tuple[float, float]:
@@ -1231,7 +1511,7 @@ class HistogramChart(_ChartBase):
 
     def autofit_bounds(self) -> tuple[float, float, float, float] | None:
         xs, ys = self._bin_extents()
-        extras = _reference_anchors(self.target_beat_ms)
+        extras = _guide_anchors(self.target_beat_ms, self.configured_range)
         if not xs:
             return None
         ymax = max(ys) if ys else 1.0
@@ -1250,6 +1530,7 @@ class HistogramChart(_ChartBase):
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
         items = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
+        items.extend(self._range_legend_items())
         if self.overlay_bins:
             items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
         if self.target_beat_ms:
@@ -1297,12 +1578,9 @@ class HistogramChart(_ChartBase):
             map_x=map_x,
             map_y=map_y,
         )
+        self._draw_vertical_range(p, plot, map_x)
         p.save()
         p.setClipRect(plot)
-        if self.target_beat_ms:
-            tx = map_x(self.target_beat_ms)
-            p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
-            p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
         bar_w = max(2.0, plot.width() / max(1, len(self.bins)) - 2)
         for item in self.bins:
             lo, hi = float(item["lo"]), float(item["hi"])
@@ -1324,6 +1602,10 @@ class HistogramChart(_ChartBase):
                 y = map_y(count)
                 p.fillRect(QRectF(x, y, w, plot.bottom() - y), color)
         p.restore()
+        if self.target_beat_ms:
+            tx = map_x(self.target_beat_ms)
+            p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(tx, plot.top()), QPointF(tx, plot.bottom()))
 
 
 class OccupancyBar(QWidget):

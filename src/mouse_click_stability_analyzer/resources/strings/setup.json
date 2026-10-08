@@ -190,6 +190,77 @@
     "en": "{@term.schedule_association_window}",
     "zh-TW": "{@term.schedule_association_window}"
   },
+  "preview_interval_comparison": {
+    "en": "{@term.interval_comparison}",
+    "zh-TW": "{@term.interval_comparison}"
+  },
+  "preview_interval_comparison_off": {
+    "en": "Off",
+    "zh-TW": "關閉"
+  },
+  "compare_intervals": {
+    "en": "Compare intervals",
+    "zh-TW": "比較間隔"
+  },
+  "configured_tolerance": {
+    "en": "Configured tolerance",
+    "zh-TW": "設定容差"
+  },
+  "derived_equivalent": {
+    "en": "Derived equivalent",
+    "zh-TW": "推導等值"
+  },
+  "interval_bounds": {
+    "en": "Interval bounds",
+    "zh-TW": "間隔上下限"
+  },
+  "interval_comparison_invalid": {
+    "en": "Configured tolerance must be a finite number of 0 or greater.",
+    "zh-TW": "設定容差必須為 0 以上的有限數字。"
+  },
+  "interval_comparison_ms_range": {
+    "en": "Millisecond tolerance must be between 0 and the {@term.reference_interval} inclusive.",
+    "zh-TW": "毫秒容差必須介於 0 與{@term.reference_interval}之間（含）。"
+  },
+  "interval_comparison_percent_range": {
+    "en": "Percent tolerance must be between 0 and 100 inclusive.",
+    "zh-TW": "百分比容差必須介於 0 與 100 之間（含）。"
+  },
+  "interval_comparison_section": {
+    "en": "{@term.interval_comparison}",
+    "zh-TW": "{@term.interval_comparison}"
+  },
+  "interval_comparison_derived_ms": {
+    "en": "±{ms} ms",
+    "zh-TW": "±{ms} ms",
+    "placeholders": ["ms"]
+  },
+  "interval_comparison_derived_pct": {
+    "en": "±{pct} %",
+    "zh-TW": "±{pct} %",
+    "placeholders": ["pct"]
+  },
+  "interval_comparison_bounds": {
+    "en": "{lo} – {hi} ms",
+    "zh-TW": "{lo} – {hi} ms",
+    "placeholders": ["lo", "hi"]
+  },
+  "range_unit": {
+    "en": "Range unit",
+    "zh-TW": "範圍單位"
+  },
+  "range_unit_milliseconds": {
+    "en": "Milliseconds",
+    "zh-TW": "毫秒"
+  },
+  "range_unit_percent": {
+    "en": "Percent",
+    "zh-TW": "百分比"
+  },
+  "schedule_association_section": {
+    "en": "Schedule association",
+    "zh-TW": "排程關聯"
+  },
   "profile_status_draft": {
     "en": "Setup Draft — lock the profile before capture.",
     "zh-TW": "設定草稿 — 擷取前請先鎖定設定檔。"

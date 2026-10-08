@@ -120,6 +120,43 @@
       "value"
     ]
   },
+  "hover_observed_interval": {
+    "en": "Observed interval: {value} ms",
+    "zh-TW": "觀測間隔：{value} ms",
+    "placeholders": ["value"]
+  },
+  "hover_configured_range": {
+    "en": "Configured range: {lo}–{hi} ms",
+    "zh-TW": "設定範圍：{lo}–{hi} ms",
+    "placeholders": ["lo", "hi"]
+  },
+  "hover_position": {
+    "en": "{@term.range_position}: {position}",
+    "zh-TW": "{@term.range_position}：{position}",
+    "placeholders": ["position"]
+  },
+  "hover_distance_above": {
+    "en": "Distance above upper bound: +{value} ms",
+    "zh-TW": "高於上限：+{value} ms",
+    "placeholders": ["value"]
+  },
+  "hover_distance_below": {
+    "en": "Distance below lower bound: {value} ms",
+    "zh-TW": "低於下限：{value} ms",
+    "placeholders": ["value"]
+  },
+  "legend_configured_range": {
+    "en": "{@term.configured_range}",
+    "zh-TW": "{@term.configured_range}"
+  },
+  "legend_within_configured_range": {
+    "en": "{@term.within_configured_range}",
+    "zh-TW": "{@term.within_configured_range}"
+  },
+  "legend_outside_configured_range": {
+    "en": "{@term.outside_configured_range}",
+    "zh-TW": "{@term.outside_configured_range}"
+  },
   "issues": {
     "en": "OBSERVATIONS",
     "zh-TW": "觀測"
