@@ -12,8 +12,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QEvent, QTimer, Signal, QObject, QPoint, QRect, QSettings, QSize
-from PySide6.QtGui import QCursor, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QEvent, QTimer, Signal, QObject, QPoint, QRect, QSettings, QSize, QUrl
+from PySide6.QtGui import QCursor, QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -77,7 +77,7 @@ from ..completed_result import (
     qt_visible_verdict,
 )
 from ..core import now_iso
-from ..duration import format_elapsed_hms, format_elapsed_seconds_hms
+from ..duration import format_duration_hms, format_elapsed_hms, format_elapsed_seconds_hms
 from ..fixture_schedule import fixture_reference_interval_ms
 from ..host_evidence import HostEvidenceError, build_fixture_host_evidence
 from ..host_inventory import collect_host_information, empty_host_information
@@ -183,13 +183,39 @@ def parse_auto_stop_seconds(enabled: bool, raw: Any) -> float | None:
     """Return auto-stop offset in seconds, or None if auto-stop is off.
 
     When auto-stop is disabled the seconds field is ignored, including
-    invalid text. When enabled, the field must be a finite positive number.
+    invalid text. When enabled, accept a finite positive number of seconds
+    or an hh:mm:ss clock. Timer math always uses the numeric seconds value.
     """
     if not enabled:
         return None
     if raw is None:
         raise ValueError("Auto Stop seconds must be a finite positive number")
+    if isinstance(raw, bool):
+        raise ValueError("Auto Stop seconds must be a finite positive number")
+    if isinstance(raw, (int, float)):
+        sec = float(raw)
+        if not math.isfinite(sec) or sec <= 0.0:
+            raise ValueError("Auto Stop seconds must be a finite positive number")
+        return sec
     text = str(raw).strip()
+    if not text:
+        raise ValueError("Auto Stop seconds must be a finite positive number")
+    if ":" in text:
+        parts = text.split(":")
+        if len(parts) != 3:
+            raise ValueError("Auto Stop seconds must be a finite positive number")
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = float(parts[2])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Auto Stop seconds must be a finite positive number") from exc
+        if hours < 0 or minutes < 0 or minutes >= 60 or seconds < 0 or seconds >= 60:
+            raise ValueError("Auto Stop seconds must be a finite positive number")
+        total = hours * 3600 + minutes * 60 + seconds
+        if not math.isfinite(total) or total <= 0.0:
+            raise ValueError("Auto Stop seconds must be a finite positive number")
+        return float(total)
     try:
         sec = float(text)
     except (TypeError, ValueError) as exc:
@@ -679,16 +705,15 @@ def locked_profile_preview_rows(
         (tr("button"), str(settings.get("focus_button") or "Left")),
         (tr("preview_mode"), tr("manual") if manual else tr("fixture")),
     ]
-    if manual:
-        return rows
-    hz = settings.get("fixture_reference_hz")
-    tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
     duration = settings.get("duration_sec")
-    rows.append((tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
-    rows.append((
-        tr("preview_timing_tolerance"),
-        format_association_window_ms(tol) if isinstance(tol, (int, float)) else "—",
-    ))
+    if not manual:
+        hz = settings.get("fixture_reference_hz")
+        tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
+        rows.append((tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
+        rows.append((
+            tr("preview_timing_tolerance"),
+            format_association_window_ms(tol) if isinstance(tol, (int, float)) else "—",
+        ))
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
         rows.append((tr("auto_stop"), f"{float(duration):g} s"))
     else:
@@ -714,7 +739,7 @@ class ResponsiveCardGrid(QWidget):
         for card in self._cards:
             card.setMinimumWidth(self.CARD_MIN_WIDTH)
         self._columns = 0
-        self._apply_columns(3)
+        self._apply_columns(min(3, len(self._cards) or 1))
 
     @classmethod
     def columns_for_width(cls, width: int) -> int:
@@ -748,7 +773,8 @@ class ResponsiveCardGrid(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._apply_columns(self.columns_for_width(event.size().width()))
+        requested = self.columns_for_width(event.size().width())
+        self._apply_columns(max(1, min(requested, len(self._cards) or 1)))
 
 
 class ResponsiveItemGrid(QWidget):
@@ -876,6 +902,10 @@ class ShrinkableButtonBar(WrappingButtonBar):
         hint = super().minimumSizeHint()
         widest = max((max(btn.sizeHint().width(), 88) for btn in self._buttons), default=0)
         return QSize(widest, hint.height())
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        return QSize(self.minimumSizeHint().width(), hint.height())
 
 
 # Persisted IDs; "compact"/"standard"/"large" predate the size-named presets and must stay valid.
@@ -1406,36 +1436,38 @@ class MainWindow(QMainWindow):
         auto_stop_row.addStretch(1)
         config_l.addLayout(auto_stop_row)
         config_l.addSpacing(10)
-        self.auto_stop_sec_label = self._field_label("Auto Stop After (s)")
+        self.auto_stop_sec_label = self._field_label("Duration")
         config_l.addWidget(self.auto_stop_sec_label)
         self.auto_stop_sec_combo = QComboBox()
         self.auto_stop_sec_combo.setEditable(True)
-        self.auto_stop_sec_combo.addItems(["30", "60", "120", "300"])
-        self.auto_stop_sec_combo.setCurrentText("60")
+        self.auto_stop_sec_combo.addItems(["00:00:20", "00:00:30", "00:01:00", "00:02:00", "00:05:00", "01:00:00"])
+        self.auto_stop_sec_combo.setCurrentText("00:01:00")
         self._setup_field(self.auto_stop_sec_combo)
         config_l.addWidget(self.auto_stop_sec_combo)
-        config_l.addStretch(1)
-
-        screening_card, screening_l = self._setup_card()
-        self.setup_screening_card = screening_card
-        self.setup_limits_card = screening_card
-        self.lbl_screening = self._card_title()
-        screening_l.addWidget(self.lbl_screening)
-        screening_l.addSpacing(8)
+        config_l.addSpacing(12)
+        scope_row = QWidget()
+        self.setup_screening_card = scope_row
+        self.setup_limits_card = scope_row
+        scope_l = QVBoxLayout(scope_row)
+        scope_l.setContentsMargins(0, 0, 0, 0)
+        scope_l.setSpacing(4)
+        self.lbl_screening = self._field_label("Analysis scope")
+        scope_l.addWidget(self.lbl_screening)
         self.lbl_screening_status = QLabel("Measurement only")
         self.lbl_screening_status.setObjectName("PreviewValue")
         self.lbl_screening_status.setWordWrap(True)
-        screening_l.addWidget(self.lbl_screening_status)
+        scope_l.addWidget(self.lbl_screening_status)
         self.lbl_screening_note = QLabel("")
         self.lbl_screening_note.setObjectName("Muted")
         self.lbl_screening_note.setWordWrap(True)
-        screening_l.addWidget(self.lbl_screening_note)
-        screening_l.addStretch(1)
+        scope_l.addWidget(self.lbl_screening_note)
+        config_l.addWidget(scope_row)
+        config_l.addStretch(1)
         self._limit_edits: dict[str, QLineEdit] = {}
         self._limit_labels: dict[str, QLabel] = {}
         self.lbl_custom_limits = self.lbl_screening
 
-        self.setup_card_grid = ResponsiveCardGrid([device_card, config_card, screening_card])
+        self.setup_card_grid = ResponsiveCardGrid([device_card, config_card])
         inner_l.addWidget(self.setup_card_grid)
 
         profile_card, profile_l = self._setup_card()
@@ -1826,14 +1858,41 @@ class MainWindow(QMainWindow):
         analysis_l = QVBoxLayout(analysis_page)
         analysis_l.setContentsMargins(0, 8, 0, 0)
         analysis_l.setSpacing(8)
-        analysis_header = QHBoxLayout()
+        analysis_header = QVBoxLayout()
+        analysis_header.setSpacing(8)
+        view_row = QHBoxLayout()
+        view_row.setSpacing(8)
         self.lbl_analysis_view = QLabel("")
         self.lbl_analysis_view.setObjectName("Muted")
         self.results_view_combo = QComboBox()
-        self.results_view_combo.setMinimumWidth(180)
+        self.results_view_combo.setMinimumWidth(140)
         self.results_view_combo.currentIndexChanged.connect(self._on_analysis_view_changed)
-        analysis_header.addWidget(self.lbl_analysis_view)
-        analysis_header.addWidget(self.results_view_combo, 1)
+        view_row.addWidget(self.lbl_analysis_view)
+        view_row.addWidget(self.results_view_combo, 1)
+        self.btn_results_chart_fit = QToolButton()
+        self.btn_results_chart_fit.setObjectName("ChartNav")
+        self.btn_results_chart_zoom_in = QToolButton()
+        self.btn_results_chart_zoom_in.setObjectName("ChartNav")
+        self.btn_results_chart_zoom_out = QToolButton()
+        self.btn_results_chart_zoom_out.setObjectName("ChartNav")
+        self.btn_results_chart_reset = QToolButton()
+        self.btn_results_chart_reset.setObjectName("ChartNav")
+        for btn in (
+            self.btn_results_chart_fit, self.btn_results_chart_zoom_in,
+            self.btn_results_chart_zoom_out, self.btn_results_chart_reset,
+        ):
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            btn.setAutoRaise(False)
+            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_results_chart_fit.clicked.connect(self._on_results_fit_data)
+        self.btn_results_chart_zoom_in.clicked.connect(self._on_results_zoom_in)
+        self.btn_results_chart_zoom_out.clicked.connect(self._on_results_zoom_out)
+        self.btn_results_chart_reset.clicked.connect(self._on_results_reset_view)
+        view_row.addWidget(self.btn_results_chart_fit)
+        view_row.addWidget(self.btn_results_chart_zoom_in)
+        view_row.addWidget(self.btn_results_chart_zoom_out)
+        view_row.addWidget(self.btn_results_chart_reset)
+        analysis_header.addLayout(view_row)
         self.btn_overlay = QPushButton("Compare Overlay")
         self.btn_overlay.setObjectName("Secondary")
         self.btn_overlay.clicked.connect(self.load_overlay_run)
@@ -1841,7 +1900,7 @@ class MainWindow(QMainWindow):
         self.btn_clear_overlay.setObjectName("Secondary")
         self.btn_clear_overlay.clicked.connect(self.clear_overlay)
         self.results_overlay_bar = ShrinkableButtonBar([self.btn_overlay, self.btn_clear_overlay])
-        analysis_header.addWidget(self.results_overlay_bar, 1)
+        analysis_header.addWidget(self.results_overlay_bar)
         analysis_l.addLayout(analysis_header)
         self.results_overlay_status = QLabel("")
         self.results_overlay_status.setObjectName("OverlayDelta")
@@ -1859,6 +1918,9 @@ class MainWindow(QMainWindow):
         self.results_interval_chart.set_measurement_only_presentation(True)
         self.results_distribution_chart.set_measurement_only_presentation(True)
         self.results_scatter.set_measurement_only_presentation(True)
+        self.results_interval_chart.set_data_aware_fit(True)
+        self.results_distribution_chart.set_data_aware_fit(True)
+        self.results_scatter.set_data_aware_fit(True)
         self.results_timing_panel = QWidget()
         timing_l = QVBoxLayout(self.results_timing_panel)
         timing_l.setContentsMargins(12, 12, 12, 12)
@@ -2055,33 +2117,30 @@ class MainWindow(QMainWindow):
         self.lbl_results_report = self._card_title()
         report_l.addWidget(self.lbl_results_report)
         report_l.addSpacing(8)
-        self.btn_generate_excel = QPushButton("Generate Excel")
-        self.btn_generate_excel.setObjectName("Primary")
-        self.btn_generate_excel.clicked.connect(self.generate_excel_report)
-        self.btn_finish = self.btn_generate_excel
-        self.btn_generate_html = QPushButton("Generate HTML")
-        self.btn_generate_html.setObjectName("Primary")
-        self.btn_generate_html.clicked.connect(self.generate_html_report)
+        self.btn_generate_report = QPushButton("Generate Report")
+        self.btn_generate_report.setObjectName("Primary")
+        self.btn_generate_report.clicked.connect(self.generate_report)
+        self.btn_finish = self.btn_generate_report
+        self.btn_generate_excel = self.btn_generate_report
+        self.btn_open_reports_folder = QPushButton("Open Reports Folder")
+        self.btn_open_reports_folder.setObjectName("Secondary")
+        self.btn_open_reports_folder.clicked.connect(self.open_reports_folder)
         self.btn_export = QToolButton()
         self.btn_export.setObjectName("Secondary")
         self.btn_export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.btn_export.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.export_menu = QMenu(self.btn_export)
-        self.act_export_txt = self.export_menu.addAction("Analysis TXT")
-        self.act_export_csv = self.export_menu.addAction("Click Log CSV")
-        self.act_export_summary_json = self.export_menu.addAction("Summary JSON")
-        self.act_export_detail_json = self.export_menu.addAction("Detail JSON")
+        self.act_export_csv = self.export_menu.addAction("Events CSV")
+        self.act_export_evidence_json = self.export_menu.addAction("Evidence JSON")
         self.export_menu.addSeparator()
         self.act_save_report_as = self.export_menu.addAction("Save Report As…")
-        self.act_export_txt.triggered.connect(lambda: self.export_report_artifact("txt"))
         self.act_export_csv.triggered.connect(lambda: self.export_report_artifact("all_click_log_csv"))
-        self.act_export_summary_json.triggered.connect(lambda: self.export_report_artifact("summary_json"))
-        self.act_export_detail_json.triggered.connect(lambda: self.export_report_artifact("detail_json"))
+        self.act_export_evidence_json.triggered.connect(lambda: self.export_report_artifact("evidence_json"))
         self.act_save_report_as.triggered.connect(self.save_report_as)
         self.btn_export.setMenu(self.export_menu)
         self.btn_save = self.btn_export
         self.results_report_bar = ShrinkableButtonBar([
-            self.btn_generate_excel, self.btn_generate_html, self.btn_export,
+            self.btn_generate_report, self.btn_open_reports_folder, self.btn_export,
         ])
         report_l.addWidget(self.results_report_bar)
         report_l.addStretch(1)
@@ -2393,6 +2452,8 @@ class MainWindow(QMainWindow):
         for btn in (
             self.btn_chart_fit, self.btn_chart_zoom_in,
             self.btn_chart_zoom_out, self.btn_chart_reset,
+            self.btn_results_chart_fit, self.btn_results_chart_zoom_in,
+            self.btn_results_chart_zoom_out, self.btn_results_chart_reset,
         ):
             btn.setFixedSize(nav_size, nav_size)
         cell_h = layout_metric("stat_cell_min_h", d)
@@ -2428,6 +2489,10 @@ class MainWindow(QMainWindow):
             (self.btn_chart_zoom_in, "viz_zoom_in"),
             (self.btn_chart_zoom_out, "viz_zoom_out"),
             (self.btn_chart_reset, "viz_reset_view"),
+            (self.btn_results_chart_fit, "viz_fit_data"),
+            (self.btn_results_chart_zoom_in, "viz_zoom_in"),
+            (self.btn_results_chart_zoom_out, "viz_zoom_out"),
+            (self.btn_results_chart_reset, "viz_reset_view"),
         )
         for btn, key in labels:
             text = self._tr(key)
@@ -2442,6 +2507,10 @@ class MainWindow(QMainWindow):
             (self.btn_chart_zoom_in, "zoom_in"),
             (self.btn_chart_zoom_out, "zoom_out"),
             (self.btn_chart_reset, "reset"),
+            (self.btn_results_chart_fit, "fit"),
+            (self.btn_results_chart_zoom_in, "zoom_in"),
+            (self.btn_results_chart_zoom_out, "zoom_out"),
+            (self.btn_results_chart_reset, "reset"),
         )
         for btn, name in icons:
             icon = chart_nav_icon(name, dark=dark)
@@ -2836,18 +2905,18 @@ class MainWindow(QMainWindow):
         self.auto_stop_off.setText(self._tr("auto_stop_off_button"))
         self.auto_stop_on.setText(self._tr("auto_stop_on_button"))
         self.auto_stop_sec_label.setText(self._tr("auto_stop_after"))
-        self.lbl_custom_limits.setText(self._tr("screening").upper())
-        self.lbl_screening.setText(self._tr("screening").upper())
+        self.lbl_custom_limits.setText(self._tr("analysis_scope"))
+        self.lbl_screening.setText(self._tr("analysis_scope"))
         self.lbl_screening_status.setText(self._tr("screening_measurement_only"))
         self.lbl_screening_note.setText(self._tr("screening_measurement_only_note"))
+        self.lbl_screening_status.setToolTip(self._tr("screening_measurement_only_note"))
+        self.lbl_screening_note.setToolTip(self._tr("screening_measurement_only_note"))
         self.btn_stop.setText(self._tr("stop"))
-        self.btn_generate_excel.setText(self._tr("generate_excel"))
-        self.btn_generate_html.setText(self._tr("generate_html"))
+        self.btn_generate_report.setText(self._tr("generate_report"))
+        self.btn_open_reports_folder.setText(self._tr("open_reports_folder"))
         self.btn_export.setText(self._tr("export_save_as"))
-        self.act_export_txt.setText(self._tr("export_analysis_txt"))
         self.act_export_csv.setText(self._tr("export_click_log_csv"))
-        self.act_export_summary_json.setText(self._tr("export_summary_json"))
-        self.act_export_detail_json.setText(self._tr("export_detail_json"))
+        self.act_export_evidence_json.setText(self._tr("export_evidence_json"))
         self.act_save_report_as.setText(self._tr("save_report_as"))
         self.btn_overlay.setText(self._tr("compare"))
         self.btn_clear_overlay.setText(self._tr("clear_overlay"))
@@ -2913,9 +2982,6 @@ class MainWindow(QMainWindow):
         self.timing_tol_label.setVisible(not manual)
         self.timing_tol_edit.setVisible(not manual)
         self.assoc_context_box.setVisible(not manual)
-        self.auto_stop_label.setVisible(not manual)
-        self.auto_stop_off.setVisible(not manual)
-        self.auto_stop_on.setVisible(not manual)
         self._sync_auto_stop_widgets()
         if self._ui_is_manual():
             self.mode_label.setText(self._tr("mode_manual"))
@@ -2959,13 +3025,12 @@ class MainWindow(QMainWindow):
         self.assoc_derived_note.setText(self._tr("assoc_derived_note"))
 
     def _sync_auto_stop_widgets(self):
-        fixture = not self._ui_is_manual()
         on = self.auto_stop_on.isChecked()
-        self.auto_stop_label.setVisible(fixture)
-        self.auto_stop_off.setVisible(fixture)
-        self.auto_stop_on.setVisible(fixture)
-        self.auto_stop_sec_label.setVisible(fixture and on)
-        self.auto_stop_sec_combo.setVisible(fixture and on)
+        self.auto_stop_label.setVisible(True)
+        self.auto_stop_off.setVisible(True)
+        self.auto_stop_on.setVisible(True)
+        self.auto_stop_sec_label.setVisible(on)
+        self.auto_stop_sec_combo.setVisible(on)
         self.auto_stop_off.setObjectName("Primary" if not on else "Secondary")
         self.auto_stop_on.setObjectName("Primary" if on else "Secondary")
         for btn in (self.auto_stop_off, self.auto_stop_on):
@@ -2974,7 +3039,7 @@ class MainWindow(QMainWindow):
             btn.update()
 
     def _auto_stop_seconds(self) -> float | None:
-        enabled = (not self._ui_is_manual()) and self.auto_stop_on.isChecked()
+        enabled = self.auto_stop_on.isChecked()
         return parse_auto_stop_seconds(enabled, self.auto_stop_sec_combo.currentText())
 
     def _validated_profile_settings_from_ui(self) -> dict[str, Any]:
@@ -3105,7 +3170,7 @@ class MainWindow(QMainWindow):
         profile = str(settings.get("profile_name") or "").strip()
         if profile:
             parts.append(f"{self._tr('run_profile')}: {profile}")
-        parts.append(f"{self._tr('screening')}: {self._tr('screening_measurement_only')}")
+        parts.append(f"{self._tr('analysis_scope')}: {self._tr('screening_measurement_only')}")
         if run["manual"]:
             parts.append(self._tr("manual"))
         else:
@@ -3450,7 +3515,11 @@ class MainWindow(QMainWindow):
 
     def _fill_analysis_views(self, model: dict[str, Any]) -> None:
         combo = self.results_view_combo
+        run_id = str((model.get("run") or {}).get("run_id") or "")
         current = combo.currentData()
+        if getattr(self, "_results_view_run_id", None) != run_id:
+            current = "distribution"
+            self._results_view_run_id = run_id
         combo.blockSignals(True)
         combo.clear()
         combo.addItem(self._tr("interval_over_time"), "interval")
@@ -3458,18 +3527,22 @@ class MainWindow(QMainWindow):
         combo.addItem(self._tr("hold_vs_interval"), "scatter")
         if not model["run"]["manual"] and model["host_evidence"]["snapshot"] is not None:
             combo.addItem(self._tr("timing_error"), "timing")
-        index = max(0, combo.findData(current) if current else 0)
-        combo.setCurrentIndex(index)
+        index = combo.findData(current) if current else -1
+        if index < 0:
+            index = combo.findData("distribution")
+        combo.setCurrentIndex(max(0, index))
         combo.blockSignals(False)
         self._on_analysis_view_changed()
 
     def _on_analysis_view_changed(self, _index: int = 0):
         key = self.results_view_combo.currentData()
         mapping = {"interval": 0, "distribution": 1, "scatter": 2, "timing": 3}
-        self.results_chart_stack.setCurrentIndex(mapping.get(key, 0))
+        self.results_chart_stack.setCurrentIndex(mapping.get(key, 1))
         facts = self._completed_run_facts()
         if facts:
             self._refresh_results_charts(facts["model"])
+        self._sync_results_chart_nav()
+        self._sync_overlay_controls()
 
     def _refresh_results_charts(self, model: dict[str, Any]) -> None:
         analysis = model["analysis"]
@@ -3480,14 +3553,32 @@ class MainWindow(QMainWindow):
         ov_intervals = [pt[1] for pt in ov_series]
         current_hist, overlay_hist = paired_interval_histograms(analysis["intervals"], ov_intervals)
         pal = get_palette(self.theme)
+        run_id = str((model.get("run") or {}).get("run_id") or "")
+        reset_nav = getattr(self, "_results_nav_run_id", None) != run_id
         for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
             chart.set_theme(pal, labels)
+            chart.set_pan_enabled(True)
+        if reset_nav:
+            self._results_nav_run_id = run_id
+            for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
+                chart.clear_navigation()
+                chart.set_data_aware_fit(True)
         self.results_occupancy_bar.set_theme(pal)
+        elapsed_raw = (model.get("run") or {}).get("elapsed_s")
+        capture_duration_ms = None
+        try:
+            if elapsed_raw is not None and not isinstance(elapsed_raw, bool):
+                elapsed_s = float(elapsed_raw)
+                if math.isfinite(elapsed_s) and elapsed_s > 0:
+                    capture_duration_ms = elapsed_s * 1000.0
+        except (TypeError, ValueError):
+            capture_duration_ms = None
         self.results_interval_chart.set_series(
             analysis["interval_series"],
             title=self._tr("interval_over_time"),
             overlay=ov_series,
             target_beat_ms=beat,
+            capture_duration_ms=capture_duration_ms,
         )
         self.results_distribution_chart.set_bins(
             current_hist,
@@ -3501,6 +3592,10 @@ class MainWindow(QMainWindow):
             overlay=ov_pts,
             target_beat_ms=beat,
         )
+        if reset_nav:
+            for chart in (self.results_interval_chart, self.results_distribution_chart, self.results_scatter):
+                chart.fit_data()
+                chart.set_pan_enabled(True)
         snapshot = model["host_evidence"]["snapshot"]
         self.results_timing_title.setText(self._tr("timing_error").upper())
         if snapshot is None:
@@ -3670,36 +3765,63 @@ class MainWindow(QMainWindow):
                 count = metrics.get("click_count") if metrics.get("click_count") is not None else len(ev)
             tags = payload.get("issue_tags") or metrics.get("issue_tags") or []
             status = run_status_for_count(count, tags)
-        clicks = str(metrics.get("click_count") if metrics.get("click_count") is not None else len(ev) or "?")
+        measurements = payload.get("measurements") or {}
+        clicks_n = measurements.get("host_press_count")
+        if clicks_n is None:
+            clicks_n = metrics.get("click_count")
+        clicks = str(clicks_n if clicks_n is not None else len(ev) or "?")
         return status, clicks
 
     def _overlay_list_label(self, run_id: str, result: str, clicks: str, target: str = "") -> str:
         label = f"{run_id} · {target}" if target else run_id
         return self._tr("overlay_list_line", label=label, result=result, n=clicks)
 
-    def _load_run_meta_from_disk(self, detail_path: Path) -> dict[str, Any] | None:
-        rid = detail_path.name.replace("mcsa_", "").replace("_detail.json", "")
-        summary_path = self.report_root / f"mcsa_{rid}_summary.json"
+    def _run_id_from_artifact_name(self, path: Path) -> str:
+        name = path.name
+        if not name.startswith("mcsa_"):
+            return ""
+        for suffix in ("_evidence.json", "_detail.json", "_summary.json"):
+            if name.endswith(suffix):
+                return name[len("mcsa_"):-len(suffix)]
+        return ""
+
+    def _load_run_meta_from_disk(self, json_path: Path) -> dict[str, Any] | None:
+        rid = self._run_id_from_artifact_name(json_path)
+        base = json_path.parent
+        evidence_path = base / f"mcsa_{rid}_evidence.json"
+        detail_path = base / f"mcsa_{rid}_detail.json"
+        summary_path = base / f"mcsa_{rid}_summary.json"
         payload: dict[str, Any] = {}
+        source = json_path
         try:
-            if summary_path.exists():
-                payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            if evidence_path.exists():
+                source = evidence_path
+                payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+            elif json_path.exists():
+                payload = json.loads(json_path.read_text(encoding="utf-8"))
             elif detail_path.exists():
+                source = detail_path
                 payload = json.loads(detail_path.read_text(encoding="utf-8"))
+            elif summary_path.exists():
+                source = summary_path
+                payload = json.loads(summary_path.read_text(encoding="utf-8"))
             else:
                 return None
         except Exception:
             return None
         result, clicks = self._run_result_and_clicks(payload)
         target = str(payload.get("target_product") or payload.get("target") or "").strip()
+        measurements = payload.get("measurements") or {}
+        if clicks in {"?", "0"} and measurements.get("host_press_count") is not None:
+            clicks = str(measurements.get("host_press_count"))
         return {
             "run_id": rid,
             "label": self._overlay_list_label(rid, result, clicks, target),
-            "detail_path": str(detail_path),
-            "summary_path": str(summary_path) if summary_path.exists() else "",
+            "detail_path": str(source),
+            "summary_path": str(evidence_path if evidence_path.exists() else (summary_path if summary_path.exists() else "")),
             "target": target,
             "result": result,
-            "mtime": detail_path.stat().st_mtime,
+            "mtime": source.stat().st_mtime,
         }
 
     def _session_run_meta(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -3731,10 +3853,19 @@ class MainWindow(QMainWindow):
     def _list_overlay_candidates(self) -> list[dict[str, Any]]:
         by_id: dict[str, dict[str, Any]] = {}
         if self.report_root.exists():
-            for detail in self.report_root.glob("mcsa_*_detail.json"):
-                meta = self._load_run_meta_from_disk(detail)
-                if meta:
-                    by_id[meta["run_id"]] = meta
+            seen: set[str] = set()
+            # Per-run packages first, then flat legacy evidence, then legacy detail.
+            for pattern in ("mcsa_*/mcsa_*_evidence.json", "mcsa_*_evidence.json", "mcsa_*_detail.json"):
+                for path in sorted(self.report_root.glob(pattern)):
+                    if not path.is_file():
+                        continue
+                    rid = self._run_id_from_artifact_name(path)
+                    if not rid or rid in seen:
+                        continue
+                    meta = self._load_run_meta_from_disk(path)
+                    if meta:
+                        seen.add(meta["run_id"])
+                        by_id[meta["run_id"]] = meta
         for run in reversed(self.session_runs):
             rid = str(run.get("run_id") or "")
             if not rid:
@@ -3812,7 +3943,7 @@ class MainWindow(QMainWindow):
                 dlg,
                 self._tr("browse"),
                 str(self.report_root),
-                "MCSA detail JSON (*_detail.json);;JSON (*.json);;All (*.*)",
+                "MCSA evidence JSON (*_evidence.json);;MCSA detail JSON (*_detail.json);;JSON (*.json);;All (*.*)",
             )
             if path:
                 _apply_path(path)
@@ -3932,6 +4063,49 @@ class MainWindow(QMainWindow):
             self.scatter.set_pan_enabled(enabled)
         if getattr(self, "interval_chart", None) is not None:
             self.interval_chart.set_pan_enabled(enabled)
+
+    def _active_results_chart(self):
+        key = self.results_view_combo.currentData() if getattr(self, "results_view_combo", None) is not None else None
+        if key == "interval":
+            return self.results_interval_chart
+        if key == "distribution":
+            return self.results_distribution_chart
+        if key == "scatter":
+            return self.results_scatter
+        return None
+
+    def _on_results_fit_data(self) -> None:
+        chart = self._active_results_chart()
+        if chart is not None:
+            chart.fit_data()
+
+    def _on_results_zoom_in(self) -> None:
+        chart = self._active_results_chart()
+        if chart is not None:
+            chart.zoom_in()
+
+    def _on_results_zoom_out(self) -> None:
+        chart = self._active_results_chart()
+        if chart is not None:
+            chart.zoom_out()
+
+    def _on_results_reset_view(self) -> None:
+        chart = self._active_results_chart()
+        if chart is not None:
+            chart.reset_view()
+
+    def _sync_results_chart_nav(self) -> None:
+        chart = self._active_results_chart()
+        enabled = chart is not None and not self._post_run_input_guard_active
+        for btn in (
+            self.btn_results_chart_fit, self.btn_results_chart_zoom_in,
+            self.btn_results_chart_zoom_out, self.btn_results_chart_reset,
+        ):
+            btn.setEnabled(enabled)
+        if getattr(self, "results_interval_chart", None) is not None:
+            self.results_interval_chart.set_pan_enabled(True)
+            self.results_distribution_chart.set_pan_enabled(True)
+            self.results_scatter.set_pan_enabled(True)
 
     # ── Capture lifecycle ───────────────────────────────────────────
     def _reset_live_values_for_listen(self):
@@ -4119,12 +4293,12 @@ class MainWindow(QMainWindow):
             tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
             if tol is not None:
                 self.timing_tol_edit.setText(f"{float(tol):g}")
-            duration = settings.get("duration_sec")
-            if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
-                self.auto_stop_on.setChecked(True)
-                self.auto_stop_sec_combo.setCurrentText(f"{float(duration):g}")
-            else:
-                self.auto_stop_off.setChecked(True)
+        duration = settings.get("duration_sec")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+            self.auto_stop_on.setChecked(True)
+            self.auto_stop_sec_combo.setCurrentText(format_duration_hms(duration))
+        else:
+            self.auto_stop_off.setChecked(True)
         self._apply_mode_fields()
 
     def stop_run(self):
@@ -4194,20 +4368,23 @@ class MainWindow(QMainWindow):
             _log.warning("Host evidence snapshot not built: %s", exc)
             self.host_evidence_snapshot = None
 
+    def generate_report(self):
+        """Write the standard report bundle exactly once."""
+        self.finish_report(notify=True)
+
     def generate_excel_report(self):
-        """Primary Results action: full report bundle, success target is the engineering XLSX."""
-        self.finish_report(preferred_artifact="engineering_xlsx")
+        self.generate_report()
 
     def generate_html_report(self):
-        """Primary Results action: full report bundle, success target is the engineering HTML."""
-        self.finish_report(preferred_artifact="engineering_html")
+        self.generate_report()
 
     def finish_report(self, preferred_artifact: str | None = None, notify: bool = True):
-        """Write the full report bundle from the completed snapshot.
+        """Write the standard Measurement/Evidence bundle from the completed snapshot.
 
-        ``preferred_artifact`` must exist for the call to count as success.
         ``notify=False`` suppresses only the success dialog; failures are always shown.
+        ``preferred_artifact`` is ignored; generation always writes the standard bundle once.
         """
+        del preferred_artifact
         if self.running:
             self.stop_run()
         if not self.events:
@@ -4230,20 +4407,70 @@ class MainWindow(QMainWindow):
             verification = _verify_artifacts(self.report_paths)
             if not verification.get("ok"):
                 raise RuntimeError("Missing: " + ", ".join(verification.get("missing") or []))
-            target_path: Path | str = self.report_root
-            if preferred_artifact:
-                preferred = str((self.report_paths or {}).get(preferred_artifact) or "")
-                if not preferred or not Path(preferred).exists():
-                    raise RuntimeError("Missing: " + (Path(preferred).name if preferred else preferred_artifact))
-                target_path = preferred
             self.report_written = True
             self._upsert_session_run_for_compare()
             self.status_label.setText(self._tr("report_ready"))
             self._update_controls()
             if notify:
-                QMessageBox.information(self, self._tr("report"), self._tr("saved_to", path=target_path))
+                package_dir = self._current_report_package_dir() or Path(self.report_root)
+                QMessageBox.information(
+                    self, self._tr("report"), self._tr("saved_to", path=package_dir),
+                )
         except Exception as exc:
+            self.report_written = False
+            self._update_controls()
             QMessageBox.critical(self, self._tr("report_failed"), str(exc))
+
+    def _current_report_package_dir(self) -> Path | None:
+        """Package dir of the report generated for the current run, else None."""
+        if not self.report_written:
+            return None
+        evidence = Path(str((self.report_paths or {}).get("evidence_json") or ""))
+        if not evidence.is_file():
+            return None
+        if self._run_id_from_artifact_name(evidence) != str(self.run_id or ""):
+            return None
+        return evidence.parent
+
+    def open_reports_folder(self) -> None:
+        """Open the current run package if generated, else the reports root. Never generates."""
+        root = Path(self.report_root)
+        try:
+            target = self._current_report_package_dir()
+            if target is None:
+                root.mkdir(parents=True, exist_ok=True)
+                target = root
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.resolve())))
+            if not opened:
+                raise OSError("shell open returned false")
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                self._tr("report"),
+                self._tr("open_reports_folder_failed", detail=str(exc)),
+            )
+
+    def _open_existing_artifact(self, key: str) -> None:
+        path = Path(str((self.report_paths or {}).get(key) or ""))
+        if not path.is_file():
+            QMessageBox.information(
+                self, self._tr("report"), self._tr("report_missing_detail", detail=path.name or key),
+            )
+            return
+        try:
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+            if not opened:
+                raise OSError("shell open returned false")
+        except Exception as exc:
+            QMessageBox.warning(
+                self, self._tr("report"), self._tr("open_artifact_failed", detail=str(exc)),
+            )
+
+    def open_excel_report(self) -> None:
+        self._open_existing_artifact("engineering_xlsx")
+
+    def open_html_report(self) -> None:
+        self._open_existing_artifact("engineering_html")
 
     def export_report_artifact(self, key: str):
         """Copy one bundle file through a native Save As dialog, preparing the bundle silently if needed."""
@@ -4256,10 +4483,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, self._tr("report_failed"), self._tr("report_missing_detail", detail=src.name or key))
             return
         filters = {
-            "txt": "Text (*.txt);;All (*.*)",
             "all_click_log_csv": "CSV (*.csv);;All (*.*)",
-            "summary_json": "JSON (*.json);;All (*.*)",
-            "detail_json": "JSON (*.json);;All (*.*)",
+            "evidence_json": "JSON (*.json);;All (*.*)",
+            "engineering_html": "HTML (*.html);;All (*.*)",
+            "engineering_xlsx": "Excel (*.xlsx);;All (*.*)",
         }
         dest, _ = QFileDialog.getSaveFileName(
             self,
@@ -4315,8 +4542,8 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(self.running)
         self.btn_new.setEnabled(not self.running)
         self.btn_edit_setup_new_run.setEnabled(self.completed and not self.running)
-        self.btn_generate_excel.setEnabled(self.completed and not self.running)
-        self.btn_generate_html.setEnabled(self.completed and not self.running)
+        self.btn_generate_report.setEnabled(self.completed and not self.running)
+        self.btn_open_reports_folder.setEnabled(True)
         self.btn_export.setEnabled(self.completed and not self.running)
         self.btn_lock_profile.setEnabled(state == "draft")
         self.btn_arm.setEnabled(state in ("ready", "armed"))
@@ -4339,6 +4566,7 @@ class MainWindow(QMainWindow):
             w.setEnabled(editable)
         self._refresh_lifecycle_presentation()
         self._sync_capture_chart_pan()
+        self._sync_results_chart_nav()
         if self._post_run_input_guard_active:
             self._apply_post_run_input_guard_disable()
         else:
@@ -4353,8 +4581,8 @@ class MainWindow(QMainWindow):
             self.btn_capture_edit_setup,
             self.btn_overlay,
             self.btn_clear_overlay,
-            self.btn_generate_excel,
-            self.btn_generate_html,
+            self.btn_generate_report,
+            self.btn_open_reports_folder,
             self.btn_export,
             self.nav_setup,
             self.nav_capture,
@@ -4365,14 +4593,18 @@ class MainWindow(QMainWindow):
     def _overlay_is_loaded(self) -> bool:
         return bool(self.overlay_events) or bool(str(self.overlay_path or "").strip())
 
+    def _overlay_view_supported(self) -> bool:
+        return self.results_view_combo.currentData() != "timing"
+
     def _sync_overlay_controls(self) -> None:
         """Restore Compare / Clear Overlay to normal lifecycle enablement."""
         if self._post_run_input_guard_active:
             self.btn_overlay.setEnabled(False)
             self.btn_clear_overlay.setEnabled(False)
             return
-        self.btn_overlay.setEnabled(True)
-        self.btn_clear_overlay.setEnabled(self._overlay_is_loaded())
+        supported = self._overlay_view_supported()
+        self.btn_overlay.setEnabled(supported)
+        self.btn_clear_overlay.setEnabled(supported and self._overlay_is_loaded())
 
     def _set_post_run_input_guard_status_visible(self, visible: bool) -> None:
         if visible:
@@ -4595,8 +4827,8 @@ class MainWindow(QMainWindow):
             self.btn_capture_edit_setup,
             self.btn_new,
             self.btn_edit_setup_new_run,
-            self.btn_generate_excel,
-            self.btn_generate_html,
+            self.btn_generate_report,
+            self.btn_open_reports_folder,
             self.btn_export,
             self.btn_overlay,
             self.btn_clear_overlay,

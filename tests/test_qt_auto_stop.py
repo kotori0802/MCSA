@@ -53,6 +53,12 @@ class ParseAutoStopSecondsTests(unittest.TestCase):
         self.assertEqual(parse_auto_stop_seconds(True, "30"), 30.0)
         self.assertEqual(parse_auto_stop_seconds(True, 12.5), 12.5)
 
+    def test_enabled_hhmmss_clock(self):
+        self.assertEqual(parse_auto_stop_seconds(True, "00:00:20"), 20.0)
+        self.assertEqual(parse_auto_stop_seconds(True, "00:01:00"), 60.0)
+        self.assertEqual(parse_auto_stop_seconds(True, "01:00:00"), 3600.0)
+        self.assertEqual(parse_auto_stop_seconds(True, "02:15:30"), 8130.0)
+
     def test_enabled_rejects_invalid_without_defaulting_to_60(self):
         for raw in ("", "abc", "0", "-5", "0.0", None, math.nan, math.inf, -math.inf):
             with self.subTest(raw=raw):

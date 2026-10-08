@@ -55,6 +55,17 @@ def format_elapsed_seconds_hms(value_s: Any) -> str:
     return format_elapsed_hms(seconds * MS_PER_SECOND)
 
 
+def format_duration_hms(value_s: Any) -> str:
+    """Configured Auto Stop duration as hh:mm:ss. Not used for timer arithmetic."""
+    seconds = _finite_ms(value_s)
+    if seconds is None:
+        return ""
+    total = int(round(max(0.0, seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def excel_elapsed_days(value_ms: Any) -> float | None:
     """Excel serial day fraction: elapsed_ms / 86_400_000."""
     ms = _finite_ms(value_ms)

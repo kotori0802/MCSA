@@ -157,15 +157,16 @@ class SetupScreeningPresentationTests(unittest.TestCase):
 
     def test_setup_shows_measurement_only_screening(self):
         self.win._show_workflow_page("setup")
-        self.assertEqual(self.win.lbl_screening.text(), "SCREENING")
+        self.assertEqual(self.win.lbl_screening.text(), "Analysis scope")
         self.assertEqual(self.win.lbl_screening_status.text(), "Measurement only")
         self.assertEqual(
             self.win.lbl_screening_note.text(),
             "No approved screening or validation profile is applied.",
         )
         self.assertNotIn("PASS", self.win.lbl_screening_status.text())
+        self.assertIs(self.win.setup_screening_card.parentWidget(), self.win.setup_config_card)
         self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("zh"))
-        self.assertEqual(self.win.lbl_screening.text(), "篩查")
+        self.assertEqual(self.win.lbl_screening.text(), "分析範圍")
         self.assertEqual(self.win.lbl_screening_status.text(), "僅量測")
         self.assertEqual(self.win.lbl_screening_note.text(), "未套用核准的篩查或驗證設定檔。")
 

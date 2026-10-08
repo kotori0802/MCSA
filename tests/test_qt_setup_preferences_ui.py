@@ -138,8 +138,9 @@ class SetupPreferencesUiTests(unittest.TestCase):
         for widget in (self.win.radio_manual, self.win.hz_combo, self.win.timing_tol_edit,
                        self.win.auto_stop_on, self.win.auto_stop_sec_combo):
             self.assertTrue(_under(widget, self.win.setup_config_card), widget)
-        self.assertTrue(_under(self.win.lbl_screening, self.win.setup_screening_card))
-        self.assertTrue(_under(self.win.lbl_screening_status, self.win.setup_screening_card))
+        self.assertTrue(_under(self.win.lbl_screening, self.win.setup_config_card))
+        self.assertTrue(_under(self.win.lbl_screening_status, self.win.setup_config_card))
+        self.assertTrue(_under(self.win.setup_screening_card, self.win.setup_config_card))
         self.assertIs(self.win.setup_limits_card, self.win.setup_screening_card)
         self.assertTrue(_under(self.win.lbl_profile_status, self.win.setup_profile_card))
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.setup_profile_card))
@@ -180,7 +181,7 @@ class SetupPreferencesUiTests(unittest.TestCase):
 
     def test_screening_card_is_measurement_only(self):
         self.win._show_workflow_page("setup")
-        self.assertEqual(self.win.lbl_screening.text(), self.win._tr("screening").upper())
+        self.assertEqual(self.win.lbl_screening.text(), self.win._tr("analysis_scope"))
         self.assertEqual(self.win.lbl_screening_status.text(), self.win._tr("screening_measurement_only"))
         self.assertEqual(self.win.lbl_screening_note.text(), self.win._tr("screening_measurement_only_note"))
         for phrase in ("Chatter", "Double-click", "Actuation short", "Low hold", "Interval CV", "PASS"):
@@ -216,9 +217,11 @@ class SetupPreferencesUiTests(unittest.TestCase):
         self.win.timing_tol_edit.setText("3")
         self.assertTrue(self.win.lock_profile())
         labels = [k for k, _v in self._preview_pairs()]
-        self.assertEqual(len(labels), 3)
-        for key in ("preview_reference_rate", "preview_timing_tolerance", "auto_stop"):
+        self.assertEqual(len(labels), 4)
+        for key in ("preview_reference_rate", "preview_timing_tolerance"):
             self.assertNotIn(self.win._tr(key).upper(), labels)
+        values = dict(self._preview_pairs())
+        self.assertEqual(values[self.win._tr("auto_stop").upper()], self.win._tr("preview_auto_stop_off"))
 
     def test_fixture_auto_stop_off_preview(self):
         self._fixture(auto_sec=None)
@@ -233,7 +236,8 @@ class SetupPreferencesUiTests(unittest.TestCase):
         )
         self.assertEqual(rows[0][1], "—")
         self.assertEqual(rows[1][1], "X1")
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[-1][1], self.win._tr("preview_auto_stop_off"))
 
     # 6
     def test_widget_mutation_cannot_change_preview_until_relock(self):
@@ -386,23 +390,15 @@ class SetupPreferencesUiTests(unittest.TestCase):
 
     def _assert_grid_geometry(self, columns: int) -> None:
         grid = self.win.setup_card_grid
-        device, config, limits = self.win.setup_device_card, self.win.setup_config_card, self.win.setup_limits_card
+        device, config = self.win.setup_device_card, self.win.setup_config_card
         self.assertEqual(grid.columns(), columns)
-        if columns == 3:
-            self.assertEqual(device.y(), config.y())
-            self.assertEqual(config.y(), limits.y())
-            self.assertLess(device.x(), config.x())
-            self.assertLess(config.x(), limits.x())
-        elif columns == 2:
+        self.assertTrue(_under(self.win.setup_limits_card, config))
+        if columns >= 2:
             self.assertEqual(device.y(), config.y())
             self.assertLess(device.x(), config.x())
-            self.assertGreater(limits.y(), device.y())
-            self.assertGreater(limits.width(), device.width() + config.width())
         else:
             self.assertEqual(device.x(), config.x())
-            self.assertEqual(config.x(), limits.x())
             self.assertLess(device.y(), config.y())
-            self.assertLess(config.y(), limits.y())
         for card in (self.win.setup_profile_card, self.win.locked_profile_card):
             if card.isVisibleTo(self.win):
                 self.assertEqual(card.width(), grid.width())
@@ -417,9 +413,9 @@ class SetupPreferencesUiTests(unittest.TestCase):
     def test_real_window_wide_setup_is_three_columns(self):
         viewport = self._setup_at(1600)
         self._assert_setup_owns_viewport(viewport)
-        self._assert_grid_geometry(3)
-        self.assertGreater(self.win.setup_content.width(), 3 * ResponsiveCardGrid.CARD_MIN_WIDTH)
-        self.assertGreaterEqual(self.win.setup_card_grid.width(), ResponsiveCardGrid.THREE_COLUMN_MIN_WIDTH)
+        self._assert_grid_geometry(2)
+        self.assertGreater(self.win.setup_content.width(), 2 * ResponsiveCardGrid.CARD_MIN_WIDTH)
+        self.assertGreaterEqual(self.win.setup_card_grid.width(), ResponsiveCardGrid.TWO_COLUMN_MIN_WIDTH)
 
     def test_real_window_medium_setup_is_two_columns(self):
         viewport = self._setup_at(1280)
@@ -439,11 +435,11 @@ class SetupPreferencesUiTests(unittest.TestCase):
         self._assert_grid_geometry(2)
         viewport = self._setup_at(1600)
         self._assert_setup_owns_viewport(viewport)
-        self._assert_grid_geometry(3)
+        self._assert_grid_geometry(2)
 
     def test_real_window_live_resize_wide_to_compact_reflows_down(self):
         self._setup_at(1600)
-        self._assert_grid_geometry(3)
+        self._assert_grid_geometry(2)
         self._setup_at(1280)
         self._assert_grid_geometry(2)
         viewport = self._setup_at(820)
@@ -518,7 +514,7 @@ class SetupPreferencesUiTests(unittest.TestCase):
                 self.assertEqual(buttons.count(widget), 1)
                 self.assertTrue(_under(widget, self.win.page_capture))
         for widget in (
-            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_new, self.win.btn_generate_report, self.win.btn_open_reports_folder,
             self.win.btn_overlay, self.win.btn_clear_overlay,
         ):
             with self.subTest(widget=widget.text()):

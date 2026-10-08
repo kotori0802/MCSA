@@ -204,8 +204,8 @@ class WorkflowShellTests(unittest.TestCase):
         self.assertTrue(_under(self.win.interval_chart, self.win.test_area))
         self.assertTrue(_under(self.win.btn_lock_profile, self.win.page_setup))
         self.assertTrue(_under(self.win.btn_new, self.win.page_results))
-        self.assertTrue(_under(self.win.btn_generate_excel, self.win.page_results))
-        self.assertTrue(_under(self.win.btn_generate_html, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_generate_report, self.win.page_results))
+        self.assertTrue(_under(self.win.btn_open_reports_folder, self.win.page_results))
         self.assertTrue(_under(self.win.btn_export, self.win.page_results))
 
     def test_help_is_on_nav_footer(self):
@@ -221,7 +221,7 @@ class WorkflowShellTests(unittest.TestCase):
         for btn in (self.win.btn_stop, self.win.btn_arm, self.win.btn_edit_profile):
             self.assertTrue(_under(btn, self.win.page_capture), btn)
         for btn in (
-            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_new, self.win.btn_generate_report, self.win.btn_open_reports_folder,
             self.win.btn_export, self.win.btn_overlay, self.win.btn_clear_overlay,
         ):
             self.assertTrue(_under(btn, self.win.page_results), btn)

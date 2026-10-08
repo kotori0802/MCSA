@@ -37,12 +37,16 @@
     "zh-TW": "自動停止"
   },
   "auto_stop_after": {
-    "en": "Auto Stop After (s)",
-    "zh-TW": "自動停止秒數"
+    "en": "Duration",
+    "zh-TW": "時長"
   },
   "auto_stop_invalid": {
-    "en": "Auto Stop requires a finite positive number of seconds.",
-    "zh-TW": "自動停止需填入大於 0 的有限秒數。"
+    "en": "Auto Stop Duration must be a finite positive time as seconds or hh:mm:ss.",
+    "zh-TW": "自動停止時長須為大於 0 的秒數或 hh:mm:ss。"
+  },
+  "analysis_scope": {
+    "en": "Analysis scope",
+    "zh-TW": "分析範圍"
   },
   "auto_stop_off_button": {
     "en": "OFF",

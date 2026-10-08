@@ -1,11 +1,13 @@
 """MCSA public report and settings schema (v1)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 TOOL_ID = "mouse_click_stability_analyzer"
 TOOL_NAME = "Mouse Click Stability Analyzer"
 TOOL_VERSION = "1.0.0"
+EVIDENCE_SCHEMA = "MCSA_EVIDENCE_V1"
 SUMMARY_SCHEMA = "MCSA_REPORT_V1"
 DETAIL_SCHEMA = "MCSA_DETAIL_V1"
 SETTINGS_SCHEMA = "MCSA_SETTINGS_V1"
@@ -23,13 +25,31 @@ def default_report_dir(app_root) -> "Path":
 
 
 def artifact_names(run_id: str) -> dict[str, str]:
+    """Filenames for the standard Measurement/Evidence report bundle."""
+    rid = str(run_id or "run")
+    return {
+        "evidence_json": f"mcsa_{rid}_evidence.json",
+        "all_click_log_csv": f"mcsa_{rid}_events.csv",
+        "engineering_xlsx": f"mcsa_{rid}_report.xlsx",
+        "engineering_html": f"mcsa_{rid}_report.html",
+    }
+
+
+def report_package_name(run_id: str) -> str:
+    """Per-run report package directory name under the reports root."""
+    return f"mcsa_{run_id or 'run'}"
+
+
+def report_package_dir(report_root: Path, run_id: str) -> Path:
+    return Path(report_root) / report_package_name(run_id)
+
+
+def legacy_artifact_names(run_id: str) -> dict[str, str]:
+    """Retired heuristic sidecars. Not produced by ordinary Generate Report."""
     rid = str(run_id or "run")
     return {
         "summary_json": f"mcsa_{rid}_summary.json",
         "detail_json": f"mcsa_{rid}_detail.json",
-        "all_click_log_csv": f"mcsa_{rid}_events.csv",
-        "engineering_xlsx": f"mcsa_{rid}_report.xlsx",
-        "engineering_html": f"mcsa_{rid}_report.html",
         "txt": f"mcsa_{rid}_analysis.txt",
     }
 

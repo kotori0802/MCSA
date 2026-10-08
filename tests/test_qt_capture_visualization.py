@@ -722,8 +722,9 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertEqual(self._snapshot(), before)
 
     def test_results_charts_remain_legacy_and_multi_view(self):
-        self.assertFalse(self.win.results_scatter.data_aware_fit)
-        self.assertFalse(self.win.results_interval_chart.data_aware_fit)
+        self.assertTrue(self.win.results_scatter.data_aware_fit)
+        self.assertTrue(self.win.results_interval_chart.data_aware_fit)
+        self.assertTrue(self.win.results_distribution_chart.data_aware_fit)
         self.assertGreaterEqual(self.win.results_chart_stack.count(), 3)
 
     def test_live_refresh_preserves_manual_zoom(self):

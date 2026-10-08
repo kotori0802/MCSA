@@ -8,6 +8,12 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtWidgets import QToolTip, QWidget
 
+from ..chart_domain import (
+    DOMAIN_COUNT,
+    DOMAIN_HOLD,
+    DOMAIN_INTERVAL,
+    domain_axis_bounds,
+)
 from ..duration import elapsed_axis_uses_seconds, format_elapsed_axis_tick
 from .presentation import screening_presentation_label
 from .styles import ChartPalette, LIGHT_PALETTE, chart_font
@@ -852,6 +858,8 @@ class ScatterChart(_ChartBase):
         if self.data_aware_fit:
             xmin, xmax = fitted_range(xs, extra=extras, min_span=SCATTER_X_MIN_SPAN_MS)
             ymin, ymax = fitted_range(ys, min_span=SCATTER_Y_MIN_SPAN_MS)
+            xmin, xmax = domain_axis_bounds(xmin, xmax, domain=DOMAIN_INTERVAL, values=xs)
+            ymin, ymax = domain_axis_bounds(ymin, ymax, domain=DOMAIN_HOLD, values=ys)
             return xmin, xmax, ymin, ymax
         if not xs:
             return None
@@ -1035,6 +1043,7 @@ class IntervalChart(_ChartBase):
         if self.data_aware_fit:
             xmin, xmax = elapsed_viewport(*fitted_range(xs, min_span=INTERVAL_X_MIN_SPAN_MS))
             ymin, ymax = fitted_range(ys, extra=extras, min_span=INTERVAL_Y_MIN_SPAN_MS)
+            ymin, ymax = domain_axis_bounds(ymin, ymax, domain=DOMAIN_INTERVAL, values=ys)
             return xmin, xmax, ymin, ymax
         if len(self.series) < 2 and len(self.overlay_series) < 2:
             return None
@@ -1175,8 +1184,12 @@ class IntervalChart(_ChartBase):
         p.restore()
 
 
+HIST_X_MIN_SPAN_MS = 8.0
+HIST_Y_MIN_SPAN = 1.0
+
+
 class HistogramChart(_ChartBase):
-    """Static interval distribution histogram."""
+    """Interval distribution histogram. Navigation inspects bins; binning is unchanged."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1200,6 +1213,39 @@ class HistogramChart(_ChartBase):
             self.title = title
         self.target_beat_ms = target_beat_ms
         self.update()
+
+    def _min_spans(self) -> tuple[float, float]:
+        return HIST_X_MIN_SPAN_MS, HIST_Y_MIN_SPAN
+
+    def _bin_extents(self) -> tuple[list[float], list[float]]:
+        xs: list[float] = []
+        ys: list[float] = []
+        for item in list(self.bins) + list(self.overlay_bins):
+            lo = _finite_values([item.get("lo")])
+            hi = _finite_values([item.get("hi")])
+            count = _finite_values([item.get("count")])
+            xs.extend(lo)
+            xs.extend(hi)
+            ys.extend(count)
+        return xs, ys
+
+    def autofit_bounds(self) -> tuple[float, float, float, float] | None:
+        xs, ys = self._bin_extents()
+        extras = _reference_anchors(self.target_beat_ms)
+        if not xs:
+            return None
+        ymax = max(ys) if ys else 1.0
+        if self.data_aware_fit:
+            xmin, xmax = fitted_range(xs, extra=extras, min_span=HIST_X_MIN_SPAN_MS)
+            xmin, xmax = domain_axis_bounds(xmin, xmax, domain=DOMAIN_INTERVAL, values=xs)
+            ymin, yhi = fitted_range([0.0, ymax], min_span=HIST_Y_MIN_SPAN)
+            ymin, yhi = domain_axis_bounds(ymin, yhi, domain=DOMAIN_COUNT, values=ys)
+            return xmin, xmax, ymin, yhi
+        xmin = min(xs)
+        xmax = max(xs)
+        if xmax <= xmin:
+            xmax = xmin + 1.0
+        return xmin, xmax, 0.0, max(1.0, ymax * 1.15)
 
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
@@ -1226,30 +1272,33 @@ class HistogramChart(_ChartBase):
             p.setFont(chart_font("placeholder"))
             p.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), self._label("waiting_data", "Waiting for click data"))
             return
-        xmin = float(self.bins[0]["lo"])
-        xmax = float(self.bins[-1]["hi"])
-        if xmax <= xmin:
-            xmax = xmin + 1.0
-        ymax = max(1.0, max(int(b.get("count") or 0) for b in self.bins) * 1.15)
-        if self.overlay_bins:
-            ymax = max(ymax, max(int(b.get("count") or 0) for b in self.overlay_bins) * 1.15)
+        bounds = self.visible_bounds()
+        if bounds is None:
+            return
+        xmin, xmax, ymin, ymax = bounds
+        dx = xmax - xmin
+        dy = ymax - ymin
+        if dx <= 0 or dy <= 0:
+            return
 
         def map_x(v: float) -> float:
-            return plot.left() + (v - xmin) / (xmax - xmin) * plot.width()
+            return plot.left() + (v - xmin) / dx * plot.width()
 
         def map_y(v: float) -> float:
-            return plot.bottom() - (v / ymax) * plot.height()
+            return plot.bottom() - (v - ymin) / dy * plot.height()
 
         self._draw_axes(
             p,
             plot,
             x_ticks=nice_ticks(xmin, xmax),
-            y_ticks=nice_ticks(0.0, ymax),
+            y_ticks=nice_ticks(ymin, ymax),
             x_label=self._label("axis_interval_ms", "Interval (ms)"),
             y_label=self._label("axis_count", "Count"),
             map_x=map_x,
             map_y=map_y,
         )
+        p.save()
+        p.setClipRect(plot)
         if self.target_beat_ms:
             tx = map_x(self.target_beat_ms)
             p.setPen(QPen(QColor(pal.target_line), 1.5, Qt.PenStyle.DashLine))
@@ -1274,6 +1323,7 @@ class HistogramChart(_ChartBase):
                 w = max(2.0, map_x(hi) - map_x(lo) - 4)
                 y = map_y(count)
                 p.fillRect(QRectF(x, y, w, plot.bottom() - y), color)
+        p.restore()
 
 
 class OccupancyBar(QWidget):

@@ -239,31 +239,25 @@ class ReportNeutralStatusTests(unittest.TestCase):
                     self.assertNotIn("Test Result", cells)
                     self.assertFalse([c for c in cells if _VERDICT_WORD.search(c)])
 
-    def test_json_sidecars_separate_legacy_verdict_from_run_status(self):
-        summaries = []
+    def test_standard_json_does_not_export_legacy_verdicts(self):
         for value in ("3", "8"):
             settings = _settings(True, chatter_threshold_ms=value)
             events = _chatter_events()
             model = _model(settings, events)
             with tempfile.TemporaryDirectory() as tmp:
-                paths = legacy_app.write_reports(Path(tmp), "DUT", "op", settings, events, f"run_{value}",
+                root = Path(tmp)
+                paths = legacy_app.write_reports(root, "DUT", "op", settings, events, f"run_{value}",
                                                  completed_model=model)
-                summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-                detail = json.loads(Path(paths["detail_json"]).read_text(encoding="utf-8"))
-                text = Path(paths["txt"]).read_text(encoding="utf-8")
-            self.assertEqual(summary["run_status"], RUN_STATUS_COMPLETE)
-            self.assertEqual(summary["result"], RUN_STATUS_COMPLETE)
-            self.assertEqual(summary["result_semantics"], "run_status")
-            self.assertEqual(detail["run_status"], RUN_STATUS_COMPLETE)
-            self.assertIs(summary["legacy_heuristic_assessment"]["authoritative"], False)
-            self.assertIs(detail["legacy_heuristic_assessment"]["authoritative"], False)
-            self.assertNotIn("health", summary["metrics"])
-            self.assertIn("Run Status: COMPLETE", text)
-            summaries.append(summary)
-        self.assertEqual(
-            [s["legacy_heuristic_assessment"]["result"] for s in summaries], ["WARN", "FAIL"],
-        )
-        self.assertEqual([s["run_status"] for s in summaries], [RUN_STATUS_COMPLETE] * 2)
+                evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
+                self.assertEqual(evidence["run_status"], RUN_STATUS_COMPLETE)
+                self.assertNotIn("result", evidence)
+                self.assertNotIn("legacy_heuristic_assessment", evidence)
+                self.assertNotIn("metrics", evidence)
+                self.assertNotIn("pass", evidence)
+                self.assertNotIn("txt", paths)
+                self.assertFalse(list(root.rglob("*_analysis.txt")))
+                self.assertFalse(list(root.rglob("*_summary.json")))
+                self.assertFalse(list(root.rglob("*_detail.json")))
 
 
 def _make_qapp():

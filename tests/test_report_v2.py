@@ -315,14 +315,11 @@ class ReportV2QtTests(unittest.TestCase):
         self.assertEqual(facts["run_status"], "COMPLETE")
         self.assertNotIn("verdict", facts)
         self.assertEqual(facts["tags"], ["TIMING_JITTER_PAIR"])
-        legacy_summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-        self.assertEqual(legacy_summary["run_status"], "COMPLETE")
-        self.assertEqual(legacy_summary["result"], "COMPLETE")
-        self.assertEqual(legacy_summary["result_semantics"], "run_status")
-        legacy = legacy_summary["legacy_heuristic_assessment"]
-        self.assertIs(legacy["authoritative"], False)
-        self.assertEqual(legacy["result"], "FAIL")
-        self.assertIn("EXCESS_CLICK_COUNT_FAIL", legacy_summary["issue_tags"])
+        evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
+        self.assertEqual(evidence["run_status"], "COMPLETE")
+        self.assertNotIn("result", evidence)
+        self.assertNotIn("legacy_heuristic_assessment", evidence)
+        self.assertNotIn("issue_tags", evidence)
         html_text, xlsx = self._artifacts(paths)
         self.assertEqual(_html_run_status(html_text), {"Run Status": "COMPLETE"})
         self.assertEqual(_xlsx_run_status(xlsx), "COMPLETE")
@@ -335,7 +332,8 @@ class ReportV2QtTests(unittest.TestCase):
         info = _html_kv(html_text, "test-information")
         self.assertEqual(info["Device"], "123")
         self.assertEqual(info["Run Profile"], "Fixture_Custom")
-        self.assertEqual(info["Screening"], "Measurement only")
+        self.assertEqual(info["Analysis scope"], "Measurement only")
+        self.assertNotIn("Screening", info)
         self.assertEqual(info["Reference Rate"], "5.6 Hz")
         self.assertEqual(info["Mode"], "Fixture")
 
@@ -551,7 +549,7 @@ class ReportV2QtTests(unittest.TestCase):
             self.assertNotIn(forbidden, workbook, forbidden)
         self.assertNotIn("<a ", html_text)
         self.assertNotIn("href", html_text)
-        for key in ("summary_json", "detail_json", "all_click_log_csv", "engineering_xlsx", "txt"):
+        for key in ("evidence_json", "all_click_log_csv", "engineering_xlsx"):
             self.assertNotIn(Path(paths[key]).name, html_text)
             self.assertNotIn(Path(paths[key]).name, workbook)
 
@@ -639,21 +637,19 @@ class ReportV2QtTests(unittest.TestCase):
 
     def test_generate_buttons_still_write_full_bundle(self):
         self._run(_golden_offsets())
-        for preferred in ("engineering_xlsx", "engineering_html"):
-            with self.subTest(preferred=preferred):
-                self.win.report_written = False
-                with mock.patch.object(qt_app.QMessageBox, "information") as info, \
-                     mock.patch.object(qt_app.QMessageBox, "critical") as critical:
-                    self.win.finish_report(preferred_artifact=preferred)
-                critical.assert_not_called()
-                info.assert_called_once()
-                self.assertEqual(
-                    info.call_args[0][2],
-                    self.win._tr("saved_to", path=self.win.report_paths[preferred]),
-                )
-                self.assertTrue(legacy_app._verify_artifacts(self.win.report_paths)["ok"])
-                for key in legacy_app.artifact_names(self.win.run_id):
-                    self.assertTrue(Path(self.win.report_paths[key]).exists(), key)
+        self.win.report_written = False
+        with mock.patch.object(qt_app.QMessageBox, "information") as info, \
+             mock.patch.object(qt_app.QMessageBox, "critical") as critical:
+            self.win.finish_report()
+        critical.assert_not_called()
+        info.assert_called_once()
+        self.assertEqual(
+            info.call_args[0][2],
+            self.win._tr("saved_to", path=Path(self.win.report_root) / f"mcsa_{self.win.run_id}"),
+        )
+        self.assertTrue(legacy_app._verify_artifacts(self.win.report_paths)["ok"])
+        for key, fname in legacy_app.artifact_names(self.win.run_id).items():
+            self.assertTrue(Path(self.win.report_paths[key]).is_file(), fname)
 
     def test_direct_secondary_export_is_silent_with_real_bundle(self):
         self._run(_golden_offsets())
@@ -676,21 +672,23 @@ class ReportV2QtTests(unittest.TestCase):
             self.win.act_save_report_as.trigger()
         info.assert_not_called()
         copied = {p.name for p in (out_root / f"mcsa_{self.win.run_id}").iterdir()}
-        self.assertEqual(copied, set(legacy_app.artifact_names(self.win.run_id).values()))
+        expected = {
+            Path(path).name
+            for path in self.win.report_paths.values()
+            if path and Path(path).exists()
+        }
+        self.assertEqual(copied, expected)
 
     def test_detail_json_still_loads_as_overlay(self):
         facts, paths = self._golden()
-        payload = load_overlay_payload(Path(paths["detail_json"]))
+        payload = load_overlay_payload(Path(paths["evidence_json"]))
         events = extract_overlay_events(payload)
         self.assertEqual(len([e for e in events if e.get("accepted")]), len(facts["model"]["click_data"]))
-        summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-        self.assertEqual(summary["result"], "COMPLETE")
-        self.assertIn("metrics", summary)
-        detail = json.loads(Path(paths["detail_json"]).read_text(encoding="utf-8"))
-        self.assertEqual(detail["run_status"], "COMPLETE")
-        self.assertIs(detail["legacy_heuristic_assessment"]["authoritative"], False)
-        self.assertNotIn("health", detail["metrics"])
-        self.assertNotIn("health", detail["legacy_payload"]["metrics"])
+        evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
+        self.assertEqual(evidence["run_status"], "COMPLETE")
+        self.assertNotIn("metrics", evidence)
+        self.assertNotIn("legacy_heuristic_assessment", evidence)
+        self.assertNotIn("legacy_payload", evidence)
 
     def test_frozen_run_settings_and_events_not_mutated(self):
         self._run(_golden_offsets())
@@ -811,7 +809,7 @@ class ReportV2ModelTests(unittest.TestCase):
                                              events=self._events([100.0] * 25), run_id="ident", target="SAMPLE-07")
         info = {label: value for _id, label, value in report_v2.build_report_view(model)["test_information"]}
         self.assertEqual(info["Run Profile"], "Fixture_Custom")
-        self.assertEqual(info["Screening"], "Measurement only")
+        self.assertEqual(info["Analysis scope"], "Measurement only")
         self.assertEqual(info["Device"], "SAMPLE-07")
         self.assertEqual(info["HID device name"], "HP Mouse 9000")
         self.assertEqual((info["VID"], info["PID"], info["bcdDevice"]), ("03F0", "0A4B", "0102"))
@@ -889,9 +887,9 @@ class ReportV2ModelTests(unittest.TestCase):
         events = self._events([100.0] * 25)
         with tempfile.TemporaryDirectory() as tmp:
             paths = legacy_app.write_reports(Path(tmp), "fallback", "op", settings, events, "fallback_run")
-            summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-            self.assertIn("EXCESS_CLICK_COUNT_FAIL", summary["issue_tags"])
-            self.assertEqual(summary["run_status"], "COMPLETE")
+            evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
+            self.assertNotIn("issue_tags", evidence)
+            self.assertEqual(evidence["run_status"], "COMPLETE")
             html_text = Path(paths["engineering_html"]).read_text(encoding="utf-8")
             self.assertEqual(_html_run_status(html_text), {"Run Status": "COMPLETE"})
             for tag in _RETIRED:

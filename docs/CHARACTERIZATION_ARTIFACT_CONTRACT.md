@@ -16,36 +16,36 @@ Future characterization analysis may use only these fields from MCSA report arti
 
 | Field | Artifact | Meaning |
 |---|---|---|
-| `run_id` | `_summary.json`, `_detail.json` | Run identity |
-| `run_status` | both | Authoritative capture/data status: `COMPLETE`, `NO_DATA`, or `INVALID` |
-| `tool_version` | both | Tool version that wrote the artifacts |
+| `run_id` | `_evidence.json` (Stage 2C+). Historical: `_summary.json`, `_detail.json` | Run identity |
+| `run_status` | same | Authoritative capture/data status: `COMPLETE`, `NO_DATA`, or `INVALID` |
+| `tool_version` | same | Tool version that wrote the artifacts |
 
 ### Configuration
 
 | Field | Artifact | Meaning |
 |---|---|---|
-| `settings.manual_mode` | both JSON `settings` | Software mode. `false` is Fixture **software** mode, not proof of physical Fixture actuation |
-| `settings.focus_button` | both JSON `settings` | Target button |
-| `settings.duration_sec` | both JSON `settings` | Configured capture duration (whole seconds after report normalize) |
-| `settings.fixture_reference_hz` | both JSON `settings` | Configured Reference Rate. Defines the **nominal configured schedule** for characterization |
-| `settings.fixture_timing_tolerance_ms` | both JSON `settings` | Operational Schedule Association Window for that run (numeric ms) |
+| `settings.manual_mode` | `_evidence.json` `settings` | Software mode. `false` is Fixture **software** mode, not proof of physical Fixture actuation |
+| `settings.focus_button` | `_evidence.json` `settings` | Target button |
+| `settings.duration_sec` | `_evidence.json` `settings` | Configured Auto Stop duration in seconds (`0` / absent means Auto Stop off) |
+| `settings.fixture_reference_hz` | `_evidence.json` `settings` | Configured Reference Rate. Defines the **nominal configured schedule** for characterization |
+| `settings.fixture_timing_tolerance_ms` | `_evidence.json` `settings` | Operational Schedule Association Window for that run (numeric ms) |
 
 ### Primary observation timeline
 
 | Field | Artifact | Meaning |
 |---|---|---|
-| `events[].accepted` | `_detail.json` | Whether the event is an accepted Host press |
-| `events[].button` | `_detail.json` | Button for that event |
-| `events[].press_elapsed_ms` | `_detail.json` | Primary Host-observed timeline, relative to the first accepted Host press (t0) |
+| `events[].accepted` | `_evidence.json` | Whether the event is an accepted Host press |
+| `events[].button` | `_evidence.json` | Button for that event |
+| `events[].press_elapsed_ms` | `_evidence.json` | Primary Host-observed timeline, relative to the first accepted Host press (t0) |
 
 ### Optional factual context (if present)
 
 | Field | Artifact | Meaning |
 |---|---|---|
-| `events[].hold_ms` | `_detail.json` | This click's release minus this click's press |
-| `host_test_environment` | `_summary.json` | Host/platform/capture backend recorded at write time |
-| `events[].capture_source` | `_detail.json` | Capture backend label when persisted |
-| `events[].device_source` | `_detail.json` | Raw Input device path when persisted |
+| `events[].hold_ms` | `_evidence.json` | This click's release minus this click's press |
+| `host_test_environment` | `_evidence.json` | Host/platform/capture backend recorded at write time |
+| `events[].capture_source` | `_evidence.json` | Capture backend label when persisted |
+| `events[].device_source` | `_evidence.json` | Raw Input device path when persisted |
 
 `release_elapsed_ms` is **not** relative to t0. It is relative to the first accepted **release**. Do not treat it as a schedule-relative time.
 
@@ -59,8 +59,7 @@ One numeric source of truth per report bundle: when one completed report bundle 
 
     locked Setup
       -> completed model (frozen): run.timing_tolerance_ms
-           -> _summary.json settings.fixture_timing_tolerance_ms
-           -> _detail.json  settings.fixture_timing_tolerance_ms
+           -> _evidence.json settings.fixture_timing_tolerance_ms
            -> HTML
            -> XLSX
 
@@ -105,7 +104,7 @@ not native JSON provenance. This repository does not implement report-text recov
 
 ## 4. Non-authoritative / forbidden characterization inputs
 
-These exist in artifacts for compatibility. They are **not** measurement truth for characterization.
+These exist in **legacy** `*_summary.json` / `*_detail.json` files only. Stage 2C standard Generate Report does **not** emit them. They are **not** measurement truth for characterization.
 
 ### Run / metric / score blocks
 
@@ -174,9 +173,31 @@ That run used Fixture software mode with hand actuation. It is valid only as an 
 
 ## 6. Schema version
 
-Adding optional `settings.fixture_timing_tolerance_ms` is additive. Existing readers that ignore unknown settings keys remain valid. Schema identifiers stay:
+Stage 2C standard machine-readable contract:
+
+- evidence: `MCSA_EVIDENCE_V1` (`schema` / `schema_version`)
+
+Historical files may still use:
 
 - summary: `MCSA_REPORT_V1`
 - detail: `1`
 
-No schema-version bump in 4E-B1.
+Overlay loaders accept `_evidence.json` and fall back to historical `_detail.json`.
+
+## 7. Report package layout (Stage 2C closeout)
+
+Generate Report writes one per-run package under the configured reports root:
+
+```text
+reports/
+  mcsa_<run_id>/
+    mcsa_<run_id>_events.csv
+    mcsa_<run_id>_evidence.json
+    mcsa_<run_id>_report.html
+    mcsa_<run_id>_report.xlsx
+```
+
+- All four files are required. A missing file (including XLSX) means generation failed.
+- `artifacts` and `report_artifacts_verified` inside the evidence JSON hold package-relative file names only (`evidence_json`, `events_csv`, `report_html`, `report_xlsx`). No absolute machine path is stored.
+- `report_generated_at` is the report-writer wall-clock time. It is not a run completion time; no frozen completion timestamp exists. Run duration is `elapsed_s`.
+- Historical flat files directly under `reports/` (`mcsa_<id>_evidence.json`, `_detail.json`, `_summary.json`) are not migrated and remain readable. Discovery prefers the nested package evidence, then flat evidence, then flat detail; one entry per run id. Siblings are resolved relative to the discovered file's folder.

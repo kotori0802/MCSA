@@ -23,6 +23,11 @@ from mouse_click_stability_analyzer.duration import (
     format_elapsed_axis_tick,
     format_elapsed_seconds_hms,
 )
+from mouse_click_stability_analyzer.chart_domain import (
+    DOMAIN_HOLD,
+    DOMAIN_INTERVAL,
+    domain_axis_bounds,
+)
 from mouse_click_stability_analyzer.host_inventory import NOT_AVAILABLE, field_display
 from mouse_click_stability_analyzer.schema import TOOL_VERSION
 from mouse_click_stability_analyzer.presentation import (
@@ -480,7 +485,7 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
     span = _reference_span(reference)
     if span:
         ymin, ymax = min(ymin, span[0]), max(ymax, span[1])
-    ymin, ymax = _padded(ymin, ymax)
+    ymin, ymax = domain_axis_bounds(*_padded(ymin, ymax), domain=DOMAIN_INTERVAL, values=ys)
     xmin, xmax = min(xs), max(xs)
     span_ms = max(xmax - xmin, abs(xmax), abs(xmin))
     x_label = _rt("report_axis_elapsed_s") if elapsed_axis_uses_seconds(span_ms) else _rt("report_axis_elapsed")
@@ -533,8 +538,8 @@ def _svg_scatter(points: list[tuple[float, float, str]], reference: dict[str, An
     span = _reference_span(reference)
     if span:
         xlo, xhi = min(xlo, span[0]), max(xhi, span[1])
-    xmin, xmax = _padded(xlo, xhi)
-    ymin, ymax = _padded(min(ys), max(ys))
+    xmin, xmax = domain_axis_bounds(*_padded(xlo, xhi), domain=DOMAIN_INTERVAL, values=xs)
+    ymin, ymax = domain_axis_bounds(*_padded(min(ys), max(ys)), domain=DOMAIN_HOLD, values=ys)
     body = _axis(xmin, xmax, ymin, ymax, _rt("report_axis_interval_ms"), _rt("report_axis_hold_ms"))
     if reference:
         body += _svg_reference_vertical(reference, xmin, xmax)
@@ -897,7 +902,7 @@ def write_report_xlsx(
         ys = [v for _, v in series] + (list(span) if span else [])
         line = frame(
             ScatterChart(scatterStyle="line"), _rt("report_chart_interval_over_time"), _rt("report_axis_elapsed"), _rt("report_axis_interval_ms"),
-            y_range=_padded(min(ys), max(ys)),
+            y_range=domain_axis_bounds(*_padded(min(ys), max(ys)), domain=DOMAIN_INTERVAL, values=[v for _, v in series]),
         )
         line.x_axis.number_format = "[h]:mm:ss"
         s = Series(Reference(wc, min_col=4, min_row=2, max_row=last), Reference(wc, min_col=2, min_row=2, max_row=last),
@@ -915,10 +920,12 @@ def write_report_xlsx(
         wm.add_chart(line, "F3")
 
         xs = [p[0] for p in points] + (list(span) if span else [])
-        y_range = _padded(min(p[1] for p in points), max(p[1] for p in points))
+        holds = [p[1] for p in points]
+        y_range = domain_axis_bounds(*_padded(min(holds), max(holds)), domain=DOMAIN_HOLD, values=holds)
+        x_range = domain_axis_bounds(*_padded(min(xs), max(xs)), domain=DOMAIN_INTERVAL, values=[p[0] for p in points])
         scatter = frame(
             ScatterChart(scatterStyle="marker"), _rt("report_chart_hold_vs_interval"), _rt("report_axis_interval_ms"), _rt("report_axis_hold_ms"),
-            x_range=_padded(min(xs), max(xs)), y_range=y_range,
+            x_range=x_range, y_range=y_range,
         )
         scatter.y_axis.number_format = "0.0"
         p = Series(Reference(wc, min_col=5, min_row=2, max_row=last), Reference(wc, min_col=4, min_row=2, max_row=last),

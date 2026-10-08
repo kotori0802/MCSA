@@ -39,7 +39,7 @@ def load_overlay_payload(path: str | Path) -> dict[str, Any]:
         raise OverlayLoadError("Overlay JSON root must be an object.")
     events = extract_overlay_events(payload)
     if not events:
-        raise OverlayLoadError("No click events in overlay file (need *_detail.json).")
+        raise OverlayLoadError("No click events in overlay file (need *_evidence.json or *_detail.json).")
     if len(events) > MAX_OVERLAY_EVENT_COUNT:
         raise OverlayLoadError(
             f"Too many events ({len(events):,}; limit {MAX_OVERLAY_EVENT_COUNT:,}). "

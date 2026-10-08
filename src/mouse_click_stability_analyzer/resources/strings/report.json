@@ -39,7 +39,7 @@
     "en": "Run Profile"
   },
   "report_label_screening": {
-    "en": "Screening"
+    "en": "Analysis scope"
   },
   "report_value_measurement_only": {
     "en": "{@term.measurement_only}"

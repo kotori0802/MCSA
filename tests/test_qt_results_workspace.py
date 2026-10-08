@@ -50,11 +50,12 @@ _RESULT_KEYS = (
     "generate_report",
     "generate_excel",
     "generate_html",
+    "open_reports_folder",
+    "open_excel",
+    "open_html",
     "export_save_as",
-    "export_analysis_txt",
     "export_click_log_csv",
-    "export_summary_json",
-    "export_detail_json",
+    "export_evidence_json",
     "save_report_as",
     "report",
     "capture_run_completed",
@@ -322,8 +323,9 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(facts["metrics"].get("hold_avg_ms"), metrics.get("hold_avg_ms"))
         self.assertEqual(self.win.results_verdict_label.text(), "COMPLETE")
         self.assertEqual(self.win.lbl_results_run_status.text(), "RUN STATUS")
+        self.assertTrue(self.win.results_observations_card.isHidden())
         obs = self.win.results_observations_text.text()
-        self.assertTrue(obs)
+        self.assertEqual(obs, "")
         self.assertNotIn("DUT", obs)
         self.assertNotIn("Host click count", obs)
         self.assertNotIn(self.win._tr("results_host_clicks"), obs)
@@ -383,8 +385,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
             snap = self.win.host_evidence_snapshot
             self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("zh"))
             self.assertEqual(self.win.lbl_results_summary.text(), STRINGS["zh"]["results_run_context"].upper())
-            self.assertEqual(self.win.btn_generate_excel.text(), STRINGS["zh"]["generate_excel"])
-            self.assertEqual(self.win.btn_generate_html.text(), STRINGS["zh"]["generate_html"])
+            self.assertEqual(self.win.btn_generate_report.text(), STRINGS["zh"]["generate_report"])
+            self.assertEqual(self.win.btn_open_reports_folder.text(), STRINGS["zh"]["open_reports_folder"])
             self.assertEqual(self.win.btn_export.text(), STRINGS["zh"]["export_save_as"])
             self.assertIn("主機觀測證據", self.win.results_evidence_text.toPlainText())
             self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("en"))
@@ -417,26 +419,28 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         for widget in (
-            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_new, self.win.btn_generate_report, self.win.btn_open_reports_folder,
             self.win.btn_export, self.win.btn_overlay, self.win.btn_clear_overlay,
         ):
             with self.subTest(widget=widget.text()):
                 self.assertTrue(_under(widget, self.win.page_results), widget)
                 self.assertFalse(_under(widget, self.win.page_capture), widget)
                 self.assertTrue(widget.isVisibleTo(self.win), widget)
-        self.assertEqual(self.win.btn_generate_excel.text(), self.win._tr("generate_excel"))
-        self.assertEqual(self.win.btn_generate_html.text(), self.win._tr("generate_html"))
+        self.assertEqual(self.win.btn_generate_report.text(), self.win._tr("generate_report"))
+        self.assertEqual(self.win.btn_open_reports_folder.text(), self.win._tr("open_reports_folder"))
         self.assertEqual(self.win.btn_export.text(), self.win._tr("export_save_as"))
         self.assertEqual(self.win.btn_new.text(), self.win._tr("run_again"))
+        self.assertFalse(hasattr(self.win, "btn_open_html"))
+        self.assertFalse(hasattr(self.win, "btn_open_excel"))
         self.assertEqual(self.win.btn_edit_setup_new_run.text(), self.win._tr("edit_setup_new_run").replace("&", "&&"))
         self.assertTrue(_under(self.win.btn_overlay, self.win.results_analysis_page))
         self.assertTrue(_under(self.win.btn_clear_overlay, self.win.results_analysis_page))
         self.assertFalse(_under(self.win.btn_overlay, self.win.results_actions_card))
-        self.assertTrue(_under(self.win.btn_generate_excel, self.win.results_actions_card))
-        self.assertFalse(_under(self.win.btn_generate_excel, self.win.results_tabs))
+        self.assertTrue(_under(self.win.btn_generate_report, self.win.results_actions_card))
+        self.assertFalse(_under(self.win.btn_generate_report, self.win.results_tabs))
         self.assertEqual(self.win.results_tabs.currentIndex(), 0)
-        self.assertTrue(self.win.btn_generate_excel.isEnabled())
-        self.assertTrue(self.win.btn_generate_html.isEnabled())
+        self.assertTrue(self.win.btn_generate_report.isEnabled())
+        self.assertTrue(self.win.btn_open_reports_folder.isEnabled())
         self.assertTrue(self.win.btn_export.isEnabled())
         self.assertTrue(_under(self.win.btn_stop, self.win.page_capture))
         self.assertTrue(_under(self.win.btn_arm, self.win.page_capture))
@@ -449,8 +453,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.win._set_overlay(list(self.win.events), {}, "session:handlers")
         self.win._update_controls()
         mapping = (
-            (self.win.btn_generate_excel, "generate_excel_report"),
-            (self.win.btn_generate_html, "generate_html_report"),
+            (self.win.btn_generate_report, "generate_report"),
             (self.win.btn_overlay, "load_overlay_run"),
             (self.win.btn_clear_overlay, "clear_overlay"),
             (self.win.btn_new, "new_run"),
@@ -516,10 +519,11 @@ class ResultsWorkspaceTests(unittest.TestCase):
                     self.win.results_actions_card,
                 ]
                 _no_pairwise_overlap(visible)
-                self.assertGreaterEqual(self.win.results_interval_chart.height(), 80)
+                shown = self.win.results_chart_stack.currentWidget()
+                self.assertGreaterEqual(shown.height(), 80)
                 self.assertLessEqual(self.win.results_workspace.height(), max(self.win.height() * 4, 4000))
                 self.assertTrue(self.win.results_tabs.isVisibleTo(self.win))
-                self.assertTrue(self.win.btn_generate_excel.isVisibleTo(self.win))
+                self.assertTrue(self.win.btn_generate_report.isVisibleTo(self.win))
 
     def test_hidden_results_actions_do_not_exclude_capture(self):
         self._setup_fixture()
@@ -528,7 +532,7 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self._settle()
         self.win._cursor_over_capture_exclusion_ui = lambda: qt_app.MainWindow._cursor_over_capture_exclusion_ui(self.win)
         for widget in (
-            self.win.btn_new, self.win.btn_generate_excel, self.win.btn_generate_html,
+            self.win.btn_new, self.win.btn_generate_report, self.win.btn_open_reports_folder,
             self.win.btn_export, self.win.results_evidence_text,
         ):
             self.assertFalse(widget.isVisibleTo(self.win), widget)
@@ -538,8 +542,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
     def test_report_primary_and_secondary_actions(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
-        self.assertEqual(self.win.btn_generate_excel.objectName(), "Primary")
-        self.assertEqual(self.win.btn_generate_html.objectName(), "Primary")
+        self.assertEqual(self.win.btn_generate_report.objectName(), "Primary")
+        self.assertEqual(self.win.btn_open_reports_folder.objectName(), "Secondary")
         self.assertIsInstance(self.win.btn_export, QToolButton)
         self.assertEqual(self.win.btn_export.objectName(), "Secondary")
         self.assertEqual(self.win.lbl_results_report.text(), self.win._tr("report").upper())
@@ -549,10 +553,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(
             labels,
             [
-                self.win._tr("export_analysis_txt"),
                 self.win._tr("export_click_log_csv"),
-                self.win._tr("export_summary_json"),
-                self.win._tr("export_detail_json"),
+                self.win._tr("export_evidence_json"),
                 self.win._tr("save_report_as"),
             ],
         )
@@ -573,36 +575,33 @@ class ResultsWorkspaceTests(unittest.TestCase):
     def test_generate_excel_and_html_pass_distinct_preferred_artifacts(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
-        expected = (
-            (self.win.btn_generate_excel, "engineering_xlsx"),
-            (self.win.btn_generate_html, "engineering_html"),
-        )
-        for button, key in expected:
-            with self.subTest(key=key):
-                with mock.patch.object(self.win, "finish_report") as handler:
-                    button.click()
-                handler.assert_called_once_with(preferred_artifact=key)
+        with mock.patch.object(self.win, "finish_report") as handler:
+            self.win.btn_generate_report.click()
+        handler.assert_called_once_with(notify=True)
+        with mock.patch.object(self.win, "open_reports_folder") as opener:
+            self.win.btn_open_reports_folder.click()
+        opener.assert_called_once_with()
+        with mock.patch.object(qt_app, "write_reports") as writer, \
+             mock.patch.object(qt_app.QDesktopServices, "openUrl", return_value=True) as opener:
+            self.win.open_reports_folder()
+        writer.assert_not_called()
+        opener.assert_called_once()
 
     def test_primary_success_target_is_preferred_artifact(self):
         self._setup_fixture()
         self._run([0, 25, 50, 75])
         paths = self._fake_bundle("primary_target")
-        for method, key in (
-            (self.win.generate_excel_report, "engineering_xlsx"),
-            (self.win.generate_html_report, "engineering_html"),
-        ):
-            with self.subTest(key=key):
-                self.win.report_written = False
-                with mock.patch.object(qt_app, "write_reports", return_value=dict(paths)) as writer, \
-                     mock.patch.object(qt_app.QMessageBox, "information") as info, \
-                     mock.patch.object(qt_app.QMessageBox, "critical") as critical:
-                    method()
-                writer.assert_called_once()
-                critical.assert_not_called()
-                info.assert_called_once()
-                message = info.call_args[0][2]
-                self.assertEqual(message, self.win._tr("saved_to", path=paths[key]))
-                self.assertTrue(self.win.report_written)
+        self.win.report_written = False
+        with mock.patch.object(qt_app, "write_reports", return_value=dict(paths)) as writer, \
+             mock.patch.object(qt_app.QMessageBox, "information") as info, \
+             mock.patch.object(qt_app.QMessageBox, "critical") as critical:
+            self.win.generate_report()
+        writer.assert_called_once()
+        critical.assert_not_called()
+        info.assert_called_once()
+        message = info.call_args[0][2]
+        self.assertEqual(message, self.win._tr("saved_to", path=Path(paths["evidence_json"]).parent))
+        self.assertTrue(self.win.report_written)
 
     def test_generate_excel_missing_xlsx_is_not_success(self):
         self._setup_fixture()
@@ -613,12 +612,11 @@ class ResultsWorkspaceTests(unittest.TestCase):
         with mock.patch.object(qt_app, "write_reports", return_value=paths) as writer, \
              mock.patch.object(qt_app.QMessageBox, "information") as info, \
              mock.patch.object(qt_app.QMessageBox, "critical") as critical:
-            self.win.generate_excel_report()
+            self.win.generate_report()
         writer.assert_called_once()
-        info.assert_not_called()
         critical.assert_called_once()
-        self.assertEqual(critical.call_args[0][1], self.win._tr("report_failed"))
-        self.assertIn("engineering_xlsx", critical.call_args[0][2])
+        info.assert_not_called()
+        self.assertIn("engineering_xlsx", str(critical.call_args[0][2]))
         self.assertFalse(self.win.report_written)
         self.assertIs(self.win.locked, locked)
         self.assertEqual(self.win.events, events_before)
@@ -680,10 +678,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.win.report_written = True
         self.win._update_controls()
         artifact_actions = (
-            (self.win.act_export_txt, "txt"),
             (self.win.act_export_csv, "all_click_log_csv"),
-            (self.win.act_export_summary_json, "summary_json"),
-            (self.win.act_export_detail_json, "detail_json"),
+            (self.win.act_export_evidence_json, "evidence_json"),
         )
         for action, key in artifact_actions:
             with self.subTest(key=key):
@@ -695,14 +691,14 @@ class ResultsWorkspaceTests(unittest.TestCase):
         saver.assert_called_once()
 
     def test_export_artifact_copies_existing_bundle_file(self):
-        src = Path(self._tmp.name) / "mcsa_copy_analysis.txt"
-        src.write_text("bundle-txt", encoding="utf-8")
-        dest = Path(self._tmp.name) / "saved_analysis.txt"
+        src = Path(self._tmp.name) / "mcsa_copy_evidence.json"
+        src.write_text("bundle-json", encoding="utf-8")
+        dest = Path(self._tmp.name) / "saved_evidence.json"
         self.win.report_written = True
-        self.win.report_paths = {"txt": str(src)}
+        self.win.report_paths = {"evidence_json": str(src)}
         with mock.patch.object(qt_app.QFileDialog, "getSaveFileName", return_value=(str(dest), "")):
-            self.win.export_report_artifact("txt")
-        self.assertEqual(dest.read_text(encoding="utf-8"), "bundle-txt")
+            self.win.export_report_artifact("evidence_json")
+        self.assertEqual(dest.read_text(encoding="utf-8"), "bundle-json")
 
     def test_generate_excel_writes_detail_json_for_overlay(self):
         self._setup_fixture()
@@ -714,21 +710,24 @@ class ResultsWorkspaceTests(unittest.TestCase):
         events_before = list(self.win.events)
         with mock.patch.object(qt_app.QMessageBox, "information") as info, \
              mock.patch.object(qt_app.QMessageBox, "critical") as critical:
-            self.win.generate_excel_report()
+            self.win.generate_report()
         critical.assert_not_called()
         info.assert_called_once()
-        self.assertTrue(list(root.glob("mcsa_*_report.xlsx")))
-        details = list(root.glob("mcsa_*_detail.json"))
-        self.assertEqual(len(details), 1, details)
-        payload = load_overlay_payload(details[0])
+        package = root / f"mcsa_{self.win.run_id}"
+        self.assertEqual(list(root.glob("mcsa_*.*")), [])
+        self.assertTrue(list(package.glob("mcsa_*_report.xlsx")))
+        evidence = list(package.glob("mcsa_*_evidence.json"))
+        self.assertEqual(len(evidence), 1, evidence)
+        payload = load_overlay_payload(evidence[0])
         overlay_events = extract_overlay_events(payload)
         self.assertGreaterEqual(len(overlay_events), 1)
-        self.assertTrue(list(root.glob("mcsa_*_summary.json")))
-        self.assertTrue(list(root.glob("mcsa_*_report.html")))
-        self.assertTrue(list(root.glob("mcsa_*_events.csv")))
-        self.assertTrue(list(root.glob("mcsa_*_analysis.txt")))
+        self.assertFalse(list(root.rglob("mcsa_*_summary.json")))
+        self.assertTrue(list(package.glob("mcsa_*_report.html")))
+        self.assertTrue(list(package.glob("mcsa_*_events.csv")))
+        self.assertFalse(list(root.rglob("mcsa_*_analysis.txt")))
+        self.assertFalse(list(root.rglob("mcsa_*_detail.json")))
         candidates = self.win._list_overlay_candidates()
-        self.assertTrue(any(Path(item.get("detail_path") or "") == details[0] for item in candidates))
+        self.assertTrue(any(Path(item.get("detail_path") or "") == evidence[0] for item in candidates))
         self.assertIs(self.win.locked, locked)
         self.assertEqual(self.win.events, events_before)
 
@@ -757,21 +756,18 @@ class ResultsWorkspaceTests(unittest.TestCase):
 
     def test_report_actions_follow_completed_lifecycle(self):
         self._setup_fixture()
-        self.assertFalse(self.win.btn_generate_excel.isEnabled())
-        self.assertFalse(self.win.btn_generate_html.isEnabled())
+        self.assertFalse(self.win.btn_generate_report.isEnabled())
         self.assertFalse(self.win.btn_export.isEnabled())
         self._run([0, 25, 50, 75])
         self.assertTrue(self.win.completed)
-        self.assertTrue(self.win.btn_generate_excel.isEnabled())
-        self.assertTrue(self.win.btn_generate_html.isEnabled())
+        self.assertTrue(self.win.btn_generate_report.isEnabled())
         self.assertFalse(self.win.report_written)
         self.assertTrue(self.win.btn_export.isEnabled())
         self.win.btn_new.click()
         self._settle()
         self.assertFalse(self.win.completed)
         self.assertFalse(self.win.report_written)
-        self.assertFalse(self.win.btn_generate_excel.isEnabled())
-        self.assertFalse(self.win.btn_generate_html.isEnabled())
+        self.assertFalse(self.win.btn_generate_report.isEnabled())
         self.assertFalse(self.win.btn_export.isEnabled())
 
     def test_export_failure_does_not_mutate_completed_result(self):
@@ -839,7 +835,9 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.win.results_tabs.tabText(2), self.win._tr("click_data"))
         self.assertEqual(self.win.results_tabs.currentIndex(), 0)
         self.assertTrue(self.win.results_context_label.isVisibleTo(self.win))
-        self.assertTrue(self.win.results_interval_chart.isVisibleTo(self.win))
+        self.assertEqual(self.win.results_view_combo.currentData(), "distribution")
+        self.assertTrue(self.win.results_distribution_chart.isVisibleTo(self.win))
+        self.assertFalse(self.win.results_interval_chart.isVisibleTo(self.win))
         self.assertFalse(self.win.results_evidence_text.isVisibleTo(self.win))
         self.assertEqual(self.win._results_summary_cells, [])
 
@@ -875,26 +873,20 @@ class ResultsWorkspaceTests(unittest.TestCase):
     def test_fixture_mismatch_observation_is_a_finding(self):
         self._setup_fixture(hz="5", auto_sec="1")
         self._run([0, 25, 50, 75])
+        facts = self._facts()
+        rules = {finding["rule"] for finding in facts["model"]["observations"]}
+        self.assertIn("FIXTURE_HZ_MISMATCH", rules)
+        self.assertTrue(self.win.results_observations_card.isHidden())
         text = self.win.results_observations_text.text()
-        self.assertIn(self.win._tr("obs_fixture_hz_mismatch"), text)
-        self.assertIn(self.win._tr("observed_average"), text)
-        self.assertIn(self.win._tr("configured_reference"), text)
-        self.assertIn(self.win._tr("difference"), text)
+        self.assertEqual(text, "")
         self.assertNotIn("FIXTURE_HZ_MISMATCH", text)
         self.assertNotIn("DUT", text)
-        body = "\n".join(text.splitlines()[1:])
-        self.assertNotIn(self.win.results_context_label.text().split(" · ")[0], body)
 
     def test_no_observation_uses_neutral_message(self):
         self.win.radio_manual.setChecked(True)
         self._run([0, 120, 240, 360])
-        facts = self._facts()
-        if facts["model"]["observations"]:
-            self.skipTest("this cadence still produced rule-based findings")
-        self.assertEqual(
-            self.win.results_observations_text.text(),
-            self.win._tr("observations_none"),
-        )
+        self.assertTrue(self.win.results_observations_card.isHidden())
+        self.assertEqual(self.win.results_observations_text.text(), "")
         self.assertNotIn("Host click count", self.win.results_observations_text.text())
         self.assertNotIn(self.win._tr("results_host_clicks"), self.win.results_observations_text.text())
         self.assertNotIn(self.win._tr("waiting_for_mouse_input"), self.win.results_observations_text.text())
@@ -1278,10 +1270,13 @@ class ResultsWorkspaceTests(unittest.TestCase):
                 self.assertEqual(split.orientation(), Qt.Orientation.Horizontal)
                 chart, observations = split.sizes()
                 total = chart + observations
-                self.assertGreaterEqual(chart / total, 0.62)
-                self.assertLessEqual(chart / total, 0.72)
                 self.assertGreaterEqual(chart, 600)
-                self.assertGreaterEqual(observations, 240)
+                if self.win.results_observations_card.isVisibleTo(self.win):
+                    self.assertGreaterEqual(chart / total, 0.62)
+                    self.assertLessEqual(chart / total, 0.72)
+                    self.assertGreaterEqual(observations, 240)
+                else:
+                    self.assertGreaterEqual(chart / total, 0.62)
                 self.assertEqual(self.win.results_header_grid.columns(), 2)
                 self.assertEqual(self.win.results_actions_grid.columns(), 2)
                 self.assertEqual(self.win.results_scroll.horizontalScrollBar().maximum(), 0)

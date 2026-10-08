@@ -501,7 +501,7 @@ def build_completed_result_model(
     reference_ms = cadence_ms(settings)
     hz = _finite(settings.get("fixture_reference_hz") or settings.get("fixture_hz"))
     duration = _finite(settings.get("duration_sec"))
-    auto_stop_sec = duration if (not manual and duration is not None and duration > 0) else None
+    auto_stop_sec = duration if (duration is not None and duration > 0) else None
     snapshot = host_evidence_snapshot if host_evidence_snapshot else None
     return {
         "run": {

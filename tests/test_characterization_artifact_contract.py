@@ -109,15 +109,43 @@ def _write(settings, events, run_id, *, model=None):
         paths = legacy_app.write_reports(
             Path(tmp), "DUT", "op", settings, events, run_id, completed_model=model,
         )
-        summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-        detail = json.loads(Path(paths["detail_json"]).read_text(encoding="utf-8"))
+        evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
         html_text = Path(paths["engineering_html"]).read_text(encoding="utf-8")
         xlsx_kv = _xlsx_summary(Path(paths["engineering_xlsx"])) if paths.get("engineering_xlsx") and Path(paths["engineering_xlsx"]).is_file() else {}
-        return summary, detail, html_text, xlsx_kv, model
+        return evidence, evidence, html_text, xlsx_kv, model
 
 
 def _model_run(value, *, frozen_settings):
     return {"run": {"timing_tolerance_ms": value, "settings": frozen_settings}}
+
+
+class EvidenceWhitelistTests(unittest.TestCase):
+    def test_standard_evidence_carries_4eb_fields(self):
+        evidence, _, *_ = _write(_fixture_settings(12.49), _events(), "char_4eb")
+        self.assertEqual(evidence["schema"], "MCSA_EVIDENCE_V1")
+        self.assertEqual(evidence["run_status"], RUN_STATUS_COMPLETE)
+        self.assertTrue(evidence["tool_version"])
+        settings = evidence["settings"]
+        for key in (
+            "manual_mode", "focus_button", "duration_sec",
+            "fixture_reference_hz", "fixture_timing_tolerance_ms",
+        ):
+            self.assertIn(key, settings, key)
+        self.assertFalse(settings["manual_mode"])
+        self.assertEqual(settings["focus_button"], "Left")
+        self.assertEqual(settings["duration_sec"], 2.0)
+        self.assertEqual(settings["fixture_reference_hz"], 10.0)
+        self.assertEqual(settings["fixture_timing_tolerance_ms"], 12.49)
+        events = evidence["events"]
+        self.assertGreaterEqual(len(events), 1)
+        for event in events:
+            self.assertIn("accepted", event)
+            self.assertIn("button", event)
+            self.assertIn("press_elapsed_ms", event)
+            self.assertNotIn("click_class", event)
+            self.assertNotIn("issue_tags", event)
+            self.assertNotIn("expected_click_index", event)
+            self.assertNotIn("drift_ms", event)
 
 
 class SyntheticFixtureTimeOriginTests(unittest.TestCase):
@@ -205,11 +233,9 @@ class FixturePersistenceTests(unittest.TestCase):
         events = _events()
         with tempfile.TemporaryDirectory() as tmp:
             paths = legacy_app.write_reports(Path(tmp), "DUT", "op", _fixture_settings(7.251), events, "fallback")
-            summary = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))
-            detail = json.loads(Path(paths["detail_json"]).read_text(encoding="utf-8"))
+            evidence = json.loads(Path(paths["evidence_json"]).read_text(encoding="utf-8"))
             html_text = Path(paths["engineering_html"]).read_text(encoding="utf-8")
-        self.assertEqual(summary["settings"][_WINDOW_KEY], 7.251)
-        self.assertEqual(detail["settings"][_WINDOW_KEY], 7.251)
+        self.assertEqual(evidence["settings"][_WINDOW_KEY], 7.251)
         self.assertEqual(_html_info(html_text)["Schedule Association Window"], "±7.25 ms")
 
     def test_zero_is_a_real_configured_window(self):
@@ -239,8 +265,8 @@ class BackwardCompatibilityTests(unittest.TestCase):
         summary, detail, *_ = _write(settings, _events(), "win_old")
         self.assertNotIn(_WINDOW_KEY, summary["settings"])
         self.assertNotIn(_WINDOW_KEY, detail["settings"])
-        self.assertEqual(summary["settings"]["chatter_threshold_ms"], 8.0)
-        self.assertEqual(summary["settings"]["duplicate_click_threshold_ms"], 30.0)
+        self.assertNotIn("chatter_threshold_ms", summary["settings"])
+        self.assertNotIn("duplicate_click_threshold_ms", summary["settings"])
 
     def test_pilot_artifact_lacks_native_json_window(self):
         detail_path = _REPO / "reports" / f"mcsa_{_PILOT_ID}_detail.json"
@@ -261,30 +287,29 @@ class BackwardCompatibilityTests(unittest.TestCase):
 
 
 class LegacyAndMatcherContainmentTests(unittest.TestCase):
-    def test_authoritative_run_status_and_legacy_block_unchanged(self):
+    def test_authoritative_run_status_and_no_legacy_verdict_block(self):
         settings = _fixture_settings(12.49)
         events = _events()
         summary, detail, *_rest = _write(settings, events, "win_legacy")
         self.assertEqual(summary["run_status"], RUN_STATUS_COMPLETE)
         self.assertEqual(detail["run_status"], RUN_STATUS_COMPLETE)
-        self.assertEqual(summary["result"], RUN_STATUS_COMPLETE)
-        self.assertEqual(summary["result_semantics"], "run_status")
-        self.assertIs(summary["legacy_heuristic_assessment"]["authoritative"], False)
-        self.assertIs(detail["legacy_heuristic_assessment"]["authoritative"], False)
+        self.assertNotIn("result", summary)
+        self.assertNotIn("legacy_heuristic_assessment", summary)
+        self.assertNotIn("legacy_heuristic_assessment", detail)
         self.assertIn(summary["run_status"], (RUN_STATUS_COMPLETE, "NO_DATA", "INVALID"))
         self.assertNotIn(summary["run_status"], ("PASS", "WARN", "FAIL"))
 
-    def test_adding_the_field_does_not_change_legacy_counts(self):
+    def test_adding_the_field_does_not_change_factual_measurements(self):
         events = _events()
         base = _fixture_settings(12.49)
         without = dict(base)
         del without[_WINDOW_KEY]
         s_with, _, *_ = _write(base, events, "with_w")
         s_without, _, *_ = _write(without, events, "without_w")
-        for key in ("click_count", "chatter_count", "duplicate_click_risk_count", "missed_estimated"):
-            self.assertEqual(s_with["metrics"].get(key), s_without["metrics"].get(key), key)
-        self.assertEqual(s_with["legacy_heuristic_assessment"]["result"],
-                         s_without["legacy_heuristic_assessment"]["result"])
+        for key in ("host_press_count", "interval_avg_ms", "interval_count"):
+            self.assertEqual(s_with["measurements"].get(key), s_without["measurements"].get(key), key)
+        self.assertNotIn("legacy_heuristic_assessment", s_with)
+        self.assertNotIn("legacy_heuristic_assessment", s_without)
 
     def test_matcher_and_host_evidence_arithmetic_unchanged(self):
         times = [e["press_elapsed_ms"] for e in _events()]

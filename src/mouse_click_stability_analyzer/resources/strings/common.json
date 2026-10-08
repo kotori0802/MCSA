@@ -28,16 +28,16 @@
     "zh-TW": "比較"
   },
   "compare_note": {
-    "en": "You do not need to choose between summary/detail JSON files.",
-    "zh-TW": "無需手動選 summary/detail JSON。"
+    "en": "You do not need to choose between evidence JSON files.",
+    "zh-TW": "無需手動選 evidence JSON。"
   },
   "compare_overlay": {
     "en": "Compare Overlay",
     "zh-TW": "比較疊圖"
   },
   "compare_pick": {
-    "en": "Pick a previous run (auto-loads detail events):",
-    "zh-TW": "選擇先前輪次（自動載入 detail 事件）："
+    "en": "Pick a previous run (auto-loads evidence events):",
+    "zh-TW": "選擇先前輪次（自動載入 evidence 事件）："
   },
   "compare_title": {
     "en": "Compare with previous run",
@@ -52,8 +52,12 @@
     "zh-TW": "分析 TXT"
   },
   "export_click_log_csv": {
-    "en": "Click Log CSV",
-    "zh-TW": "點擊紀錄 CSV"
+    "en": "Events CSV",
+    "zh-TW": "事件 CSV"
+  },
+  "export_evidence_json": {
+    "en": "Evidence JSON",
+    "zh-TW": "證據 JSON"
   },
   "export_detail_json": {
     "en": "Detail JSON",
@@ -83,9 +87,35 @@
     "en": "Generate Report",
     "zh-TW": "產生報告"
   },
+  "open_excel": {
+    "en": "Open Excel",
+    "zh-TW": "開啟 Excel"
+  },
+  "open_html": {
+    "en": "Open HTML",
+    "zh-TW": "開啟 HTML"
+  },
+  "open_reports_folder": {
+    "en": "Open Reports Folder",
+    "zh-TW": "開啟報告資料夾"
+  },
+  "open_reports_folder_failed": {
+    "en": "Could not open the reports folder.\n{detail}",
+    "zh-TW": "無法開啟報告資料夾。\n{detail}",
+    "placeholders": [
+      "detail"
+    ]
+  },
+  "open_artifact_failed": {
+    "en": "Could not open {detail}",
+    "zh-TW": "無法開啟 {detail}",
+    "placeholders": [
+      "detail"
+    ]
+  },
   "guide_body": {
-    "en": "1. Choose Manual or Fixture and complete Setup.\n2. Press Lock Profile & Continue.\n3. On Capture, press Start Capture. Recording begins on the first valid click.\n4. Manual has no timer — press F5 or Esc to Stop.\n5. Fixture: optional Auto Stop, or Stop with F5 / Esc.\n6. Review charts, then New Run or Finish & Generate Report.\n\nTip: prefer F5 / Esc to stop so Stop-button clicks do not contaminate data.",
-    "zh-TW": "1. 選擇手動或治具並完成設定。\n2. 按「鎖定設定檔並繼續」。\n3. 在擷取頁按開始擷取。第一個有效點擊才開始記錄。\n4. 手動無計時 — F5 或 Esc 停止。\n5. 治具：可選自動停止，或 F5/Esc 停止。\n6. 檢視圖表後新一輪或完成報告。\n\n提示：用 F5/Esc 停止，避免點停止鈕污染資料。"
+    "en": "1. Choose Manual or Fixture and complete Setup.\n2. Press Lock Profile & Continue.\n3. On Capture, press Start Capture. Recording begins on the first valid click.\n4. Optional Auto Stop uses Duration (hh:mm:ss); or press F5 / Esc to Stop.\n5. Review Results, then Generate Report.\n\nTip: prefer F5 / Esc to stop so Stop-button clicks do not contaminate data.",
+    "zh-TW": "1. 選擇手動或治具並完成設定。\n2. 按「鎖定設定檔並繼續」。\n3. 在擷取頁按開始擷取。第一個有效點擊才開始記錄。\n4. 可選自動停止使用時長（hh:mm:ss）；或按 F5 / Esc 停止。\n5. 在結果頁檢視後產生報告。\n\n提示：用 F5/Esc 停止，避免點停止鈕污染資料。"
   },
   "guide_title": {
     "en": "Quick Start",

@@ -299,7 +299,8 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.assertFalse(self.win.review_text.isVisibleTo(self.win))
         self.assertTrue(self.win.results_workspace.isVisibleTo(self.win))
         obs = self.win.results_observations_text.text()
-        self.assertGreater(len(obs), 0)
+        self.assertFalse(self.win.results_observations_card.isVisibleTo(self.win))
+        self.assertEqual(obs, "")
         self._show_capture_at(1280, 720)
         self.assertIs(self.win.host_evidence_snapshot, snap)
         self.assertFalse(self.win.review_text.isVisibleTo(self.win))
@@ -340,10 +341,8 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.win._show_workflow_page("setup")
         self._settle()
         grid = self.win.setup_card_grid
-        self.assertEqual(
-            grid.columns(),
-            qt_app.ResponsiveCardGrid.columns_for_width(self.win.setup_scroll.viewport().width() - 4),
-        )
+        requested = qt_app.ResponsiveCardGrid.columns_for_width(self.win.setup_scroll.viewport().width() - 4)
+        self.assertEqual(grid.columns(), min(len(grid._cards), requested))
         _no_pairwise_overlap(grid._cards)
         self.assertFalse(self.win.setup_scroll.horizontalScrollBar().isVisible())
         for card in grid._cards:
@@ -378,7 +377,7 @@ class CaptureResponsiveTests(unittest.TestCase):
         self.assertEqual(self.win.capture_stats_grid.columns(), 6)
         self.assertEqual(self.win.capture_issues_grid.columns(), 3)
         self._assert_setup_usable()
-        self.assertEqual(self.win.setup_card_grid.columns(), 3)
+        self.assertEqual(self.win.setup_card_grid.columns(), 2)
 
     def test_preset_sequence_reflows_without_restart_or_lifecycle_change(self):
         self.win._available_geometry = lambda: QRect(0, 0, 1920, 1040)

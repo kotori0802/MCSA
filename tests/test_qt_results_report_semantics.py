@@ -373,7 +373,8 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
         self._run([0, 25, 50, 75])
         ctx = self.win.results_context_label.text()
         self.assertIn("Run Profile:", ctx)
-        self.assertIn("Screening: Measurement only", ctx)
+        self.assertIn("Analysis scope: Measurement only", ctx)
+        self.assertNotIn("Screening:", ctx)
         self.assertEqual(self.win.results_verdict_label.text(), "COMPLETE")
         html, xlsx = self._report_text()
         for blob in (html, xlsx):

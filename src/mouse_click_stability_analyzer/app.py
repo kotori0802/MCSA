@@ -16,7 +16,16 @@ def _agent_log(*_args, **_kwargs) -> None:
     return
 
 
-from .schema import artifact_names, build_host_environment
+from .artifact_contract import (
+    build_evidence_payload,
+    factual_settings,
+    portable_artifact_references,
+    portable_verification,
+    verify_standard_artifacts,
+    write_events_csv,
+    write_evidence_json,
+)
+from .schema import artifact_names, build_host_environment, report_package_dir
 from .host_inventory import HOST_INFORMATION_SCHEMA, collect_host_information, empty_host_information
 from .report_v2 import host_information_rows, write_report_html, write_report_xlsx
 from .core import build_payload, normalize_settings, now_iso, safe_float, safe_int, make_synthetic_events
@@ -566,17 +575,8 @@ def annotate_events(events: list[dict[str, Any]], settings: dict[str, Any]) -> l
 
 
 def _verify_artifacts(paths: dict[str, str]) -> dict[str, Any]:
-    required = ["summary_json", "detail_json", "all_click_log_csv", "engineering_html", "txt"]
-    optional = ["engineering_xlsx"]
-    status = {}
-    missing = []
-    for key in required + optional:
-        value = paths.get(key) or ""
-        exists = bool(value) and Path(value).exists()
-        status[key] = {"path": value, "exists": exists, "optional": key in optional}
-        if key in required and not exists:
-            missing.append(key)
-    return {"ok": not missing, "missing": missing, "status": status, "xlsx_skipped": not status.get("engineering_xlsx", {}).get("exists")}
+    """Require the Stage 2C standard bundle only. Legacy sidecars are not required."""
+    return verify_standard_artifacts(paths)
 
 
 RESULT_SEMANTICS_RUN_STATUS = "run_status"
@@ -652,16 +652,17 @@ def write_reports(
     raw_events: list[dict[str, Any]] | None = None,
     completed_model: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Write the full report bundle.
+    """Write the standard Measurement/Evidence report bundle.
 
-    Engineering HTML/XLSX render ``completed_model`` (the Results model); JSON,
-    CSV, and TXT sidecars keep their legacy layout, except that ``result`` /
-    ``run_status`` carry the authoritative run status and every legacy
-    heuristic verdict field lives under ``legacy_heuristic_assessment``.
-    The Schedule Association Window in every artifact comes from the frozen
-    ``completed_model`` (``run.timing_tolerance_ms``), not from ``settings``.
+    Files go to the per-run package ``report_root/mcsa_<run_id>/``. All four
+    artifacts are required. Evidence JSON references siblings by file name only.
+    HTML/XLSX render ``completed_model``. JSON and CSV export factual
+    whitelist fields only. The Schedule Association Window comes from the
+    frozen ``completed_model`` (``run.timing_tolerance_ms``), not from the
+    caller's live ``settings``. Legacy heuristic sidecars are not written.
+    ``raw_events`` is accepted for caller compatibility and is not exported.
     """
-    report_root.mkdir(parents=True, exist_ok=True)
+    del raw_events
     if completed_model is None:
         completed_model = _report_fallback_model(target, operator, settings, events, run_id)
     run_model = completed_model.setdefault("run", {})
@@ -673,178 +674,57 @@ def write_reports(
             frozen_host = empty_host_information(settings=settings)
         run_model["host_information"] = frozen_host
     run_status = str(completed_model["run"]["run_status"])
-    settings_norm = normalize_settings(settings)
-    settings_norm.update(settings)
-    settings_norm = normalize_auto_settings({"settings": settings_norm})
-    settings_norm = stamp_frozen_schedule_association_window(settings_norm, completed_model)
-    settings_norm["target_product"] = target or settings_norm.get("target_product", "")
-    events = annotate_events(events, settings_norm)
-    legacy_payload = build_payload(target, operator, settings_norm, events, run_id=run_id)
-    metrics = dict(legacy_payload.get("metrics") or {})
-    tags = _metrics_issue_tags(metrics, settings_norm, events)
-    legacy_result = _result_from_tags(tags, metrics, settings_norm)
-    legacy_health = {key: metrics.pop(key) for key in _LEGACY_HEALTH_METRIC_KEYS if key in metrics}
-    expected = int(settings_norm.get("expected_clicks") or settings_norm.get("target_clicks") or 0)
-    actual = int(metrics.get("click_count") or 0)
-    metrics.update({
-        "result": run_status,
-        "issue_tags": tags,
-        "expected_clicks": None if _is_manual_profile(settings_norm) else expected,
-        "actual_clicks": actual,
-        "excess_click_count": None if _is_manual_profile(settings_norm) else max(0, actual - expected) if expected else 0,
-        "missed_click_count": None if _is_manual_profile(settings_norm) else max(0, expected - actual) if expected else None,
-        "duration_sec": float(settings_norm.get("duration_sec") or 0),
-        "fixture_hz": float(settings_norm.get("fixture_hz") or settings_norm.get("fixture_reference_hz") or 0),
-        "manual_mode": _is_manual_profile(settings_norm),
-    })
-    click_session = _click_session_summary(legacy_result, settings_norm, metrics, tags)
+    frozen_settings = dict(run_model.get("settings") or settings or {})
+    evidence_settings = factual_settings(frozen_settings)
+    evidence_settings = stamp_frozen_schedule_association_window(evidence_settings, completed_model)
+    host_snapshot = (completed_model.get("host_evidence") or {}).get("snapshot")
+    if not isinstance(host_snapshot, dict):
+        host_snapshot = None
     rid = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     names = artifact_names(rid)
-    summary_path = report_root / names["summary_json"]
-    detail_path = report_root / names["detail_json"]
-    csv_path = report_root / names["all_click_log_csv"]
-    xlsx_path = report_root / names["engineering_xlsx"]
-    html_path = report_root / names["engineering_html"]
-    txt_path = report_root / names["txt"]
+    package_dir = report_package_dir(report_root, rid)
+    package_dir.mkdir(parents=True, exist_ok=True)
+    evidence_path = package_dir / names["evidence_json"]
+    csv_path = package_dir / names["all_click_log_csv"]
+    xlsx_path = package_dir / names["engineering_xlsx"]
+    html_path = package_dir / names["engineering_html"]
     paths: dict[str, str] = {
-        "summary_json": str(summary_path),
-        "detail_json": str(detail_path),
+        "evidence_json": str(evidence_path),
         "all_click_log_csv": str(csv_path),
         "engineering_xlsx": str(xlsx_path),
         "engineering_html": str(html_path),
-        "txt": str(txt_path),
     }
-    summary = {
-        "schema_version": SUMMARY_SCHEMA,
-        "tool_id": TOOL_ID,
-        "tool_name": TOOL_NAME,
-        "tool_version": TOOL_VERSION,
-        "run_id": run_id,
-        "run_state": "COMPLETED",
-        "run_status": run_status,
-        "result": run_status,
-        "result_semantics": RESULT_SEMANTICS_RUN_STATUS,
-        "created_at": now_iso(),
-        "completed_at": now_iso(),
-        "target_product": target or "",
-        "operator": operator or "",
-        "completed_cycles": 1,
-        "target_cycles": 1,
-        "failed_cycles": None,
-        "settings": settings_norm,
-        "metrics": metrics,
-        "issue_tags": tags,
-        "engineering_summary_zh": _engineering_summary(settings_norm, metrics, tags),
-        "engineering_reports": paths,
-        "host_test_environment": build_host_environment(settings_norm),
-        "host_information": frozen_host,
-        "legacy_heuristic_assessment": {
-            "authoritative": False,
-            "note": LEGACY_HEURISTIC_ASSESSMENT_NOTE,
-            "result": legacy_result,
-            "issue_tags": tags,
-            "metrics_health": legacy_health,
-            "operator_summary_zh": _operator_summary(legacy_result, settings_norm, metrics, tags),
-            "why_result_zh": click_session.get("why_result_zh"),
-            "why_result_en": click_session.get("why_result_en"),
-            "field_summary_zh": click_session.get("field_summary_zh"),
-            "field_summary_en": click_session.get("field_summary_en"),
-            "next_steps_zh": ["Manual profile 若只有 timing 變動，請先以同一按鍵重測或改用治具 profile 確認硬體連點。", "若出現 chatter 或多筆 <30ms interval，請開啟 Engineering HTML/XLSX 查看 All Click Log。"],
-            "next_steps_en": ["If manual mode only shows timing variation, retest the same button or use fixture profile before judging hardware failure.", "If chatter or repeated <30 ms intervals appear, open Engineering HTML/XLSX and inspect the All Click Log."],
-            "click_session_summary": click_session,
-            "click_operator_findings": {
-                "issue_tags": tags,
-                "button": settings_norm.get("focus_button"),
-                "profile_name": settings_norm.get("profile_name"),
-                "manual_mode": _is_manual_profile(settings_norm),
-                "profile_type": click_session.get("profile_type"),
-                "expected_count_source": click_session.get("expected_count_source"),
-                "fixture_hz": settings_norm.get("fixture_hz") or settings_norm.get("fixture_reference_hz"),
-                "expected_clicks": click_session.get("expected_clicks"),
-                "actual_clicks": actual,
-                "hardware_defect_result": click_session.get("hardware_defect_result"),
-                "manual_observation_result": click_session.get("manual_observation_result"),
-            },
-        },
-    }
-    detail = {
-        "schema_version": 1,
-        "tool_id": TOOL_ID,
-        "tool_name": TOOL_NAME,
-        "tool_version": TOOL_VERSION,
-        "created_at": now_iso(),
-        "run_id": run_id,
-        "run_status": run_status,
-        "result_semantics": RESULT_SEMANTICS_RUN_STATUS,
-        "target": target,
-        "operator": operator,
-        "settings": settings_norm,
-        "metrics": metrics,
-        "events": events,
-        "all_click_events": events,
-        "legacy_payload": {
-            **legacy_payload,
-            "metrics": {
-                key: value for key, value in (legacy_payload.get("metrics") or {}).items()
-                if key not in _LEGACY_HEALTH_METRIC_KEYS
-            },
-        },
-        "legacy_heuristic_assessment": {
-            "authoritative": False,
-            "note": LEGACY_HEURISTIC_ASSESSMENT_NOTE,
-            "result": legacy_result,
-            "issue_tags": tags,
-            "metrics_health": legacy_health,
-        },
-        "engineering_reports": paths,
-        "raw_down_up_events": raw_events or [],
-    }
-    # Write engineering artifacts first, then write Summary JSON with verified artifact paths.
-    detail_path.write_text(json.dumps(detail, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    _write_all_click_csv(csv_path, events)
+    report_generated_at = now_iso()
     host_info = host_information_rows(frozen_host, tool_version=TOOL_VERSION)
-    report_kwargs = {"host_info": host_info, "generated_at": summary["created_at"]}
+    report_kwargs = {"host_info": host_info, "generated_at": report_generated_at}
+    write_events_csv(csv_path, list(events))
     xlsx_written = write_report_xlsx(xlsx_path, completed_model, **report_kwargs)
     if not xlsx_written:
         paths["engineering_xlsx"] = ""
-        summary["xlsx_skipped"] = True
-        summary["xlsx_skip_reason"] = "openpyxl not installed"
-        summary["engineering_reports"] = paths
-        detail["engineering_reports"] = paths
     write_report_html(html_path, completed_model, **report_kwargs)
-    txt_path.write_text(_summary_txt(summary), encoding="utf-8")
-    # Write provisional Summary before existence verification so summary_json itself is a verified artifact.
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    evidence = build_evidence_payload(
+        run_id=run_id,
+        run_status=run_status,
+        target=target,
+        operator=operator,
+        settings=evidence_settings,
+        events=list(events),
+        completed_model=completed_model,
+        report_generated_at=report_generated_at,
+        host_information=frozen_host,
+        host_evidence=host_snapshot,
+        artifacts=portable_artifact_references(paths),
+    )
+    write_evidence_json(evidence_path, evidence)
     verification = _verify_artifacts(paths)
-    summary["report_artifacts_verified"] = verification
-    detail["report_artifacts_verified"] = verification
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    # Rewrite detail after verification so the engineering report package is self-describing.
-    detail_path.write_text(json.dumps(detail, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    evidence["report_artifacts_verified"] = portable_verification(verification)
+    write_evidence_json(evidence_path, evidence)
     if not verification.get("ok"):
         raise RuntimeError("Mouse Click report artifact generation incomplete: " + ", ".join(verification.get("missing") or []))
     return paths
 
 def _write_all_click_csv(path: Path, events: list[dict[str, Any]]) -> None:
-    headers = [
-        "click_index", "index", "timestamp", "analysis_status", "result", "issue_tags", "issue_detail", "button", "event_type", "accepted",
-        "press_time_ms", "release_time_ms", "hold_ms", "press_interval_ms", "expected_interval_ms", "expected_click_index", "expected_time_ms", "drift_ms", "interval_error_ms", "interval_error_pct",
-        "press_elapsed_ms", "release_elapsed_ms", "elapsed_ms", "interval_ms",
-        "x", "y", "capture_source", "device_source", "raw_hdevice", "raw_dx", "raw_dy", "flags", "notes",
-    ]
-    for e in events:
-        for k in e.keys():
-            if k not in headers:
-                headers.append(k)
-    with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        for e in events:
-            row = dict(e)
-            for k, v in list(row.items()):
-                if isinstance(v, (list, dict)):
-                    row[k] = json.dumps(v, ensure_ascii=False)
-            writer.writerow(row)
+    write_events_csv(path, events)
 
 
 def _issue_interpretation_map(tags: list[str]) -> dict[str, dict[str, str]]:
@@ -2426,12 +2306,8 @@ class ClickToolApp:
                 missing = ", ".join(verification.get("missing") or [])
                 raise RuntimeError("Missing report artifacts: " + missing)
             self.report_written = True
-            if verification.get("xlsx_skipped"):
-                self.phase_var.set("REVIEW")
-                self.status_var.set("Report ready (Excel skipped — install openpyxl).")
-            else:
-                self.phase_var.set("REVIEW")
-                self.status_var.set("Report ready.")
+            self.phase_var.set("REVIEW")
+            self.status_var.set("Report ready.")
             if self.auto_mode:
                 print(json.dumps({"type": "auto_complete", **self.report_paths}, ensure_ascii=False), flush=True)
                 self.root.after(1200, self.root.destroy)
@@ -3531,8 +3407,8 @@ def run_cadence_gates(report_root: str | Path) -> dict[str, Any]:
         failures.append(f"Hz mismatch extra should stay small, extra={extra_mm}")
 
     skip_check = _verify_artifacts({**paths_10, "engineering_xlsx": ""})
-    if not skip_check.get("ok") or not skip_check.get("xlsx_skipped"):
-        failures.append(f"xlsx optional verify failed: {skip_check}")
+    if skip_check.get("ok") or "engineering_xlsx" not in (skip_check.get("missing") or []):
+        failures.append(f"missing xlsx must fail verification: {skip_check}")
 
     ok = not failures
     summary = {
