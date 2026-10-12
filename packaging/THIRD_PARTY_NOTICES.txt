@@ -1,0 +1,33 @@
+Third-party notices for the MCSA 1.0.0 Windows distribution
+===========================================================
+
+This folder bundles a Python 3.12 runtime plus the libraries required to run
+Mouse Click Stability Analyzer. The license names and links below are factual
+references to the packaged projects' published licenses. They are not legal advice.
+
+Python
+    License: Python Software Foundation License
+    https://docs.python.org/3/license.html
+
+PySide6 / shiboken6 (Qt for Python)
+    License: GNU Lesser General Public License v3.0
+    https://doc.qt.io/qtforpython-6/licenses.html
+    Qt libraries shipped with PySide6 are used under LGPL v3 as distributed
+    by the Qt for Python project.
+
+openpyxl
+    License: MIT
+    https://pypi.org/project/openpyxl/
+
+et-xmlfile (openpyxl dependency)
+    License: MIT
+
+PyInstaller bootloader
+    The bootloader that starts MCSA.exe is part of PyInstaller.
+    License: GNU GPL v2 with the PyInstaller bootloader exception
+    (allows bundling with this application).
+    https://pyinstaller.org/en/stable/license.html
+
+MCSA application source
+    License: MIT (see LICENSE in this folder)
+    Copyright (c) 2026 Leo Cheng

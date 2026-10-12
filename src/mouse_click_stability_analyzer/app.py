@@ -944,7 +944,8 @@ class ClickToolApp:
         self.target = target
         self.operator = operator or ""
         self.run_id = run_id or _now_run_id()
-        default_root = Path(__file__).resolve().parents[2] / "reports"
+        from .runtime import default_report_root
+        default_root = default_report_root()
         self.report_root = Path(report_root or default_root)
         self.self_test_events = self_test_events
         self.events: list[dict[str, Any]] = []

@@ -1208,6 +1208,43 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.assertNotRegex(status, r"(DUT score|Miss rate|Extra clicks|Delay / miss|SETUP score):\s*[AB]\b")
         self.assertNotRegex(status.lower(), r"\bwinner\b")
 
+    def _overlay_with_heuristic_counts(self) -> str:
+        self._setup_fixture()
+        self.win.run_id = "overlay-a"
+        self._run([0, 25, 50, 75])
+        first_id = self.win.run_id
+        self.win.new_run()
+        self.win.run_id = "overlay-b"
+        self._run([0, 25, 50, 75])
+        archived = next(run for run in self.win.session_runs if run.get("run_id") == first_id)
+        metrics = dict(archived.get("metrics") or {}, true_extra_click_count=3, miss_or_slow_count=2)
+        self.win._set_overlay(list(archived["events"]), metrics, f"session:{first_id}")
+        return first_id
+
+    def test_measurement_only_overlay_shows_source_without_heuristic_counts(self):
+        first_id = self._overlay_with_heuristic_counts()
+        self.assertTrue(self.win._measurement_only_presentation())
+        expected = self.win._tr("overlay_status", name=first_id)
+        self.assertEqual(self.win.overlay_delta_label.text(), expected)
+        self.assertEqual(self.win.results_overlay_status.text(), expected)
+        for text in (self.win.overlay_delta_label.text(), self.win.results_overlay_status.text()):
+            lowered = text.lower()
+            self.assertNotIn("short interval", lowered)
+            self.assertNotIn("long interval", lowered)
+            self.assertNotIn("短間隔", text)
+            self.assertNotIn("長間隔", text)
+            self.assertNotRegex(text, r"[AB] (short|long) interval=")
+
+    def test_overlay_bins_are_never_classified_with_current_range(self):
+        self._overlay_with_heuristic_counts()
+        self.assertTrue(all(item.get("position") is None for item in self.win.results_distribution_chart.overlay_bins))
+
+    def test_screening_profile_overlay_keeps_legacy_delta_line(self):
+        with mock.patch.object(type(self.win), "_measurement_only_presentation", return_value=False):
+            self._overlay_with_heuristic_counts()
+            text = self.win.overlay_delta_label.text()
+        self.assertIn("A short interval=3 long interval=2", text)
+
     def test_paired_histogram_uses_common_edges(self):
         current = [10.0, 12.0, 11.0, 13.0]
         overlay = [80.0, 90.0, 100.0, 110.0, 120.0]

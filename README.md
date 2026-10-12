@@ -46,6 +46,10 @@ Recommended install folder: **`C:\MCSA\`** or **`C:\Tools\MCSA\`**. A deep OneDr
 
 ## Quick Start
 
+**Portable Windows EXE (no Python required):** extract `MCSA-1.0.0-win64.zip`, open the folder, and run `MCSA.exe`. Reports are written to `reports\` next to the executable. See `QUICK_START.txt` in that folder.
+
+**From source (Python 3.12):**
+
 ```bat
 cd C:\MCSA
 install.bat

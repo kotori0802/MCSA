@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mouse-click-stability-analyzer"
 version = "1.0.0"
-description = "Independent QA prototype for analyzing mouse click timing, chatter, rebound, cadence, and event stability."
+description = "Windows engineering tool for host-observed mouse click interval, hold duration, configured interval-range comparison, and evidence reporting."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Leo Cheng, PMP" }]

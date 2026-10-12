@@ -1,0 +1,4 @@
+# Build-only dependencies for the Windows EXE. Not a runtime install for engineers
+# who launch MCSA from source via install.bat / run.bat.
+-r requirements-gui.txt
+PyInstaller==6.13.0

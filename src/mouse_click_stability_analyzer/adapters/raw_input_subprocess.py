@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import threading
-from pathlib import Path
+
+from ..runtime import helper_command, helper_env, is_helper_mode
+
 
 class WindowsRawInputSubprocess:
     """
@@ -28,19 +29,29 @@ class WindowsRawInputSubprocess:
     def start(self):
         if self.running:
             return
+        if is_helper_mode():
+            self.last_error = "Raw Input helper must not start another helper process."
+            return
 
-        bridge = Path(__file__).with_name("raw_input_bridge.py")
-        self.process = subprocess.Popen(
-            [sys.executable, str(bridge)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        command = helper_command()
+        env = helper_env()
+        env.pop("PYTHONPATH", None)
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                env=env,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            self.last_error = str(exc)
+            return
 
         self.running = True
         self.reader_thread = threading.Thread(target=self._read_stdout, daemon=True)

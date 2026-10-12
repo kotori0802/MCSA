@@ -177,7 +177,8 @@ LIGHT_PALETTE = ChartPalette(
     overlay="#8e8e93",
     target_line="#34c759",
     interval_line="#007aff",
-    interval_fill="#007aff22",
+    # QColor reads 8-digit hex as #AARRGGBB (alpha first), not CSS #RRGGBBAA.
+    interval_fill="#22007aff",
     range_band="#6f9a7b",
     range_edge="#7f9c88",
 )
@@ -198,7 +199,7 @@ DARK_PALETTE = ChartPalette(
     overlay="#636366",
     target_line="#30d158",
     interval_line="#0a84ff",
-    interval_fill="#0a84ff33",
+    interval_fill="#330a84ff",
     range_band="#9cc4a8",
     range_edge="#7d9a86",
 )

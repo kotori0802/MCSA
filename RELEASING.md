@@ -1,90 +1,93 @@
 # Releasing v1.0.0
 
-## 0. Clean local artifacts (safe script)
+This document has three parts. Only **Part 1** produces the v1.0.0 release.
 
-From the project folder:
+| Part | Purpose | Produces the v1.0.0 release? |
+|------|---------|------------------------------|
+| [1. Windows EXE release — canonical](#part-1--windows-exe-release--canonical) | Build, verify, and publish `MCSA-1.0.0-win64.zip` | **Yes** — the only v1.0.0 release procedure |
+| [2. Source / Git workflow](#part-2--source--git-workflow) | Keep the source repository clean and pushed | No — source hygiene only |
+| [3. Optional legacy / manual upload](#part-3--optional-legacy--manual-upload-no-git) | Upload source without Git | No — source upload only |
 
-```bat
-clean_local.bat
-```
-
-Type `YES` when prompted. This removes **only**:
-
-- `reports\mcsa_*` (your test runs; keeps `reports\.gitkeep`)
-- `.venv\` / `venv\` (project root)
-- `__pycache__\` (under this project)
-- `src\*.egg-info\`, `build\`, `dist\`
-
-It does **not** delete source code, `install.bat`, `docs\`, etc.
-
-## 1. README screenshot
-
-```bat
-save_readme_screenshot.bat
-```
-
-1. Open MCSA → Theme **Dark** → LISTEN screen  
-2. `Win+Shift+S` capture → image on clipboard  
-3. Run script above → saves `docs\images\mcsa-ui-dark-listen.png`
-
-## 2. Verify build
-
-```bat
-install.bat
-run.bat
-run.bat --mode self-test
-```
+The `v1.0.0` tag and the GitHub Release are created **only** at the end of Part 1,
+after every Part 1 gate passes. Parts 2 and 3 never tag or publish a release.
 
 ---
 
-## Path A — Git installed (recommended)
+## Part 1 — Windows EXE release — canonical
 
-Install Git for Windows (once):
+This is the supported end-user distribution. It does not require a system Python
+install, administrator rights, or an installer.
 
-```bat
-winget install Git.Git
-```
+### 1.1 Build environment
 
-Close and reopen Command Prompt, then:
-
-```bat
-cd C:\mouse_click_stability_analyzer
-git init
-git add .
-git status
-git commit -m "Release v1.0.0 - Mouse Click Stability Analyzer"
-```
-
-Create an empty repo on GitHub (no README), then:
+- Windows 10/11 64-bit
+- Python **3.12 64-bit** only (`py -3.12`)
+- `requirements-build.txt` pins `PySide6==6.11.0`, `openpyxl==3.1.5`, `PyInstaller==6.13.0`
+- Dedicated venv: `.venv-build` (do not reuse the developer `.venv` if you want a clean build)
+- MCSA installed **editable from this repository** (`pip install -e .`)
 
 ```bat
-git branch -M main
-git remote add origin https://github.com/kotori0802/mouse-click-stability-analyzer.git
-git push -u origin main
-git tag v1.0.0
-git push origin v1.0.0
+py -3.12 -m venv .venv-build
+.venv-build\Scripts\python -m pip install -U pip
+.venv-build\Scripts\python -m pip install -r requirements-build.txt
+.venv-build\Scripts\python -m pip install -e .
+build_exe.bat
 ```
 
-On GitHub: **Releases → Draft new release → tag v1.0.0**.
+`build_exe.bat` runs `packaging\check_build_env.py` before PyInstaller and stops
+without building if any of these differ:
 
----
+- Python 3.12 64-bit
+- PyInstaller 6.13.0, PySide6 6.11.0, openpyxl 3.1.5
+- `mouse-click-stability-analyzer` 1.0.0, imported from this repository's `src\`
 
-## Path B — No Git on this PC
+It never installs or upgrades packages itself; on failure it prints the
+provisioning commands above.
+
+A rebuild deletes `dist\MCSA-1.0.0-win64\`, including its `reports\` folder.
+`build_exe.bat` therefore also stops, without deleting anything, when
+`dist\MCSA-1.0.0-win64\reports\` contains any `mcsa_*` report package. Back up or
+move those reports out of `dist\` first.
+
+Expected output:
+
+    dist\MCSA-1.0.0-win64\MCSA.exe
+
+That folder is a one-directory PyInstaller bundle (`console=False`, UPX off,
+`asInvoker`). Reports are written to `dist\MCSA-1.0.0-win64\reports\`.
+The legacy Tk UI is not bundled; `MCSA.exe --ui tk` shows a controlled message.
+
+Create a ZIP candidate only after packaged smoke tests pass:
 
 ```bat
-clean_local.bat
-pack_for_upload.bat
+packaging\make_release_zip.bat
 ```
 
-1. Add screenshot to `_dist_upload\docs\images\mcsa-ui-dark-listen.png`  
-2. Zip the `_dist_upload` folder  
-3. GitHub → **New repository** → **Upload files** → drag zip contents  
+This writes `release\MCSA-1.0.0-win64.zip` and prints SHA-256. Do not commit
+`dist\`, `build\`, or `release\`.
 
-Or install Git later and switch to Path A.
+### 1.2 Packaged smoke checklist
 
----
+Development machine (actual `MCSA.exe`, not `run.bat`):
 
-## Release candidate evidence
+- [ ] Launch with no console window and no Qt plugin / missing-DLL error
+- [ ] Setup, strings, SVG nav icons, wheel-safe combos, Auto Stop ON/OFF
+- [ ] Real mouse Raw Input capture, hold duration, press interval
+- [ ] Generate Report → four artifacts, COMPLETE, measurement_only
+- [ ] HTML opens; XLSX opens in **Microsoft Excel** without repair
+- [ ] Open Reports Folder
+- [ ] Restart; settings persist (`%AppData%\MCSA\MouseClickStabilityAnalyzer.ini`)
+- [ ] Copy the folder to a path with spaces and a non-ASCII path
+- [ ] Launch from a different current directory (`cd C:\Windows\System32` then full EXE path)
+- [ ] Launch with project Python / `.venv` removed from PATH
+
+Clean Windows machine / VM (required before GitHub v1.0.0):
+
+- [ ] No project checkout, no project venv, Python may be absent
+- [ ] Unpack ZIP, run `MCSA.exe`, real mouse run, Generate Report
+- [ ] Record Windows version, whether Python was installed, ZIP SHA-256, result
+
+### 1.3 Release candidate evidence
 
 RC acceptance requires a **live hardware run** (real mouse, Fixture or Manual) on the
 build being released, followed by Generate Report and a check of all four artifacts
@@ -98,7 +101,111 @@ timestamps in the future and force Auto Stop record `elapsed_s = null`; this is 
 property of the script, not of the live producer path, which records the real
 elapsed time.
 
-## Before upload — manual check
+Scripted helper startup (`MCSA.exe --mcsa-raw-input-helper` reporting `ready`) proves
+the frozen helper launches; it is not physical Raw Input acceptance.
+
+### 1.4 Third-party notice gate (final dist audit)
+
+`packaging\THIRD_PARTY_NOTICES.txt` lists the bundled components and their
+published licenses. It is a reference, not a compliance statement.
+
+Before the public release, inspect the **actual** `dist\MCSA-1.0.0-win64\` contents
+and record, for each component, where its license/notice text is carried in the
+bundle (for example `*.dist-info\LICENSE*` folders under `_internal\`):
+
+- [ ] Python runtime (PSF License)
+- [ ] PySide6 / shiboken6 / Qt libraries (LGPL v3)
+- [ ] openpyxl / et-xmlfile (MIT)
+- [ ] PyInstaller bootloader (GPL v2 with bootloader exception)
+
+If a required license text is not present in the bundle, report it at the final
+dist audit and add the text before publishing. Do not claim compliance without
+inspecting the final bundle.
+
+### 1.5 Git tag / GitHub Release (do not run until every Part 1 gate passes)
+
+```bat
+git tag -a v1.0.0 -m "MCSA v1.0.0"
+git push <remote> <branch>
+git push <remote> v1.0.0
+```
+
+GitHub Release title: `MCSA v1.0.0`. Attach `MCSA-1.0.0-win64.zip` and the SHA-256.
+Code signing is not configured; unsigned SmartScreen prompts are expected.
+
+Custom application icon: not included (no existing project icon). Default EXE icon is a documented polish item, not a packaging blocker.
+
+---
+
+## Part 2 — Source / Git workflow
+
+Use this to keep the source repository clean and pushed. It does **not** create the
+v1.0.0 release; tagging and the GitHub Release belong to Part 1.5.
+
+### 2.1 Clean local artifacts (safe script)
+
+From the project folder:
+
+```bat
+clean_local.bat
+```
+
+Type `YES` when prompted. This removes **only**:
+
+- `reports\mcsa_*` (your test runs; keeps `reports\.gitkeep`)
+- `.venv\` / `venv\` / `.venv-build\` (project root)
+- `__pycache__\` (under this project)
+- `src\*.egg-info\`, `build\`, `dist\`, `release\`
+
+It does **not** delete source code, `install.bat`, `docs\`, etc.
+
+### 2.2 README screenshot
+
+```bat
+save_readme_screenshot.bat
+```
+
+1. Open MCSA → Theme **Dark** → LISTEN screen  
+2. `Win+Shift+S` capture → image on clipboard  
+3. Run script above → saves `docs\images\mcsa-ui-dark-listen.png`
+
+### 2.3 Verify the source checkout
+
+```bat
+install.bat
+run.bat
+run.bat --mode self-test
+```
+
+### 2.4 Commit and push source (Git installed)
+
+Install Git for Windows (once):
+
+```bat
+winget install Git.Git
+```
+
+First-time repository setup only (skip if the folder is already a Git repository):
+
+```bat
+cd C:\mouse_click_stability_analyzer
+git init
+git branch -M main
+git remote add origin https://github.com/kotori0802/mouse-click-stability-analyzer.git
+```
+
+Then commit and push:
+
+```bat
+git add .
+git status
+git commit -m "<message>"
+git push -u origin main
+```
+
+Do not tag `v1.0.0` here. Follow Part 1.5 after the Part 1 gates pass.
+
+### 2.5 Before upload — manual check
 
 ```bat
 dir reports
@@ -110,11 +217,31 @@ You should see only `.gitkeep` (no `mcsa_*.json` you care about in the upload fo
 - [ ] `SECURITY.md` / `PRIVACY.md` present  
 - [ ] `docs/images/mcsa-workflow.svg` present  
 
-## Do not upload
+### 2.6 Do not upload
 
 | Path | Reason |
 |------|--------|
 | `reports/mcsa_*` | Local test sessions |
-| `.venv/` / `venv/` | Python environment |
+| `.venv/` / `venv/` / `.venv-build/` | Python environments |
+| `build/` / `dist/` / `release/` | Generated EXE build output and ZIP |
 | `src/**/*.egg-info/` | pip install artifact |
 | `__pycache__/` | Bytecode |
+
+---
+
+## Part 3 — Optional legacy / manual upload (no Git)
+
+Historical path for a PC without Git. It uploads **source only** and does not create
+the v1.0.0 release or tag. The end-user `MCSA-1.0.0-win64.zip` is published only
+through Part 1.5.
+
+```bat
+clean_local.bat
+pack_for_upload.bat
+```
+
+1. Add screenshot to `_dist_upload\docs\images\mcsa-ui-dark-listen.png`
+2. Zip the `_dist_upload` folder
+3. GitHub → **New repository** → **Upload files** → drag zip contents
+
+Apply the checks in Part 2.5 and 2.6 before uploading. Or install Git later and use Part 2.4.

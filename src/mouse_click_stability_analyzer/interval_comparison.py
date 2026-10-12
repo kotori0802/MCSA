@@ -282,3 +282,49 @@ def range_bounds(contract: dict[str, Any] | None) -> tuple[float, float] | None:
     if not contract or not contract.get("enabled"):
         return None
     return float(contract["lower_bound_ms"]), float(contract["upper_bound_ms"])
+
+
+def histogram_bin_closure(
+    bins: list[dict[str, Any]],
+    contract: dict[str, Any] | None = None,
+) -> list[tuple[bool, bool]]:
+    """(lo_closed, hi_closed) per bin, matching completed_result bin placement.
+
+    Presentation only: reads each bin's existing position and edges; never
+    re-classifies observations or alters bins. Exact lower and exact upper
+    bounds are shown as belonging to Within bins only.
+    """
+    if not bins:
+        return []
+    bounds = range_bounds(contract)
+    classified = bounds is not None and any(
+        item.get("position") in (POSITION_BELOW, POSITION_WITHIN, POSITION_ABOVE) for item in bins
+    )
+    last = len(bins) - 1
+    if not classified:
+        return [(True, index == last) for index in range(len(bins))]
+    lower, upper = bounds
+    first_index: dict[Any, int] = {}
+    last_index: dict[Any, int] = {}
+    for index, item in enumerate(bins):
+        position = item.get("position")
+        first_index.setdefault(position, index)
+        last_index[position] = index
+    out: list[tuple[bool, bool]] = []
+    for index, item in enumerate(bins):
+        lo, hi = float(item["lo"]), float(item["hi"])
+        position = item.get("position")
+        if position == POSITION_BELOW:
+            out.append((True, index == last_index[position] and hi < lower))
+        elif position == POSITION_ABOVE:
+            out.append((index == first_index[position] and lo > upper, True))
+        else:
+            out.append((True, index == last_index[position] or hi >= upper))
+    return out
+
+
+def format_histogram_bin_range(lo: float, hi: float, lo_closed: bool, hi_closed: bool) -> str:
+    """Human-facing bin range, e.g. '300.00 ≤ x < 301.01 ms'."""
+    left = "≤" if lo_closed else "<"
+    right = "≤" if hi_closed else "<"
+    return f"{lo:.2f} {left} x {right} {hi:.2f} ms"

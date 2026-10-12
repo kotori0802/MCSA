@@ -6,7 +6,9 @@ __pycache__/
 dist/
 build/
 .venv/
+.venv-build/
 venv/
+release/
 
 # Local test output (never commit real device sessions)
 reports/*

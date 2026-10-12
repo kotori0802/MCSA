@@ -177,7 +177,9 @@ user32.PostQuitMessage.restype = None
 device_name_cache = {}
 
 def emit(obj):
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    # ASCII-only wire format: non-ASCII text travels as \uXXXX escapes, so the
+    # line never depends on the helper's console code page.
+    sys.stdout.write(json.dumps(obj, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 def emit_error(message):

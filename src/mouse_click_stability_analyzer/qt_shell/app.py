@@ -4340,9 +4340,21 @@ class MainWindow(QMainWindow):
         self._refresh_results_workspace()
         self._sync_overlay_controls()
 
+    def _overlay_source_text(self) -> str:
+        if self.overlay_path.startswith("session:"):
+            return self._tr("overlay_status", name=self.overlay_path.replace("session:", ""))
+        if self.overlay_path:
+            return self._tr("overlay_status", name=Path(self.overlay_path).name)
+        return ""
+
     def _update_overlay_deltas(self, current_metrics: dict[str, Any]):
         if not self.overlay_metrics:
             self.overlay_delta_label.setText("")
+            return
+        base = self._overlay_source_text()
+        if self._measurement_only_presentation():
+            # Short/long counts are legacy cadence-screening heuristics, not the configured interval range.
+            self.overlay_delta_label.setText(base)
             return
         current = ranking_metrics(current_metrics, current_metrics)
         a_extra = int(self.overlay_metrics.get("true_extra_click_count") or 0)
@@ -4350,9 +4362,6 @@ class MainWindow(QMainWindow):
         a_delay = int(self.overlay_metrics.get("miss_or_slow_count") or 0)
         b_delay = int(current.get("miss_or_slow_count") or 0)
         line = self._tr("delta_line", a_extra=a_extra, a_delay=a_delay, b_extra=b_extra, b_delay=b_delay)
-        base = self._tr("overlay_status", name=Path(self.overlay_path).name) if self.overlay_path and not self.overlay_path.startswith("session:") else self.overlay_path
-        if self.overlay_path.startswith("session:"):
-            base = self._tr("overlay_status", name=self.overlay_path.replace("session:", ""))
         self.overlay_delta_label.setText(f"{base}\n{line}")
 
     def _chart_points(self, annotated: list[dict[str, Any]]) -> tuple[list, list]:
@@ -5462,7 +5471,8 @@ def run_qt_ui(
     **_kwargs,
 ) -> int:
     import sys
-    root = Path(report_root) if report_root else Path(__file__).resolve().parents[3] / "reports"
+    from ..runtime import default_report_root as _default_report_root
+    root = Path(report_root) if report_root else _default_report_root()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(get_style(theme))

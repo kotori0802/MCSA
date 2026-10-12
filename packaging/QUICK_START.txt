@@ -1,0 +1,35 @@
+Mouse Click Stability Analyzer 1.0.0
+====================================
+
+Portable Windows package. No Python install, no administrator rights,
+no installer, and no network access are required.
+
+1. Extract MCSA-1.0.0-win64.zip to a writable folder
+   (for example C:\MCSA\ or C:\Tools\MCSA\).
+2. Open the extracted folder MCSA-1.0.0-win64.
+3. Run MCSA.exe.
+4. On Setup, choose Manual or Fixture, Reference Rate, optional interval
+   comparison, and Auto Stop ON/OFF.
+5. Go to Capture, click in the Test Area, and stop with F5 or Esc.
+6. Review Results, then Generate Report.
+
+Reports are written next to MCSA.exe:
+
+    reports\mcsa_<run_id>\
+        mcsa_<run_id>_evidence.json
+        mcsa_<run_id>_events.csv
+        mcsa_<run_id>_report.html
+        mcsa_<run_id>_report.xlsx
+
+MCSA is measurement-only. Configured Interval Range counts are not PASS/FAIL.
+Schedule Association is optional/historical and is not configured in a normal run.
+
+If Windows shows a SmartScreen reputation prompt, that is expected for an
+unsigned engineering build. Do not disable antivirus as a normal step.
+
+Startup failures are shown in a dialog and also written to mcsa_startup.log
+in this folder.
+
+Settings are stored per-user as an INI file under:
+
+    %AppData%\MCSA\MouseClickStabilityAnalyzer.ini

@@ -22,7 +22,8 @@ echo Project root: %CD%
 echo.
 echo Will delete ONLY:
 echo   - %CD%\reports\mcsa_*
-echo   - %CD%\.venv\  %CD%\venv\
+echo   - %CD%\.venv\  %CD%\.venv-build\  %CD%\venv\
+echo   - %CD%\release\  %CD%\build\  %CD%\dist\
 echo   - __pycache__ folders under this project
 echo   - src\*.egg-info folders
 echo.
@@ -60,6 +61,14 @@ if exist "%ROOT%.venv\" (
 if exist "%ROOT%venv\" (
     echo [rmdir] %ROOT%venv
     rd /s /q "%ROOT%venv" 2>nul && set /a COUNT+=1
+)
+if exist "%ROOT%.venv-build\" (
+    echo [rmdir] %ROOT%.venv-build
+    rd /s /q "%ROOT%.venv-build" 2>nul && set /a COUNT+=1
+)
+if exist "%ROOT%release\" (
+    echo [rmdir] %ROOT%release
+    rd /s /q "%ROOT%release" 2>nul && set /a COUNT+=1
 )
 
 REM --- __pycache__ under project only (we are already cd'd to ROOT) ---

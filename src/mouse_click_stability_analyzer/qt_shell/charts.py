@@ -41,6 +41,12 @@ AXIS_ELAPSED = "elapsed"
 HOVER_HIT_PX = 12.0
 # Low-emphasis fill so the band never competes with observation markers.
 RANGE_BAND_ALPHA = 38
+# One palette entry per configured-range category; histogram bar fill and legend share it.
+HIST_CATEGORY_PALETTE_KEYS = {
+    POSITION_BELOW: "chatter",
+    POSITION_WITHIN: "interval_line",
+    POSITION_ABOVE: "extra",
+}
 
 
 def nice_ticks(vmin: float, vmax: float, target: int = 5) -> list[float]:
@@ -1603,16 +1609,23 @@ class HistogramChart(_ChartBase):
     def _classified(self) -> bool:
         return any(item.get("position") in (POSITION_BELOW, POSITION_WITHIN, POSITION_ABOVE) for item in self.bins)
 
-    def _bar_color(self, item: dict) -> str:
-        pal = self.palette
+    def bar_category(self, item: dict) -> str | None:
+        """Configured-range category of a bin, or None when no comparison is configured."""
         if not self._classified():
-            return pal.interval_fill
+            return None
         position = item.get("position")
-        if position == POSITION_BELOW:
-            return pal.chatter
-        if position == POSITION_ABOVE:
-            return pal.extra
-        return pal.interval_fill
+        if position in (POSITION_BELOW, POSITION_ABOVE):
+            return position
+        return POSITION_WITHIN
+
+    def bar_palette_key(self, item: dict) -> str:
+        category = self.bar_category(item)
+        if category is None:
+            return "interval_fill"
+        return HIST_CATEGORY_PALETTE_KEYS[category]
+
+    def _bar_color(self, item: dict) -> str:
+        return getattr(self.palette, self.bar_palette_key(item))
 
     def _bar_edge(self, item: dict) -> str:
         pal = self.palette
@@ -1629,9 +1642,18 @@ class HistogramChart(_ChartBase):
         pal = self.palette
         if self._classified():
             items = [
-                (pal.chatter, self._label("legend_below_configured_range", "Below configured interval range")),
-                (pal.interval_line, self._label("legend_within_configured_range", "Within configured interval range")),
-                (pal.extra, self._label("legend_above_configured_range", "Above configured interval range")),
+                (
+                    getattr(pal, HIST_CATEGORY_PALETTE_KEYS[POSITION_BELOW]),
+                    self._label("legend_below_configured_range", "Below configured interval range"),
+                ),
+                (
+                    getattr(pal, HIST_CATEGORY_PALETTE_KEYS[POSITION_WITHIN]),
+                    self._label("legend_within_configured_range", "Within configured interval range"),
+                ),
+                (
+                    getattr(pal, HIST_CATEGORY_PALETTE_KEYS[POSITION_ABOVE]),
+                    self._label("legend_above_configured_range", "Above configured interval range"),
+                ),
             ]
             items.extend(self._range_legend_items())
         else:
@@ -1688,6 +1710,8 @@ class HistogramChart(_ChartBase):
         p.save()
         p.setClipRect(plot)
         bar_w = max(2.0, plot.width() / max(1, len(self.bins)) - 2)
+        # drawRect fills with the current brush; the legend leaves its last swatch brush set.
+        p.setBrush(Qt.BrushStyle.NoBrush)
         for item in self.bins:
             lo, hi = float(item["lo"]), float(item["hi"])
             count = int(item.get("count") or 0)

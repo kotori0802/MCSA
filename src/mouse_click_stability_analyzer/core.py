@@ -7,10 +7,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .runtime import application_dir, default_report_root
 from .schema import TOOL_NAME, TOOL_VERSION
 
-APP_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_REPORT_DIR = APP_ROOT / "reports"
+APP_ROOT = application_dir()
+DEFAULT_REPORT_DIR = default_report_root()
 
 DEFAULT_SETTINGS = {
     "language": "en",

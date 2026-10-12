@@ -40,6 +40,8 @@ from mouse_click_stability_analyzer.interval_comparison import (
     POSITION_BELOW,
     POSITION_WITHIN,
     classify_interval,
+    format_histogram_bin_range,
+    histogram_bin_closure,
     summarize_positions,
 )
 from mouse_click_stability_analyzer.strings.loader import report_text as _rt
@@ -682,15 +684,16 @@ def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None)
     body = _axis(lo, hi, 0, peak, _rt("report_axis_interval_ms"), _rt("report_axis_count"))
     if reference:
         body += _svg_range_band_vertical(reference, lo, hi)
-    for b in bins:
+    closure = histogram_bin_closure(bins, _range_contract(reference))
+    for b, (lo_closed, hi_closed) in zip(bins, closure):
         h = (int(b["count"]) / peak) * (_H - _B - _T)
         x0 = _scale(float(b["lo"]), lo, hi, _L, _W - _R)
         x1 = _scale(float(b["hi"]), lo, hi, _L, _W - _R)
         cls = _histogram_bar_class(b)
+        label = format_histogram_bin_range(float(b["lo"]), float(b["hi"]), lo_closed, hi_closed)
         body += (
             f"<rect x='{x0 + 1:.1f}' y='{_H - _B - h:.1f}' width='{max(1.0, x1 - x0 - 2):.1f}' "
-            f"height='{h:.1f}' class='{cls}'><title>{float(b['lo']):.2f}–{float(b['hi']):.2f} ms: "
-            f"{int(b['count'])}</title></rect>"
+            f"height='{h:.1f}' class='{cls}'><title>{_e(label)}: {int(b['count'])}</title></rect>"
         )
     if reference:
         body += _svg_reference_vertical(reference, lo, hi)
