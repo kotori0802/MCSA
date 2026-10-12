@@ -5,6 +5,17 @@ import sys
 from pathlib import Path
 
 REQUIRED_DOCS = ("LICENSE", "QUICK_START.txt", "THIRD_PARTY_NOTICES.txt")
+REQUIRED_LICENSE_FILES = (
+    "licenses/python_LICENSE.txt",
+    "licenses/openpyxl_LICENCE.rst",
+    "licenses/et_xmlfile_LICENCE.rst",
+    "licenses/et_xmlfile_LICENCE.python",
+    "licenses/pyinstaller_COPYING.txt",
+    "licenses/pyside6_LicenseRef-Qt-Commercial.txt",
+    "licenses/qt_LGPL-3.0-only.txt",
+    "licenses/qt_GPL-3.0-only.txt",
+    "licenses/qt_GPL-2.0-only.txt",
+)
 REQUIRED_STRINGS = (
     "terminology.json",
     "common.json",
@@ -38,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         if not list(root.rglob(name)):
             errors.append(f"missing asset {name}")
     for name in REQUIRED_DOCS:
+        if not (root / name).is_file():
+            errors.append(f"missing {name}")
+    for name in REQUIRED_LICENSE_FILES:
         if not (root / name).is_file():
             errors.append(f"missing {name}")
     if (root / "tests").exists():

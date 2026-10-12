@@ -457,6 +457,111 @@ class BuildEnvironmentGuardTests(unittest.TestCase):
         self.assertIn("check_build_env.py", bat)
         self.assertNotIn("pip install -r", bat.split("Verifying pinned build toolchain", 1)[1])
 
+    def test_build_script_copies_license_directory(self):
+        bat = (self.ROOT / "build_exe.bat").read_text(encoding="utf-8")
+        self.assertIn(r'packaging\licenses', bat)
+        self.assertIn(r'%DISTDIR%\licenses', bat)
+
+    def test_release_zip_script_excludes_reports(self):
+        bat = (self.ROOT / "packaging" / "make_release_zip.bat").read_text(encoding="utf-8")
+        self.assertIn("Remove-Item (Join-Path $rel 'reports')", bat)
+        self.assertIn("mcsa_startup.log", bat)
+
+
+def _load_verify_bundle():
+    path = Path(__file__).resolve().parents[1] / "packaging" / "verify_bundle.py"
+    spec = importlib.util.spec_from_file_location("mcsa_verify_bundle", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class BundleLicenseContractTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def setUp(self):
+        self.verify = _load_verify_bundle()
+
+    def test_repo_license_sources_exist(self):
+        for name in self.verify.REQUIRED_LICENSE_FILES:
+            path = self.ROOT / "packaging" / name
+            self.assertTrue(path.is_file(), path)
+            self.assertGreater(path.stat().st_size, 400, name)
+
+    def test_notices_point_at_every_included_license_file(self):
+        text = (self.ROOT / "packaging" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
+        for name in self.verify.REQUIRED_LICENSE_FILES:
+            self.assertIn(name.replace("/", "\\"), text)
+        self.assertNotIn("OPEN:", text)
+        self.assertIn("LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only", text)
+        self.assertIn("https://code.qt.io/cgit/pyside/pyside-setup.git", text)
+        self.assertIn("v6.11.0", text)
+        python_text = (self.ROOT / "packaging" / "licenses" / "python_LICENSE.txt").read_text(encoding="utf-8")
+        self.assertIn("Python Software Foundation", python_text)
+        pi = (self.ROOT / "packaging" / "licenses" / "pyinstaller_COPYING.txt").read_text(encoding="utf-8")
+        self.assertIn("Bootloader Exception", pi)
+        self.assertIn("GNU GENERAL PUBLIC LICENSE", pi)
+
+    def test_qt_gnu_license_texts_match_declared_alternatives(self):
+        licenses = self.ROOT / "packaging" / "licenses"
+        expected = {
+            "qt_LGPL-3.0-only.txt": ("GNU LESSER GENERAL PUBLIC LICENSE", "Version 3, 29 June 2007"),
+            "qt_GPL-3.0-only.txt": ("GNU GENERAL PUBLIC LICENSE", "Version 3, 29 June 2007"),
+            "qt_GPL-2.0-only.txt": ("GNU GENERAL PUBLIC LICENSE", "Version 2, June 1991"),
+        }
+        for name, markers in expected.items():
+            text = (licenses / name).read_text(encoding="utf-8")
+            for marker in markers:
+                self.assertIn(marker, text, name)
+
+    def _minimal_bundle(self, root: Path, *, licenses: bool) -> None:
+        (root / "MCSA.exe").write_bytes(b"x")
+        (root / "platforms").mkdir()
+        (root / "platforms" / "qwindows.dll").write_bytes(b"x")
+        for name in ("LICENSE", "QUICK_START.txt", "THIRD_PARTY_NOTICES.txt"):
+            (root / name).write_text("ok", encoding="utf-8")
+        for name in self.verify.REQUIRED_STRINGS:
+            (root / name).write_text("{}", encoding="utf-8")
+        for name in ("chart_fit.svg", "check_white.svg"):
+            (root / name).write_text("<svg/>", encoding="utf-8")
+        (root / "licenses").mkdir()
+        if licenses:
+            for name in self.verify.REQUIRED_LICENSE_FILES:
+                (root / name).write_text("text", encoding="utf-8")
+
+    def _run_verify(self, root: Path) -> tuple[int, str]:
+        out = io.StringIO()
+        err = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            rc = self.verify.main([str(root)])
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_verify_bundle_fails_when_license_file_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._minimal_bundle(root, licenses=False)
+            rc, output = self._run_verify(root)
+            self.assertEqual(rc, 1)
+            self.assertIn("missing licenses/python_LICENSE.txt", output)
+
+    def test_verify_bundle_passes_with_full_license_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._minimal_bundle(root, licenses=True)
+            rc, output = self._run_verify(root)
+            self.assertEqual(rc, 0, output)
+            self.assertIn("BUNDLE CHECK OK", output)
+
+    def test_verify_bundle_fails_when_any_qt_gnu_text_missing(self):
+        for name in ("licenses/qt_LGPL-3.0-only.txt", "licenses/qt_GPL-3.0-only.txt", "licenses/qt_GPL-2.0-only.txt"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._minimal_bundle(root, licenses=True)
+                (root / name).unlink()
+                rc, output = self._run_verify(root)
+                self.assertEqual(rc, 1)
+                self.assertIn(f"missing {name}", output)
+
 
 if __name__ == "__main__":
     unittest.main()

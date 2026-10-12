@@ -4,3 +4,6 @@
 *.toml  text eol=lf
 *.mdc   text eol=lf
 *.bat   text eol=crlf
+
+# Verbatim upstream license texts: keep byte-identical, skip whitespace checks.
+packaging/licenses/** -whitespace

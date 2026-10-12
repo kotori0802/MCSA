@@ -2,31 +2,59 @@ Third-party notices for the MCSA 1.0.0 Windows distribution
 ===========================================================
 
 This folder bundles a Python 3.12 runtime plus the libraries required to run
-Mouse Click Stability Analyzer. The license names and links below are factual
-references to the packaged projects' published licenses. They are not legal advice.
+Mouse Click Stability Analyzer. Entries below are factual references to
+installed-package metadata and license files copied from this build machine.
+They are not legal advice and do not constitute a compliance opinion.
 
-Python
+Full texts that were present in local Python / venv packages are copied under:
+
+    licenses\
+
+PyInstaller also embeds some package metadata under `_internal\*.dist-info\`.
+Those files are left in place.
+
+Python 3.12.10
     License: Python Software Foundation License
-    https://docs.python.org/3/license.html
+    Source copied from: Python 3.12.10 installation LICENSE.txt
+    Included as: licenses\python_LICENSE.txt
 
-PySide6 / shiboken6 (Qt for Python)
-    License: GNU Lesser General Public License v3.0
-    https://doc.qt.io/qtforpython-6/licenses.html
-    Qt libraries shipped with PySide6 are used under LGPL v3 as distributed
-    by the Qt for Python project.
+PySide6 6.11.0 / PySide6_Essentials 6.11.0 / PySide6_Addons 6.11.0 / shiboken6 6.11.0
+    PyPI METADATA License field: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+    Declared alternatives: LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only
+    Covers: the PySide6 / shiboken6 Python modules and the Qt 6.11.0 DLLs and
+    plugins bundled with them under _internal\PySide6\ and _internal\shiboken6\.
+    Wheel License-File as shipped: LicenseRef-Qt-Commercial.txt
+    Included as: licenses\pyside6_LicenseRef-Qt-Commercial.txt
+    The wheels do not contain the GNU texts. The unmodified full texts were
+    taken from the official Qt for Python source repository:
+        Repository: https://code.qt.io/cgit/pyside/pyside-setup.git
+        Tag: v6.11.0 (commit 04cd59c10681242e387d125cfe5269902962ded1)
+        Path: LICENSES/<name>.txt
+    The same files are byte-identical in https://code.qt.io/cgit/qt/qtbase.git
+    at tag v6.11.0 (commit 8ba7ea4b77a4b8f1948760221e264917ddc9e1c8).
+    Included as: licenses\qt_LGPL-3.0-only.txt  (from LICENSES/LGPL-3.0-only.txt)
+                 licenses\qt_GPL-3.0-only.txt   (from LICENSES/GPL-3.0-only.txt)
+                 licenses\qt_GPL-2.0-only.txt   (from LICENSES/GPL-2.0-only.txt)
+    The Qt for Python documentation describes the Community Edition as
+    distributed under LGPLv3/GPLv3. No commercial Qt license is claimed for
+    this distribution.
 
-openpyxl
+openpyxl 3.1.5
     License: MIT
-    https://pypi.org/project/openpyxl/
+    Source copied from: openpyxl-3.1.5.dist-info\LICENCE.rst
+    Included as: licenses\openpyxl_LICENCE.rst
 
-et-xmlfile (openpyxl dependency)
-    License: MIT
+et-xmlfile 2.0.0 (openpyxl dependency)
+    License: MIT, plus bundled Python stdlib-derived code
+    Source copied from: et_xmlfile-2.0.0.dist-info\LICENCE.rst
+                         et_xmlfile-2.0.0.dist-info\LICENCE.python
+    Included as: licenses\et_xmlfile_LICENCE.rst
+                 licenses\et_xmlfile_LICENCE.python
 
-PyInstaller bootloader
-    The bootloader that starts MCSA.exe is part of PyInstaller.
-    License: GNU GPL v2 with the PyInstaller bootloader exception
-    (allows bundling with this application).
-    https://pyinstaller.org/en/stable/license.html
+PyInstaller 6.13.0 bootloader
+    License: GNU GPL v2 or later with the PyInstaller bootloader exception
+    Source copied from: pyinstaller-6.13.0.dist-info\COPYING.txt
+    Included as: licenses\pyinstaller_COPYING.txt
 
 MCSA application source
     License: MIT (see LICENSE in this folder)

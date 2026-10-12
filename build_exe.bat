@@ -70,6 +70,9 @@ if not exist "%DISTDIR%\MCSA.exe" (
 copy /y "%ROOT%\LICENSE" "%DISTDIR%\LICENSE" >nul
 copy /y "%ROOT%\packaging\QUICK_START.txt" "%DISTDIR%\QUICK_START.txt" >nul
 copy /y "%ROOT%\packaging\THIRD_PARTY_NOTICES.txt" "%DISTDIR%\THIRD_PARTY_NOTICES.txt" >nul
+if exist "%DISTDIR%\licenses" rd /s /q "%DISTDIR%\licenses"
+mkdir "%DISTDIR%\licenses"
+copy /y "%ROOT%\packaging\licenses\*.*" "%DISTDIR%\licenses\" >nul
 if exist "%ROOT%\PRIVACY.md" copy /y "%ROOT%\PRIVACY.md" "%DISTDIR%\PRIVACY.md" >nul
 if exist "%ROOT%\SECURITY.md" copy /y "%ROOT%\SECURITY.md" "%DISTDIR%\SECURITY.md" >nul
 

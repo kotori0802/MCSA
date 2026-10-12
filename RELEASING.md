@@ -106,21 +106,28 @@ the frozen helper launches; it is not physical Raw Input acceptance.
 
 ### 1.4 Third-party notice gate (final dist audit)
 
-`packaging\THIRD_PARTY_NOTICES.txt` lists the bundled components and their
-published licenses. It is a reference, not a compliance statement.
+`packaging\THIRD_PARTY_NOTICES.txt` lists the bundled components and points at
+copied license texts under `licenses\`. It is a reference, not a compliance
+statement. `build_exe.bat` copies `packaging\licenses\` into the release folder.
+`verify_bundle.py` checks those files are present; it does not interpret licenses.
 
-Before the public release, inspect the **actual** `dist\MCSA-1.0.0-win64\` contents
-and record, for each component, where its license/notice text is carried in the
-bundle (for example `*.dist-info\LICENSE*` folders under `_internal\`):
+Local texts copied for v1.0.0:
 
-- [ ] Python runtime (PSF License)
-- [ ] PySide6 / shiboken6 / Qt libraries (LGPL v3)
-- [ ] openpyxl / et-xmlfile (MIT)
-- [ ] PyInstaller bootloader (GPL v2 with bootloader exception)
+- [x] Python 3.12.10 `LICENSE.txt` → `licenses\python_LICENSE.txt`
+- [x] openpyxl 3.1.5 `LICENCE.rst`
+- [x] et-xmlfile 2.0.0 `LICENCE.rst` and `LICENCE.python`
+- [x] PyInstaller 6.13.0 `COPYING.txt` (GPL-2.0-or-later with bootloader exception)
+- [x] PySide6 wheel `LicenseRef-Qt-Commercial.txt` as shipped
+- [x] PySide6 / shiboken6 / Qt libraries — METADATA declares
+      `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`. The wheels do not ship
+      those texts, so the unmodified files come from
+      `https://code.qt.io/cgit/pyside/pyside-setup.git` tag `v6.11.0`
+      (commit `04cd59c10681242e387d125cfe5269902962ded1`), `LICENSES/`:
+      `qt_LGPL-3.0-only.txt`, `qt_GPL-3.0-only.txt`, `qt_GPL-2.0-only.txt`
 
-If a required license text is not present in the bundle, report it at the final
-dist audit and add the text before publishing. Do not claim compliance without
-inspecting the final bundle.
+When upgrading PySide6, refresh these from the matching Qt for Python tag.
+Presence of license files is a technical gate only; organizational/legal
+review of the distribution is separate and is not claimed here.
 
 ### 1.5 Git tag / GitHub Release (do not run until every Part 1 gate passes)
 
