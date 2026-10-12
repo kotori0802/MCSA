@@ -7,12 +7,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer.cadence import class_to_tags, classify_click
 from mouse_click_stability_analyzer.completed_result import (
     build_completed_result_model,
@@ -166,6 +170,9 @@ class ResultsReportSemanticsWindowTests(unittest.TestCase):
 
     def _run(self, offsets):
         self.assertTrue(self.win.lock_profile())
+        raw = self.win.timing_tol_edit.text().strip()
+        if raw:
+            apply_explicit_association(self.win, float(raw))
         self.assertTrue(self.win.arm_capture())
         t0 = float(self.win._arm_boundary_perf) + 0.001
         self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
@@ -514,7 +521,7 @@ class ReportViewSemanticsTests(unittest.TestCase):
         cols = report_v2.click_data_columns(False)
         self.assertNotIn("Observation", cols)
         self.assertNotIn("Observation flag(s)", cols)
-        self.assertIn("Elapsed", cols)
+        self.assertIn("Elapsed time", cols)
         self.assertNotIn("Elapsed (ms)", cols)
         self.assertIn("Interval Δ vs ref. (ms)", cols)
         self.assertNotIn("State", cols)

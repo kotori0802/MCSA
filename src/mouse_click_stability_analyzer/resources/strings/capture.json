@@ -4,16 +4,16 @@
     "zh-TW": "開始擷取"
   },
   "axis_count": {
-    "en": "Count",
-    "zh-TW": "數量"
+    "en": "{@term.observation_count}",
+    "zh-TW": "{@term.observation_count}"
   },
   "axis_elapsed": {
-    "en": "Elapsed",
-    "zh-TW": "經過"
+    "en": "{@term.elapsed_time}",
+    "zh-TW": "{@term.elapsed_time}"
   },
   "axis_elapsed_s": {
-    "en": "Elapsed (s)",
-    "zh-TW": "經過 (s)"
+    "en": "{@term.elapsed_time} (s)",
+    "zh-TW": "{@term.elapsed_time} (s)"
   },
   "axis_hold_ms": {
     "en": "{@term.hold} (ms)",
@@ -28,12 +28,12 @@
     "zh-TW": "測試已完成。\n請在結果工作區檢視。"
   },
   "chart_interval": {
-    "en": "{@term.interval} over time",
-    "zh-TW": "{@term.interval}隨時間"
+    "en": "{@term.elapsed_time} vs {@term.interval}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.interval}"
   },
   "chart_interval_trend": {
-    "en": "Interval Trend",
-    "zh-TW": "間隔趨勢"
+    "en": "{@term.elapsed_time} vs {@term.interval}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.interval}"
   },
   "chart_scatter_fixture": {
     "en": "Stability vs target {beat} ms",
@@ -47,16 +47,16 @@
     "zh-TW": "手動穩定度（按住 vs 間隔）"
   },
   "chart_stability_map": {
-    "en": "Click Stability Map",
-    "zh-TW": "點擊穩定度圖"
+    "en": "{@term.interval} vs {@term.hold}",
+    "zh-TW": "{@term.interval} vs {@term.hold}"
   },
   "chart_stability_map_subtitle": {
-    "en": "Interval vs Hold",
-    "zh-TW": "間隔 vs 按住"
+    "en": "{@term.interval} vs {@term.hold}",
+    "zh-TW": "{@term.interval} vs {@term.hold}"
   },
   "chart_stability_map_subtitle_fixture": {
-    "en": "Interval vs Hold · Reference {beat} ms · {hz} Hz",
-    "zh-TW": "間隔 vs 按住 · 參考 {beat} ms · {hz} Hz",
+    "en": "{@term.interval} vs {@term.hold} · {@term.reference_interval} {beat} ms · {hz} Hz",
+    "zh-TW": "{@term.interval} vs {@term.hold} · {@term.reference_interval} {beat} ms · {hz} Hz",
     "placeholders": [
       "beat",
       "hz"
@@ -126,8 +126,8 @@
     "placeholders": ["value"]
   },
   "hover_configured_range": {
-    "en": "Configured range: {lo}–{hi} ms",
-    "zh-TW": "設定範圍：{lo}–{hi} ms",
+    "en": "{@term.configured_range}: {lo}–{hi} ms",
+    "zh-TW": "{@term.configured_range}：{lo}–{hi} ms",
     "placeholders": ["lo", "hi"]
   },
   "hover_position": {
@@ -156,6 +156,22 @@
   "legend_outside_configured_range": {
     "en": "{@term.outside_configured_range}",
     "zh-TW": "{@term.outside_configured_range}"
+  },
+  "legend_below_configured_range": {
+    "en": "{@term.below_configured_range}",
+    "zh-TW": "{@term.below_configured_range}"
+  },
+  "legend_above_configured_range": {
+    "en": "{@term.above_configured_range}",
+    "zh-TW": "{@term.above_configured_range}"
+  },
+  "legend_click_interval": {
+    "en": "{@term.interval}",
+    "zh-TW": "{@term.interval}"
+  },
+  "legend_hold_duration": {
+    "en": "{@term.hold}",
+    "zh-TW": "{@term.hold}"
   },
   "issues": {
     "en": "OBSERVATIONS",
@@ -372,20 +388,20 @@
     "zh-TW": "測試區\n按開始擷取後，在此區域點擊。\n第一個有效點擊才開始記錄。"
   },
   "viz_fit_data": {
-    "en": "Fit Data",
-    "zh-TW": "縮放至資料"
+    "en": "Fit All Data",
+    "zh-TW": "顯示全部資料"
   },
   "viz_interval_trend": {
-    "en": "Interval Trend",
-    "zh-TW": "間隔趨勢"
+    "en": "{@term.elapsed_time} vs {@term.interval}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.interval}"
   },
   "viz_reset_view": {
     "en": "Reset View",
     "zh-TW": "重設檢視"
   },
   "viz_stability_map": {
-    "en": "Stability Map",
-    "zh-TW": "穩定度圖"
+    "en": "{@term.interval} vs {@term.hold}",
+    "zh-TW": "{@term.interval} vs {@term.hold}"
   },
   "viz_zoom_in": {
     "en": "Zoom In",

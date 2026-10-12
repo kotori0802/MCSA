@@ -7,15 +7,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLineEdit
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer.fixture_matching import match_fixture_press_observations
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
@@ -147,26 +151,17 @@ class SetupAssociationContextWidgetTests(unittest.TestCase):
         })
 
     def test_setup_shows_derived_context(self):
-        self._fixture("10", "5")
-        self.assertEqual(self._values(), {
-            "assoc_reference_interval": "100.00 ms",
-            "assoc_window": "±5.00 ms",
-            "assoc_relative": "5.0 %",
-            "assoc_overlap": "No",
-        })
-        self.assertTrue(self.win.assoc_overlap_note.isHidden())
-        self._fixture("40", "5")
-        self.assertEqual(self._values()["assoc_relative"], "20.0 %")
-        self.assertEqual(self._values()["assoc_overlap"], "No")
+        self.win.radio_fixture.setChecked(True)
+        for widget in (
+            self.win.lbl_schedule_association, self.win.timing_tol_label,
+            self.win.timing_tol_edit, self.win.assoc_context_box,
+        ):
+            self.assertFalse(widget.isVisibleTo(self.win), widget)
 
     def test_overlap_is_informational_and_does_not_block_lock(self):
         self._fixture("100", "5")
-        self.assertEqual(self._values()["assoc_reference_interval"], "10.00 ms")
-        self.assertEqual(self._values()["assoc_overlap"], "Yes")
-        self.assertFalse(self.win.assoc_overlap_note.isHidden())
-        self.assertEqual(self.win.assoc_overlap_note.text(), STRINGS["en"]["assoc_overlap_note"])
         self.assertTrue(self.win.lock_profile())
-        self.assertEqual(self.win.profile_locked_settings[FIXTURE_TIMING_TOLERANCE_KEY], 5.0)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.profile_locked_settings)
         self.assertEqual(self.win.alert_label.text(), "")
 
     def test_invalid_input_shows_neutral_placeholders(self):
@@ -195,7 +190,7 @@ class SetupAssociationContextWidgetTests(unittest.TestCase):
         self.win.radio_manual.setChecked(True)
         self.assertTrue(self.win.assoc_context_box.isHidden())
         self.win.radio_fixture.setChecked(True)
-        self.assertFalse(self.win.assoc_context_box.isHidden())
+        self.assertTrue(self.win.assoc_context_box.isHidden())
 
     def test_matcher_receives_same_absolute_ms(self):
         captured: list[tuple] = []
@@ -211,6 +206,7 @@ class SetupAssociationContextWidgetTests(unittest.TestCase):
             self.win.auto_stop_on.setChecked(True)
             self.win.auto_stop_sec_combo.setCurrentText("1")
             self.assertTrue(self.win.lock_profile())
+            apply_explicit_association(self.win, 5.0)
             self.assertTrue(self.win.arm_capture())
             self.win._cursor_over_capture_exclusion_ui = lambda: False
             t0 = float(self.win._arm_boundary_perf) + 0.001

@@ -419,9 +419,9 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.assertNotIn("FAIL", scatter_text)
         self.assertNotIn("Target beat", scatter_text)
         self.assertNotIn("Target beat", interval_text)
-        self.assertIn("Configured reference", scatter_text)
-        self.assertIn("Configured reference", interval_text)
-        self.assertIn("Configured reference", hist_text)
+        self.assertIn("Reference interval", scatter_text)
+        self.assertIn("Reference interval", interval_text)
+        self.assertIn("Reference interval", hist_text)
         self.assertNotIn("Target beat", hist_text)
         self.assertTrue(self.win.results_scatter.data_aware_fit)
         self.assertTrue(self.win.results_interval_chart.data_aware_fit)
@@ -435,7 +435,7 @@ class MeasurementOnlyPresentationTests(unittest.TestCase):
         self.win.scatter.set_points([(25.0, 8.0, "TRUE_EXTRA_CLICK")], target_beat_ms=25.0)
         capture_text = [text for _, text in self.win.scatter.legend_entries()]
         self.assertIn("Host observation", capture_text)
-        self.assertIn("Configured reference", capture_text)
+        self.assertIn("Reference interval", capture_text)
         for banned in (
             "Short interval",
             "Very short interval",

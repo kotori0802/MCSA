@@ -9,12 +9,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer.host_evidence import build_fixture_host_evidence
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS, t
@@ -270,6 +274,9 @@ class ReviewPresentationTests(unittest.TestCase):
 
     def _lock_and_arm(self):
         self.assertTrue(self.win.lock_profile())
+        raw = self.win.timing_tol_edit.text().strip()
+        if raw:
+            apply_explicit_association(self.win, float(raw))
         self.assertTrue(self.win.arm_capture())
         self.win._cursor_over_capture_exclusion_ui = lambda: False
 
@@ -321,7 +328,7 @@ class ReviewPresentationTests(unittest.TestCase):
         text = self._review()
         self.assertNotIn(self.win._tr("he_title"), self.win.results_observations_text.text())
         self.assertIn(self.win._tr("he_title"), text)
-        self.assertTrue(self.win.results_observations_text.text().strip())
+        self.assertTrue(text.strip())
 
     def test_review_matches_injected_snapshot(self):
         self._setup_fixture()
@@ -406,8 +413,8 @@ class ReviewPresentationTests(unittest.TestCase):
         run = self.win.session_runs[-1]
         self.assertFalse(any("evidence" in str(k).lower() for k in run))
         report_source = Path(legacy_app.__file__).read_text(encoding="utf-8")
-        for token in ("host_evidence", "format_host_evidence", "he_title"):
-            self.assertNotIn(token, report_source)
+        self.assertNotIn("format_host_evidence", report_source)
+        self.assertNotIn("he_title", report_source)
 
 
 if __name__ == "__main__":

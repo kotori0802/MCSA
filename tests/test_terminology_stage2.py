@@ -190,7 +190,7 @@ class TerminologySemanticsTests(unittest.TestCase):
                 reload_string_tables()
 
     def test_measurement_only_results_do_not_regain_legacy_legend_categories(self):
-        self.assertEqual(STRINGS["en"]["legend_configured_reference"], "Configured reference")
+        self.assertEqual(STRINGS["en"]["legend_configured_reference"], "Reference interval")
         self.assertEqual(STRINGS["en"]["legend_host_observation"], "Host observation")
         self.assertEqual(STRINGS["en"]["legend_target"], "Target beat")
         self.assertNotEqual(STRINGS["en"]["legend_configured_reference"], STRINGS["en"]["legend_target"])

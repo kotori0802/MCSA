@@ -336,7 +336,7 @@
     "en": "#"
   },
   "report_click_col_elapsed": {
-    "en": "Elapsed"
+    "en": "{@term.elapsed_time}"
   },
   "report_click_col_button": {
     "en": "Button"
@@ -372,32 +372,32 @@
     "en": "—"
   },
   "report_chart_interval_over_time": {
-    "en": "{@term.interval} over time"
+    "en": "{@term.elapsed_time} vs {@term.interval}"
   },
   "report_chart_interval_distribution": {
     "en": "{@term.interval} distribution"
   },
   "report_hist_press_interval_distribution": {
-    "en": "Press Interval Distribution (N={n})",
+    "en": "{@term.interval} distribution (N={n})",
     "placeholders": ["n"]
   },
   "report_hist_note": {
     "en": "Distribution of observed press-to-press intervals. N is the number of interval observations included in the histogram."
   },
   "report_chart_hold_vs_interval": {
-    "en": "{@term.hold} vs {@term.interval}"
+    "en": "{@term.interval} vs {@term.hold}"
   },
   "report_chart_hold_over_time": {
-    "en": "{@term.hold} over time"
+    "en": "{@term.elapsed_time} vs {@term.hold}"
   },
   "report_axis_elapsed": {
-    "en": "Elapsed"
+    "en": "{@term.elapsed_time}"
   },
   "report_axis_elapsed_s": {
-    "en": "Elapsed (s)"
+    "en": "{@term.elapsed_time} (s)"
   },
   "report_axis_elapsed_ms": {
-    "en": "Elapsed (ms)"
+    "en": "{@term.elapsed_time} (ms)"
   },
   "report_axis_interval_ms": {
     "en": "{@term.interval} (ms)"
@@ -406,7 +406,7 @@
     "en": "{@term.hold} (ms)"
   },
   "report_axis_count": {
-    "en": "Count"
+    "en": "{@term.observation_count}"
   },
   "report_legend_host_observation": {
     "en": "{@term.host_observation}",
@@ -425,6 +425,12 @@
   "report_legend_outside_configured_range": {
     "en": "{@term.outside_configured_range}"
   },
+  "report_legend_below_configured_range": {
+    "en": "{@term.below_configured_range}"
+  },
+  "report_legend_above_configured_range": {
+    "en": "{@term.above_configured_range}"
+  },
   "report_hist_bin_centre": {
     "en": "Bin centre (ms)"
   },
@@ -435,7 +441,7 @@
     "en": "High (ms)"
   },
   "report_hist_count": {
-    "en": "Count"
+    "en": "{@term.observation_count}"
   },
   "report_alias_observation": {
     "en": "Observation"

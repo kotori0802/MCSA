@@ -167,8 +167,8 @@ class QtStage2DIntervalComparisonTests(unittest.TestCase):
         self.assertEqual(self.win.scatter.configured_range, (100.0, 150.0))
         self.assertEqual(self.win.interval_chart.configured_range, (100.0, 150.0))
         legend = " ".join(label for _color, label in self.win.scatter.legend_entries())
-        self.assertIn("Within configured range", legend)
-        self.assertIn("Outside configured range", legend)
+        self.assertIn("Within configured interval range", legend)
+        self.assertIn("Outside configured interval range", legend)
         self.assertNotIn("PASS", legend)
         self.assertNotIn("FAIL", legend)
         self.assertNotIn("WARN", legend)
@@ -262,35 +262,37 @@ class QtStage2DIntervalComparisonTests(unittest.TestCase):
                 self.assertEqual(values["upper_bound"], 150.0)
                 self.assertEqual(values["reference"], 125.0)
                 labels = [label for _c, label in chart.legend_entries()]
-                self.assertEqual(labels.count("Configured range"), 1)
-                self.assertIn("Configured reference", labels)
+                self.assertEqual(labels.count("Configured interval range"), 1)
+                self.assertIn("Reference interval", labels)
                 self.assertFalse(chart.grab().isNull())
         for chart in (self.win.results_scatter, self.win.results_interval_chart):
             labels = [label for _c, label in chart.legend_entries()]
-            self.assertLess(labels.index("Configured range"), labels.index("Within configured range"))
-            self.assertLess(labels.index("Outside configured range"), labels.index("Configured reference"))
+            self.assertLess(labels.index("Configured interval range"), labels.index("Within configured interval range"))
+            self.assertLess(labels.index("Outside configured interval range"), labels.index("Reference interval"))
         hist_labels = [label for _c, label in self.win.results_distribution_chart.legend_entries()]
-        self.assertNotIn("Within configured range", hist_labels)
-        self.assertNotIn("Outside configured range", hist_labels)
+        self.assertIn("Below configured interval range", hist_labels)
+        self.assertIn("Within configured interval range", hist_labels)
+        self.assertIn("Above configured interval range", hist_labels)
         pal = get_palette(self.win.theme)
         self.assertNotIn(pal.range_band, (pal.interval_fill, pal.on_cadence, pal.extra, pal.overlay, pal.target_line))
         self.assertNotIn(pal.range_edge, (pal.on_cadence, pal.extra, pal.overlay, pal.target_line))
 
-    def test_histogram_bins_unchanged_by_range(self):
+    def test_histogram_follows_completed_model_when_range_enabled(self):
         offsets = [0, 125, 215, 385, 500]
-        self._run(offsets, compare=False)
-        bins_off = [dict(b) for b in self.win.results_distribution_chart.bins]
         self._run(offsets, compare=True, value="20")
-        self.assertEqual([dict(b) for b in self.win.results_distribution_chart.bins], bins_off)
         model = self.win._completed_run_facts()["model"]
         self.assertEqual(self.win.results_distribution_chart.bins, list(model["analysis"]["histogram"]))
+        self.assertEqual(
+            sum(int(b["count"]) for b in self.win.results_distribution_chart.bins),
+            sum(1 for row in model["click_data"] if row["interval_ms"] is not None),
+        )
 
     def test_no_band_when_disabled_or_manual(self):
         self._run([0, 125, 250], compare=False)
         for chart in (self.win.results_scatter, self.win.results_interval_chart, self.win.results_distribution_chart):
             self.assertEqual(self._layer_kinds(chart), ["reference"])
             labels = [label for _c, label in chart.legend_entries()]
-            self.assertNotIn("Configured range", labels)
+            self.assertNotIn("Configured interval range", labels)
             self.assertEqual(chart.point_range_positions() if hasattr(chart, "point_range_positions") else [], [])
 
     def test_hold_over_time_view(self):
@@ -317,7 +319,10 @@ class QtStage2DIntervalComparisonTests(unittest.TestCase):
         self.assertEqual(chart.range_layers(), [])
         self.assertEqual(chart.point_range_positions(), [])
         labels = [label for _c, label in chart.legend_entries()]
-        for banned in ("Configured range", "Within configured range", "Outside configured range", "Configured reference"):
+        for banned in (
+            "Configured interval range", "Within configured interval range",
+            "Outside configured interval range", "Reference interval",
+        ):
             self.assertNotIn(banned, labels)
         chart.fit_data()
         xmin, _xmax, ymin, _ymax = chart.visible_bounds()
@@ -357,8 +362,11 @@ class QtStage2DIntervalComparisonTests(unittest.TestCase):
         self.assertFalse(self.win.results_summary_card.isAncestorOf(summary))
         self.assertNotIn("Comparable", self.win.results_context_label.text())
         text = summary.text()
-        for fact in ("Comparable intervals: 3", "Within configured range: 1", "Outside configured range: 2",
-                     "Below configured range: 1", "Above configured range: 1", "33.33%"):
+        for fact in (
+            "Comparable intervals: 3", "Within configured interval range: 1",
+            "Outside configured interval range: 2", "Below configured interval range: 1",
+            "Above configured interval range: 1", "33.33%",
+        ):
             self.assertIn(fact, text)
 
     def test_rate_change_invalidates_ms_value_without_clamping(self):

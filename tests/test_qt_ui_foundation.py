@@ -156,7 +156,7 @@ class SupportedLanguageTests(unittest.TestCase):
         zh = STRINGS["zh"]
         self.assertEqual(zh["arm_capture"], "開始擷取")
         self.assertEqual(zh["disarm_capture"], "取消開始")
-        self.assertEqual(zh["chart_stability_map"], "點擊穩定度圖")
+        self.assertEqual(zh["chart_stability_map"], "點擊間隔 vs 按住時間")
         self.assertEqual(zh["assoc_window"], "排程關聯範圍")
         self.assertNotIn("视窗", "".join(zh.values()))
 

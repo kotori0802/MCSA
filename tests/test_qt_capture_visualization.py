@@ -209,7 +209,7 @@ class ChartWidgetTests(unittest.TestCase):
                 self.assertFalse(hasattr(chart, "association_window"))
                 self.assertFalse(hasattr(chart, "association_half_width_ms"))
                 labels = [label for _color, label in chart._guide_legend_items()]
-                self.assertEqual(labels, ["Configured reference"])
+                self.assertEqual(labels, ["Reference interval"])
 
     def test_capture_charts_render_reference_line_without_association_band(self):
         ref = 166.67
@@ -633,7 +633,6 @@ class CaptureVisualizationTests(unittest.TestCase):
             self.win.btn_chart_fit,
             self.win.btn_chart_zoom_in,
             self.win.btn_chart_zoom_out,
-            self.win.btn_chart_reset,
         ]
 
     def _fixture(self, *, hz="6", tol="2"):
@@ -794,7 +793,7 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertEqual(self.win.val_verdict.text(), status_before)
         self.assertEqual(self.win.scatter.target_beat_ms, reference)
         self.assertEqual(self.win.interval_chart.target_beat_ms, reference)
-        self.assertEqual(self.win.locked["fixture_timing_tolerance_ms"], 2.0)
+        self.assertNotIn("fixture_timing_tolerance_ms", self.win.locked)
         for chart in (self.win.scatter, self.win.interval_chart):
             labels = [label for _color, label in chart._guide_legend_items()]
             self.assertEqual(labels, [self.win._tr("legend_configured_reference")])
@@ -814,11 +813,11 @@ class CaptureVisualizationTests(unittest.TestCase):
         self._fixture(hz="6", tol="2")
         self._start_run()
         self.win._refresh_metrics(final=False)
-        self.assertEqual(self.win.scatter.title, "Click Stability Map")
+        self.assertEqual(self.win.scatter.title, "Click interval vs Hold duration")
         self.assertIn("Reference", self.win.scatter.subtitle)
         self.assertNotIn("PASS", self.win.scatter.subtitle)
         self.assertNotIn("specification", self.win.scatter.subtitle.lower())
-        self.assertEqual(self.win.interval_chart.title, "Interval Trend")
+        self.assertEqual(self.win.interval_chart.title, "Elapsed time vs Click interval")
 
     def test_measurement_only_capture_does_not_present_legacy_categories(self):
         self._fixture(hz="40", tol="2")
@@ -835,7 +834,7 @@ class CaptureVisualizationTests(unittest.TestCase):
         self.assertFalse(self.win.val_verdict.isHidden())
         legend = [text for _, text in self.win.scatter.legend_entries()]
         self.assertIn("Host observation", legend)
-        self.assertIn("Configured reference", legend)
+        self.assertIn("Reference interval", legend)
         for banned in (
             "Short interval",
             "Very short interval",
@@ -1065,8 +1064,8 @@ class CaptureVisualizationTests(unittest.TestCase):
             for key in _I18N_KEYS:
                 with self.subTest(lang=lang, key=key):
                     self.assertTrue(str(STRINGS[lang].get(key) or "").strip())
-        self.assertEqual(STRINGS["en"]["chart_stability_map"], "Click Stability Map")
-        self.assertEqual(STRINGS["en"]["chart_interval_trend"], "Interval Trend")
+        self.assertEqual(STRINGS["en"]["chart_stability_map"], "Click interval vs Hold duration")
+        self.assertEqual(STRINGS["en"]["chart_interval_trend"], "Elapsed time vs Click interval")
         self.assertEqual(STRINGS["en"]["legend_on_cadence"], "Observation")
         for lang in SUPPORTED_LANGS:
             self.assertNotIn("legend_association_window", STRINGS[lang])

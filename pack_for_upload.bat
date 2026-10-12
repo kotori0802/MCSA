@@ -16,7 +16,8 @@ echo   %OUT%
 echo.
 
 robocopy "%~dp0" "%OUT%" /E /XD reports .venv venv build dist __pycache__ _dist_upload .git ^
-    /XF *.pyc *.pyo ^
+    characterization_out .pytest_cache .mypy_cache .ruff_cache *.egg-info .eggs .idea .vscode ^
+    /XF *.pyc *.pyo *.log ~$* .env settings.local.json ^
     /NFL /NDL /NJH /NJS /nc /ns /np
 
 REM Ensure empty reports placeholder exists in upload bundle

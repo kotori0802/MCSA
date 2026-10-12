@@ -100,7 +100,7 @@ class IntervalTrendTests(unittest.TestCase):
         self.assertEqual(chart._guide_legend_items(), [])
         chart.target_beat_ms = 25.0
         labels = [label for _color, label in chart._guide_legend_items()]
-        self.assertEqual(labels, ["Configured reference"])
+        self.assertEqual(labels, ["Reference interval"])
 
 
 class ClickDataElapsedTests(unittest.TestCase):
@@ -263,7 +263,7 @@ class HistogramAxisLabelTests(unittest.TestCase):
         src = inspect.getsource(HistogramChart.paintEvent)
         self.assertIn('"axis_count"', src)
         self.assertNotIn('"clicks"', src)
-        self.assertEqual(STRINGS["en"]["axis_count"], "Count")
+        self.assertEqual(STRINGS["en"]["axis_count"], "Observation count")
         self.assertIn('"axis_count"', inspect.getsource(qt_app.MainWindow._chart_labels))
 
 

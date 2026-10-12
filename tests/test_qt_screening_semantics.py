@@ -9,12 +9,16 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QLabel, QLineEdit
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer.app import RULE_PRESETS
 from mouse_click_stability_analyzer.cadence import class_to_tags, classify_click
 from mouse_click_stability_analyzer.completed_result import RUN_STATUS_COMPLETE
@@ -184,9 +188,8 @@ class SetupScreeningPresentationTests(unittest.TestCase):
         self.assertTrue(self.win.lock_profile())
         snap = self.win.profile_locked_settings
         self.assertEqual(snap["fixture_reference_hz"], 40.0)
-        self.assertEqual(snap[qt_app.FIXTURE_TIMING_TOLERANCE_KEY], 1.5)
+        self.assertNotIn(qt_app.FIXTURE_TIMING_TOLERANCE_KEY, snap)
         self.assertEqual(self.win.hz_interval_label.text(), self.win._tr("reference_interval_derived", ms="25.00"))
-        self.assertNotEqual(snap[qt_app.FIXTURE_TIMING_TOLERANCE_KEY], snap["chatter_threshold_ms"])
 
     def test_legacy_defaults_are_stamped_not_shown_as_product_limits(self):
         defaults = qt_app.qt_custom_limit_defaults()
@@ -265,6 +268,7 @@ class MeasurementContainmentTests(unittest.TestCase):
         self.win.auto_stop_on.setChecked(True)
         self.win.auto_stop_sec_combo.setCurrentText("1")
         self.assertTrue(self.win.lock_profile())
+        apply_explicit_association(self.win, float(tol))
         self.assertTrue(self.win.arm_capture())
         t0 = float(self.win._arm_boundary_perf) + 0.001
         self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})

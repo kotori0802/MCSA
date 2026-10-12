@@ -17,25 +17,24 @@ Author: **Leo Cheng, PMP** · License: [MIT](LICENSE)
 | Step | Action |
 |------|--------|
 | 1 | `install.bat` → `run.bat` |
-| 2 | Choose **Manual** or **Fixture**, button, rules |
+| 2 | Choose **Manual** or **Fixture**, button, Reference Rate, optional interval comparison, Auto Stop ON/OFF |
 | 3 | Click in **Test Area** — first click starts recording |
 | 4 | **F5 / Esc** to stop (avoids contaminating data) |
-| 5 | **Finish & Generate Report** → HTML/JSON/CSV locally |
+| 5 | **Generate Report** → evidence JSON, events CSV, HTML and XLSX locally |
 
 ## Why I Built This
 
-Intermittent mouse click issues are difficult to explain with words or video alone. This project converts raw mouse events into measurable engineering evidence: press/release timing, hold duration, click intervals, cadence alignment, chatter/bounce indicators, and missed/excess events.
+Intermittent mouse click issues are difficult to explain with words or video alone. This project converts raw mouse events into measurable engineering evidence: press/release timing, hold duration and click intervals.
 
-The analyzer **separates potential DUT behavior from setup/fixture instability** to reduce false conclusions — a real double-click risk is not the same as a shaky fixture or wrong Hz setting.
+MCSA is **measurement only**. It records and visualizes what the host observed; it does not issue a PASS/FAIL verdict, a DUT score or a pass recommendation.
 
 ## What It Measures
 
-- Press / release pairing and hold time
-- Press interval and fixture cadence alignment
-- Chatter, bounce, and true extra-click classification
-- Missed / excess click counts vs expected cadence
-- DUT integrity score vs SETUP alignment score
-- Timing error (bias, σ, P99 |error|) for fixture profiles
+- **Click interval** — press-to-press time between host-observed presses
+- **Hold duration** — press-to-release time of each press
+- **Configured interval range** (optional, Fixture) — inclusive bounds around the Reference Interval, set as ± ms or ± %. Intervals are counted as Below / Within / Above the range. This is a presentation of the configured range, **not** a PASS/FAIL criterion.
+- **Auto Stop** — an explicit ON/OFF setting recorded in the evidence; ON stops recording after the configured duration
+- **Schedule Association** (optional, historical) — readable only in runs that explicitly configured a Schedule Association Window. Normal runs do not configure one, and MCSA does not recommend a window value.
 
 ## Requirements
 
@@ -77,8 +76,8 @@ Before publishing: run `clean_local.bat` to remove local test reports and build 
 2. Set Manual/Fixture, button, rules (left rail)
 3. Move cursor to **Test Area**, click target button to **start**
 4. Stop with **F5** or **Esc** (not the Stop button, to keep data clean)
-5. Review live charts + verdict → **New Run** or **Finish & Generate Report**
-6. Optional: **Compare Overlay** with a previous `*_detail.json`
+5. Review the Results charts (Elapsed time vs Click interval, Click interval distribution, Elapsed time vs Hold duration, Click interval vs Hold duration) → **New Run** or **Generate Report**
+6. Optional: **Compare Overlay** with a previous run's `mcsa_<run_id>_evidence.json` (from its `reports/mcsa_<run_id>/` package). Older flat `*_detail.json` files from before Stage 2C are still readable as legacy input but are no longer generated.
 
 Reports land in `reports/` on your machine only (never committed — see [RELEASING.md](RELEASING.md)).
 
@@ -88,21 +87,19 @@ This example uses a **fictional device** for teaching only. Your real reports ap
 
 | Field | Demo Mouse A example |
 |-------|----------------------|
-| DUT label | Demo Mouse A |
-| Profile | Fixture 10 Hz Strict |
-| Expected / Actual | 600 / 598 clicks |
-| Result | WARN |
-| Issue tags | `MISS_CLICK_WARN` (2 missed) |
-| DUT score | 96 |
-| SETUP score | 100 |
+| Device | Demo Mouse A |
+| Mode | Fixture, Reference Rate 3 Hz (Reference Interval 333.33 ms) |
+| Run Status | COMPLETE |
+| Analysis scope | Measurement only |
+| Host Presses / intervals | 58 / 57 |
+| Configured interval range | ±20 % → 266.67–400.00 ms |
+| Within / Below / Above | 30 / 14 / 13 (Within 52.63 %) |
 
 **How to interpret:**
 
-- **Low DUT + low extra count** → possible missed clicks or switch behavior
-- **`FIXTURE_HZ_MISMATCH`** → count gap is likely wrong Hz setting, not 149 extras
-- **High SETUP suspicion** → check fixture travel, probe point, or vibration first
-
-Open the HTML report: green = on-cadence cloud, red = extra/chatter, orange = rebound, black X = slow/miss.
+- **Run Status COMPLETE** means the capture finished and all four artifacts were written — it is not a pass.
+- **Within / Below / Above** describe where each click interval falls relative to the range you configured. They are not PASS/FAIL results.
+- The **Click interval distribution** colours bars by range position; bars never cross the range bounds.
 
 ## Project Structure
 
@@ -111,8 +108,8 @@ src/mouse_click_stability_analyzer/
   app.py          # Tk GUI + reporting (legacy / fallback)
   qt_shell/       # PySide6 portfolio shell (default when installed)
   core.py         # Metrics engine (importable)
-  cadence.py      # Classification & DUT/SETUP scoring
-  schema.py       # MCSA_REPORT_V1 schema
+  cadence.py      # Reference Rate / Reference Interval helpers
+  schema.py       # MCSA_EVIDENCE_V1 schema constants and tool version
   cli.py          # mcsa command
   adapters/       # Windows Raw Input capture
 ```

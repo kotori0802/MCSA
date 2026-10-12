@@ -21,6 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer import report_v2
 from mouse_click_stability_analyzer.completed_result import (
@@ -314,6 +315,8 @@ class QtRunStatusContainmentTests(unittest.TestCase):
         for key, value in limits.items():
             raise AssertionError(f"Setup no longer exposes custom-limit editors for {key}={value}")
         self.assertTrue(win.lock_profile())
+        if not manual and tol:
+            apply_explicit_association(win, float(tol))
         self.assertTrue(win.arm_capture())
         t0 = float(win._arm_boundary_perf) + 0.001
         win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})

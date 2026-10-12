@@ -9,12 +9,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer.host_evidence import HostEvidenceError, build_fixture_host_evidence
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
@@ -77,6 +81,9 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
     def _lock_and_arm(self, win=None):
         win = win or self.win
         self.assertTrue(win.lock_profile())
+        raw = win.timing_tol_edit.text().strip()
+        if raw:
+            apply_explicit_association(win, float(raw))
         self.assertTrue(win.arm_capture())
         win._cursor_over_capture_exclusion_ui = lambda: False
 
@@ -343,8 +350,8 @@ class QtHostEvidenceWiringTests(unittest.TestCase):
         run = self.win.session_runs[-1]
         self.assertNotIn("host_evidence", run)
         self.assertNotIn("host_evidence_snapshot", run["settings"])
-        report_source = Path(legacy_app.__file__).read_text(encoding="utf-8")
-        self.assertNotIn("host_evidence", report_source)
+        # Host Evidence may appear in evidence.json for historical/advanced
+        # association runs. It must not be stored on the in-app session archive.
 
 
 if __name__ == "__main__":

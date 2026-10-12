@@ -659,6 +659,17 @@ def _svg_interval_series(series: list[tuple[float, float]], reference: dict[str,
     return _svg(body, title)
 
 
+def _histogram_bar_class(item: dict[str, Any]) -> str:
+    position = item.get("position")
+    if position == POSITION_BELOW:
+        return "bar-below"
+    if position == POSITION_WITHIN:
+        return "bar-within"
+    if position == POSITION_ABOVE:
+        return "bar-above"
+    return "bar"
+
+
 def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None) -> str:
     title = _rt("report_chart_interval_distribution")
     if not bins:
@@ -675,9 +686,10 @@ def _svg_histogram(bins: list[dict[str, Any]], reference: dict[str, Any] | None)
         h = (int(b["count"]) / peak) * (_H - _B - _T)
         x0 = _scale(float(b["lo"]), lo, hi, _L, _W - _R)
         x1 = _scale(float(b["hi"]), lo, hi, _L, _W - _R)
+        cls = _histogram_bar_class(b)
         body += (
             f"<rect x='{x0 + 1:.1f}' y='{_H - _B - h:.1f}' width='{max(1.0, x1 - x0 - 2):.1f}' "
-            f"height='{h:.1f}' class='bar'><title>{float(b['lo']):.2f}–{float(b['hi']):.2f} ms: "
+            f"height='{h:.1f}' class='{cls}'><title>{float(b['lo']):.2f}–{float(b['hi']):.2f} ms: "
             f"{int(b['count'])}</title></rect>"
         )
     if reference:
@@ -765,6 +777,28 @@ def _chart_legend(reference: dict[str, Any] | None, host_swatch: str, *, markers
     return f"<div class='legend'>{''.join(items)}</div>"
 
 
+def _histogram_legend(bins: list[dict[str, Any]], reference: dict[str, Any] | None) -> str:
+    classified = any(
+        item.get("position") in (POSITION_BELOW, POSITION_WITHIN, POSITION_ABOVE) for item in bins or []
+    )
+    if classified:
+        items = [
+            f"<span class='li'><i class='sw sw-below'></i>{_rt("report_legend_below_configured_range")}</span>",
+            f"<span class='li'><i class='sw sw-within'></i>{_rt("report_legend_within_configured_range")}</span>",
+            f"<span class='li'><i class='sw sw-above'></i>{_rt("report_legend_above_configured_range")}</span>",
+        ]
+        if _configured_bounds(reference):
+            items.append(
+                f"<span class='li'><i class='sw sw-band'></i>{_rt("report_legend_configured_range")}</span>"
+            )
+        if reference:
+            items.append(
+                f"<span class='li'><i class='sw sw-ref'></i>{_rt("report_legend_configured_reference")} {_e(_reference_label(reference))}</span>"
+            )
+        return f"<div class='legend'>{''.join(items)}</div>"
+    return _chart_legend(reference, "sw-bar", markers=False)
+
+
 _CSS = """
 :root{--fg:#1f2933;--muted:#5f6b7a;--line:#d9dee5;--card:#fff;--bg:#f4f6f8;--accent:#2563eb}
 *{box-sizing:border-box}
@@ -804,6 +838,9 @@ svg .rl{font-size:12px;font-weight:600;fill:#15803d;paint-order:stroke;stroke:#f
 svg .band{fill:#6f9a7b;fill-opacity:.14}
 svg .bnd{stroke:#7f9c88;stroke-width:1}
 svg .bar{fill:#60a5fa}
+svg .bar-below{fill:#ff9500}
+svg .bar-within{fill:#60a5fa}
+svg .bar-above{fill:#ff3b30}
 svg .dot{fill:#2563eb;fill-opacity:.55}
 svg .out{fill:#dc2626}
 .legend{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:6px;font-size:12px;color:var(--muted)}
@@ -811,6 +848,9 @@ svg .out{fill:#dc2626}
 .sw{display:inline-block;flex:none;width:18px;height:10px}
 .sw-line{height:0;border-top:2px solid var(--accent)}
 .sw-bar{background:#60a5fa}
+.sw-below{background:#ff9500}
+.sw-within{background:#60a5fa}
+.sw-above{background:#ff3b30}
 .sw-dot{width:8px;height:8px;border-radius:50%;background:#2563eb;opacity:.7}
 .sw-out{width:8px;height:8px;background:#dc2626;transform:rotate(45deg)}
 .sw-ref{height:0;border-top:2px dashed #16a34a}
@@ -838,7 +878,7 @@ def render_report_html(model: dict[str, Any], view: dict[str, Any]) -> str:
         f"<figure><figcaption>{_rt("report_hist_press_interval_distribution", n=n)}</figcaption>"
         f"<p class='note'>{_e(_rt("report_hist_note"))}</p>"
         f"{_svg_histogram(analysis['histogram'], reference)}"
-        f"{_chart_legend(reference, 'sw-bar', markers=False)}</figure>"
+        f"{_histogram_legend(analysis['histogram'], reference)}</figure>"
         f"<figure><figcaption>{_rt("report_chart_hold_over_time")}</figcaption>"
         f"{_svg_hold_series(analysis.get('hold_series') or [])}</figure>"
         f"<figure><figcaption>{_rt("report_chart_hold_vs_interval")}</figcaption>{_svg_scatter(analysis['scatter_points'], reference)}"

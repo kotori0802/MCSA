@@ -52,7 +52,7 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(STRINGS["zh"]["nav_setup"], "設定")
         self.assertEqual(STRINGS["en"]["col_state"], "Timing observation")
         self.assertEqual(STRINGS["en"]["legend_host_observation"], "Host observation")
-        self.assertEqual(STRINGS["en"]["legend_configured_reference"], "Configured reference")
+        self.assertEqual(STRINGS["en"]["legend_configured_reference"], "Reference interval")
 
     def test_utf8_sig_bom(self):
         with tempfile.TemporaryDirectory() as raw:

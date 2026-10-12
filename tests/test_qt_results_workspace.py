@@ -12,12 +12,16 @@ from unittest import mock
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QAbstractItemView, QToolButton
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer.completed_result import (
     TIMING_ERROR_UNAVAILABLE_REASON,
@@ -166,6 +170,9 @@ class ResultsWorkspaceTests(unittest.TestCase):
 
     def _lock_and_arm(self):
         self.assertTrue(self.win.lock_profile())
+        raw = self.win.timing_tol_edit.text().strip()
+        if raw:
+            apply_explicit_association(self.win, float(raw))
         self.assertTrue(self.win.arm_capture())
 
     def _run(self, offsets, *, stop=True, auto_stop=False, keep_guard=False):
@@ -363,8 +370,8 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self.win.radio_manual.setChecked(True)
         self._run([0, 25, 50, 75])
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self._show_results_tab(1)
-        self.assertTrue(self.win.results_evidence_card.isVisibleTo(self.win))
+        evidence_index = self.win.results_tabs.indexOf(self.win.results_evidence_page)
+        self.assertFalse(self.win.results_tabs.isTabVisible(evidence_index))
         self.assertEqual(self.win.results_evidence_na.text(), self.win._tr("not_applicable_manual"))
         self.assertNotIn("HOST EVIDENCE", self.win.results_evidence_text.toPlainText())
         self.assertNotIn("Schedule windows", self.win.results_evidence_text.toPlainText())
@@ -374,8 +381,10 @@ class ResultsWorkspaceTests(unittest.TestCase):
         self._setup_fixture(auto_sec=None)
         self._run([0, 25, 50, 75])
         self.assertIsNone(self.win.host_evidence_snapshot)
-        self._show_results_tab(1)
-        self.assertEqual(self.win.results_evidence_na.text(), self.win._tr("not_applicable_no_duration"))
+        evidence_index = self.win.results_tabs.indexOf(self.win.results_evidence_page)
+        self.assertFalse(self.win.results_tabs.isTabVisible(evidence_index))
+        self.assertEqual(self.win.results_evidence_na.text(), self.win._tr("association_not_available"))
+        self.assertNotIn("Auto Stop", self.win.results_evidence_na.text())
         self.assertNotIn("Schedule windows", self.win.results_evidence_text.toPlainText())
 
     def test_language_switch_retranslates_without_rebuild(self):

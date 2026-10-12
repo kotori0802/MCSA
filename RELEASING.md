@@ -84,6 +84,20 @@ Or install Git later and switch to Path A.
 
 ---
 
+## Release candidate evidence
+
+RC acceptance requires a **live hardware run** (real mouse, Fixture or Manual) on the
+build being released, followed by Generate Report and a check of all four artifacts
+(`_evidence.json`, `_events.csv`, `_report.html`, `_report.xlsx`) and opening the XLSX
+in Microsoft Excel.
+
+A scripted run (simulated clicks driven through the Qt window) is acceptable only for
+artifact-generation, report-contract and chart title/axis regression checks. It is
+**not** hardware or live acceptance evidence. Scripted runs that place click
+timestamps in the future and force Auto Stop record `elapsed_s = null`; this is a
+property of the script, not of the live producer path, which records the real
+elapsed time.
+
 ## Before upload — manual check
 
 ```bat

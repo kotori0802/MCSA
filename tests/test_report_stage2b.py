@@ -97,7 +97,7 @@ class HistogramContractTests(unittest.TestCase):
         view = report_v2.build_report_view(model)
         self.assertEqual(view["interval_observation_count"], 3)
         html = render_report_html(model, view)
-        self.assertIn("Press Interval Distribution (N=3)", html)
+        self.assertIn("Click interval distribution (N=3)", html)
         self.assertIn("N is the number of interval observations included", html)
 
 
@@ -106,7 +106,7 @@ class MeasurementOnlyColumnsTests(unittest.TestCase):
         cols = click_data_columns(False)
         self.assertNotIn("Observation", cols)
         self.assertNotIn("Observation flag(s)", cols)
-        self.assertIn("Elapsed", cols)
+        self.assertIn("Elapsed time", cols)
         self.assertNotIn("Elapsed (ms)", cols)
         self.assertIn("Interval Δ vs ref. (ms)", cols)
         manual_cols = click_data_columns(True)
@@ -132,7 +132,7 @@ class MeasurementOnlyColumnsTests(unittest.TestCase):
             html = html_path.read_text(encoding="utf-8")
         self.assertNotIn("Observation", headers)
         self.assertNotIn("Observation flag(s)", headers)
-        self.assertEqual(headers[1], "Elapsed")
+        self.assertEqual(headers[1], "Elapsed time")
         self.assertNotIn("Click Data", html)
         self.assertNotIn("Observation flag(s)", html)
         self.assertIn("state", model["click_data"][0])

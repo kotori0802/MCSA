@@ -6,7 +6,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QPolygonF
-from PySide6.QtWidgets import QToolTip, QWidget
+from PySide6.QtWidgets import QScrollBar, QToolTip, QWidget
 
 from ..chart_domain import (
     DOMAIN_COUNT,
@@ -249,6 +249,8 @@ class _ChartBase(QWidget):
     LEFT = 58
     RIGHT = 16
     BOTTOM = 52
+    SCROLL_H = 14
+    SCROLL_STEPS = 10000
     SUBTITLE_H = 16
 
     def __init__(self, parent=None):
@@ -269,6 +271,11 @@ class _ChartBase(QWidget):
         self._panning = False
         self._pan_last: QPointF | None = None
         self.capture_duration_ms: float | None = None
+        self._syncing_x_scroll = False
+        self._x_scroll = QScrollBar(Qt.Orientation.Horizontal, self)
+        self._x_scroll.setVisible(False)
+        self._x_scroll.setAutoFillBackground(True)
+        self._x_scroll.valueChanged.connect(self._on_x_scroll)
         self.setMinimumHeight(200)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
@@ -324,7 +331,7 @@ class _ChartBase(QWidget):
             self.LEFT,
             top,
             max(1, self.width() - self.LEFT - self.RIGHT),
-            max(1, self.height() - top - self.BOTTOM),
+            max(1, self.height() - top - self.BOTTOM - self.SCROLL_H),
         )
 
     def fit_data(self) -> None:
@@ -337,6 +344,7 @@ class _ChartBase(QWidget):
         self._nav_home = home if home is not None and _valid_axis(home[0], home[1]) and _valid_axis(home[2], home[3]) else None
         self.unsetCursor()
         self.update()
+        self._sync_x_scroll()
 
     def reset_view(self) -> None:
         if self._nav_home is None:
@@ -352,6 +360,7 @@ class _ChartBase(QWidget):
         self.zoom_locked = True
         self._wheel_accum = 0
         self.update()
+        self._sync_x_scroll()
 
     def clear_navigation(self) -> None:
         self.zoom_locked = False
@@ -362,6 +371,7 @@ class _ChartBase(QWidget):
         self._pan_last = None
         self.set_pan_enabled(False)
         self.update()
+        self._sync_x_scroll()
 
     def set_pan_enabled(self, enabled: bool) -> None:
         self._pan_enabled = bool(enabled)
@@ -432,6 +442,7 @@ class _ChartBase(QWidget):
         self._user_view = clamped
         self.zoom_locked = True
         self.update()
+        self._sync_x_scroll()
 
     def _ensure_nav_home(self) -> None:
         if self._nav_home is not None:
@@ -439,6 +450,67 @@ class _ChartBase(QWidget):
         home = self.autofit_bounds()
         if home is not None and _valid_axis(home[0], home[1]) and _valid_axis(home[2], home[3]):
             self._nav_home = home
+
+    def _fitted_x_domain(self) -> tuple[float, float] | None:
+        content = self.autofit_bounds()
+        if content is None or not _valid_axis(content[0], content[1]):
+            return None
+        return content[0], content[1]
+
+    def _layout_x_scroll(self) -> None:
+        y = max(0, self.height() - self.SCROLL_H - 2)
+        self._x_scroll.setGeometry(self.LEFT, y, max(1, self.width() - self.LEFT - self.RIGHT), self.SCROLL_H)
+
+    def _sync_x_scroll(self) -> None:
+        if self._syncing_x_scroll:
+            return
+        self._layout_x_scroll()
+        domain = self._fitted_x_domain()
+        visible = self.visible_bounds()
+        if domain is None or visible is None:
+            self._x_scroll.setVisible(False)
+            return
+        xlo, xhi = domain
+        vlo, vis_hi = visible[0], visible[1]
+        domain_span = xhi - xlo
+        vis_span = vis_hi - vlo
+        if domain_span <= 0 or vis_span <= 0 or vis_span >= domain_span * 0.999:
+            self._x_scroll.setVisible(False)
+            return
+        usable = domain_span - vis_span
+        page = max(1, int(round(vis_span / domain_span * self.SCROLL_STEPS)))
+        maximum = max(1, self.SCROLL_STEPS - page)
+        value = int(round((vlo - xlo) / usable * maximum)) if usable > 0 else 0
+        self._syncing_x_scroll = True
+        try:
+            self._x_scroll.setVisible(True)
+            self._x_scroll.setRange(0, maximum)
+            self._x_scroll.setPageStep(page)
+            self._x_scroll.setSingleStep(max(1, page // 16))
+            self._x_scroll.setValue(max(0, min(maximum, value)))
+        finally:
+            self._syncing_x_scroll = False
+
+    def _on_x_scroll(self, value: int) -> None:
+        if self._syncing_x_scroll:
+            return
+        domain = self._fitted_x_domain()
+        visible = self.visible_bounds()
+        if domain is None or visible is None:
+            return
+        xlo, xhi = domain
+        vis_span = visible[1] - visible[0]
+        domain_span = xhi - xlo
+        if vis_span <= 0 or vis_span >= domain_span:
+            return
+        usable = domain_span - vis_span
+        maximum = max(1, self._x_scroll.maximum())
+        new_lo = xlo + (value / maximum) * usable
+        self._commit_view((new_lo, new_lo + vis_span, visible[2], visible[3]))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_x_scroll()
 
     def _event_local_pos(self, event) -> QPointF:
         if hasattr(event, "position"):
@@ -681,15 +753,15 @@ class _ChartBase(QWidget):
     def _range_legend_items(self) -> list[tuple[str, str]]:
         if not self.configured_range:
             return []
-        return [(self.palette.range_edge, self._label("legend_configured_range", "Configured range"))]
+        return [(self.palette.range_edge, self._label("legend_configured_range", "Configured interval range"))]
 
     def _comparison_legend_items(self) -> list[tuple[str, str]]:
         if not self.configured_range:
             return []
         pal = self.palette
         return self._range_legend_items() + [
-            (pal.on_cadence, self._label("legend_within_configured_range", "Within configured range")),
-            (pal.extra, self._label("legend_outside_configured_range", "Outside configured range")),
+            (pal.on_cadence, self._label("legend_within_configured_range", "Within configured interval range")),
+            (pal.extra, self._label("legend_outside_configured_range", "Outside configured interval range")),
         ]
 
     def _guide_legend_items(self) -> list[tuple[str, str]]:
@@ -699,7 +771,7 @@ class _ChartBase(QWidget):
             return items
         if self.factual_guides or self.measurement_only_presentation:
             if self.target_beat_ms:
-                items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+                items.append((pal.target_line, self._label("legend_configured_reference", "Reference interval")))
         else:
             if self.target_beat_ms:
                 items.append((pal.target_line, self._label("legend_target", "Target beat")))
@@ -779,15 +851,15 @@ class _ChartBase(QWidget):
             POSITION_ABOVE: "range_position_above",
         }.get(position)
         pos_label = {
-            POSITION_WITHIN: "Within configured range",
-            POSITION_BELOW: "Below configured range",
-            POSITION_ABOVE: "Above configured range",
+            POSITION_WITHIN: "Within configured interval range",
+            POSITION_BELOW: "Below configured interval range",
+            POSITION_ABOVE: "Above configured interval range",
         }.get(position, "")
         lines = [
             self._label("hover_observed_interval", "Observed interval: {value} ms").replace(
                 "{value}", f"{interval_ms:.2f}"
             ),
-            self._label("hover_configured_range", "Configured range: {lo}–{hi} ms")
+            self._label("hover_configured_range", "Configured interval range: {lo}–{hi} ms")
             .replace("{lo}", f"{lo:.2f}")
             .replace("{hi}", f"{hi:.2f}"),
         ]
@@ -959,7 +1031,7 @@ class ScatterChart(_ChartBase):
         super().__init__(parent)
         self.points: list[tuple] = []
         self.overlay_points: list[tuple] = []
-        self.title = "Hold vs Interval"
+        self.title = "Click interval vs Hold duration"
         self.setMinimumHeight(260)
 
     def set_points(
@@ -980,6 +1052,7 @@ class ScatterChart(_ChartBase):
         self.target_beat_ms = target_beat_ms
         self.configured_range = configured_range
         self.update()
+        self._sync_x_scroll()
 
     def point_range_positions(self) -> list[str]:
         """Range positions for the base points only; overlay is never classified."""
@@ -1158,8 +1231,8 @@ class ScatterChart(_ChartBase):
             plot,
             x_ticks=nice_ticks(xmin, xmax),
             y_ticks=nice_ticks(ymin, ymax),
-            x_label=self._label("axis_interval_ms", "Interval (ms)"),
-            y_label=self._label("axis_hold_ms", "Hold (ms)"),
+            x_label=self._label("axis_interval_ms", "Click interval (ms)"),
+            y_label=self._label("axis_hold_ms", "Hold duration (ms)"),
             map_x=map_x,
             map_y=map_y,
         )
@@ -1193,13 +1266,13 @@ class IntervalChart(_ChartBase):
 
     y_domain = DOMAIN_INTERVAL
     y_label_key = "axis_interval_ms"
-    y_label_default = "Interval (ms)"
+    y_label_default = "Click interval (ms)"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.series: list[tuple[float, float]] = []
         self.overlay_series: list[tuple[float, float]] = []
-        self.title = "Interval over time"
+        self.title = "Elapsed time vs Click interval"
         self.setMinimumHeight(220)
 
     def set_series(
@@ -1220,6 +1293,7 @@ class IntervalChart(_ChartBase):
         self.capture_duration_ms = capture_duration_ms
         self.configured_range = configured_range
         self.update()
+        self._sync_x_scroll()
 
     def _min_spans(self) -> tuple[float, float]:
         return INTERVAL_X_MIN_SPAN_MS, INTERVAL_Y_MIN_SPAN_MS
@@ -1273,9 +1347,7 @@ class IntervalChart(_ChartBase):
         return plot, bounds, map_x_ms, map_x_s, map_y
 
     def _interval_legend_label(self) -> str:
-        if self.factual_guides:
-            return self._label("chart_interval_trend", "Interval Trend")
-        return self._label("chart_interval", "Interval over time")
+        return self._label("legend_click_interval", "Click interval")
 
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
@@ -1313,9 +1385,9 @@ class IntervalChart(_ChartBase):
         xmin_ms, xmax_ms, ymin, ymax = bounds
         span_ms = max(xmax_ms - xmin_ms, abs(xmax_ms), abs(xmin_ms))
         x_label = (
-            self._label("axis_elapsed_s", "Elapsed (s)")
+            self._label("axis_elapsed_s", "Elapsed time (s)")
             if elapsed_axis_uses_seconds(span_ms)
-            else self._label("axis_elapsed", "Elapsed")
+            else self._label("axis_elapsed", "Elapsed time")
         )
 
         self._draw_axes(
@@ -1433,11 +1505,11 @@ class HoldChart(IntervalChart):
 
     y_domain = DOMAIN_HOLD
     y_label_key = "axis_hold_ms"
-    y_label_default = "Hold (ms)"
+    y_label_default = "Hold duration (ms)"
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.title = "Hold over time"
+        self.title = "Elapsed time vs Hold duration"
 
     def set_series(
         self,
@@ -1459,7 +1531,7 @@ class HoldChart(IntervalChart):
         )
 
     def _interval_legend_label(self) -> str:
-        return self._label("hold_over_time", "Hold over time")
+        return self._label("legend_hold_duration", "Hold duration")
 
 
 HIST_X_MIN_SPAN_MS = 8.0
@@ -1473,7 +1545,7 @@ class HistogramChart(_ChartBase):
         super().__init__(parent)
         self.bins: list[dict] = []
         self.overlay_bins: list[dict] = []
-        self.title = "Interval distribution"
+        self.title = "Click interval distribution"
         self.target_beat_ms: float | None = None
         self.setMinimumHeight(220)
 
@@ -1493,6 +1565,7 @@ class HistogramChart(_ChartBase):
         self.target_beat_ms = target_beat_ms
         self.configured_range = configured_range
         self.update()
+        self._sync_x_scroll()
 
     def _min_spans(self) -> tuple[float, float]:
         return HIST_X_MIN_SPAN_MS, HIST_Y_MIN_SPAN
@@ -1527,14 +1600,47 @@ class HistogramChart(_ChartBase):
             xmax = xmin + 1.0
         return xmin, xmax, 0.0, max(1.0, ymax * 1.15)
 
+    def _classified(self) -> bool:
+        return any(item.get("position") in (POSITION_BELOW, POSITION_WITHIN, POSITION_ABOVE) for item in self.bins)
+
+    def _bar_color(self, item: dict) -> str:
+        pal = self.palette
+        if not self._classified():
+            return pal.interval_fill
+        position = item.get("position")
+        if position == POSITION_BELOW:
+            return pal.chatter
+        if position == POSITION_ABOVE:
+            return pal.extra
+        return pal.interval_fill
+
+    def _bar_edge(self, item: dict) -> str:
+        pal = self.palette
+        if not self._classified():
+            return pal.interval_line
+        position = item.get("position")
+        if position == POSITION_BELOW:
+            return pal.chatter
+        if position == POSITION_ABOVE:
+            return pal.extra
+        return pal.interval_line
+
     def legend_entries(self) -> list[tuple[str, str]]:
         pal = self.palette
-        items = [(pal.interval_line, self._label("interval_distribution", "Interval distribution"))]
-        items.extend(self._range_legend_items())
+        if self._classified():
+            items = [
+                (pal.chatter, self._label("legend_below_configured_range", "Below configured interval range")),
+                (pal.interval_line, self._label("legend_within_configured_range", "Within configured interval range")),
+                (pal.extra, self._label("legend_above_configured_range", "Above configured interval range")),
+            ]
+            items.extend(self._range_legend_items())
+        else:
+            items = [(pal.interval_line, self._label("interval_distribution", "Click interval distribution"))]
+            items.extend(self._range_legend_items())
         if self.overlay_bins:
             items.append((pal.overlay, self._label("legend_overlay", "Overlay (A)")))
         if self.target_beat_ms:
-            items.append((pal.target_line, self._label("legend_configured_reference", "Configured reference")))
+            items.append((pal.target_line, self._label("legend_configured_reference", "Reference interval")))
         return items
 
     def paintEvent(self, event):
@@ -1573,8 +1679,8 @@ class HistogramChart(_ChartBase):
             plot,
             x_ticks=nice_ticks(xmin, xmax),
             y_ticks=nice_ticks(ymin, ymax),
-            x_label=self._label("axis_interval_ms", "Interval (ms)"),
-            y_label=self._label("axis_count", "Count"),
+            x_label=self._label("axis_interval_ms", "Click interval (ms)"),
+            y_label=self._label("axis_count", "Observation count"),
             map_x=map_x,
             map_y=map_y,
         )
@@ -1588,8 +1694,8 @@ class HistogramChart(_ChartBase):
             x = map_x(lo)
             w = max(2.0, map_x(hi) - x - 1)
             y = map_y(count)
-            p.fillRect(QRectF(x, y, min(w, bar_w), plot.bottom() - y), QColor(pal.interval_fill))
-            p.setPen(QPen(QColor(pal.interval_line), 1))
+            p.fillRect(QRectF(x, y, min(w, bar_w), plot.bottom() - y), QColor(self._bar_color(item)))
+            p.setPen(QPen(QColor(self._bar_edge(item)), 1))
             p.drawRect(QRectF(x, y, min(w, bar_w), plot.bottom() - y))
         if self.overlay_bins:
             color = QColor(pal.overlay)

@@ -11,12 +11,16 @@ from unittest import mock
 
 from PySide6.QtCore import QPoint
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer.host_evidence import build_fixture_host_evidence
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
@@ -140,7 +144,7 @@ class ProfileLockArmTests(unittest.TestCase):
         self.assertTrue(self.win.lock_profile())
         snap = self.win.profile_locked_settings
         self.assertEqual(snap["fixture_reference_hz"], 5.0)
-        self.assertEqual(snap["fixture_timing_tolerance_ms"], 2.0)
+        self.assertNotIn("fixture_timing_tolerance_ms", snap)
         self.assertEqual(snap["duration_sec"], 10.0)
         self.assertFalse(self.win.running)
         self.assertIsNone(self.win.locked)
@@ -153,10 +157,10 @@ class ProfileLockArmTests(unittest.TestCase):
         self.assertIsNone(self.win.profile_locked_settings)
         self.assertEqual(self.win._lifecycle_state(), "draft")
 
-    def test_missing_timing_tolerance_blocks_lock(self):
+    def test_missing_timing_tolerance_does_not_block_lock(self):
         self._fixture(tol="")
-        self.assertFalse(self.win.lock_profile())
-        self.assertIsNone(self.win.profile_locked_settings)
+        self.assertTrue(self.win.lock_profile())
+        self.assertNotIn("fixture_timing_tolerance_ms", self.win.profile_locked_settings)
 
     def _assert_setup_error_visible(self, key):
         self.assertIs(self.win.page_stack.currentWidget(), self.win.page_setup)
@@ -165,24 +169,27 @@ class ProfileLockArmTests(unittest.TestCase):
         self.assertEqual(self.win.lbl_profile_status.text(), self.win._tr(key))
 
     def test_validation_error_visible_on_setup_without_navigation(self):
-        self._fixture(tol="")
+        self._fixture()
+        self.win.hz_combo.setCurrentText("")
         self.assertEqual(self.win._current_page, "setup")
         self.assertFalse(self.win.lock_profile())
         self.assertIsNone(self.win.profile_locked_settings)
         self.assertEqual(self.win._current_page, "setup")
-        self._assert_setup_error_visible("fixture_timing_tolerance_invalid")
+        self._assert_setup_error_visible("reference_rate_invalid")
 
     def test_validation_error_retranslates_on_language_switch(self):
-        self._fixture(tol="")
+        self._fixture()
+        self.win.hz_combo.setCurrentText("")
         self.assertFalse(self.win.lock_profile())
         self.win.lang_combo.setCurrentIndex(self.win.lang_combo.findData("zh"))
         self.assertEqual(
             self.win.lbl_profile_status.text(),
-            STRINGS["zh"]["fixture_timing_tolerance_invalid"],
+            STRINGS["zh"]["reference_rate_invalid"],
         )
 
     def test_successful_lock_clears_setup_validation_error(self):
-        self._fixture(tol="")
+        self._fixture()
+        self.win.hz_combo.setCurrentText("")
         self.assertFalse(self.win.lock_profile())
         self._fixture(tol="2")
         self.assertTrue(self.win.lock_profile())
@@ -190,7 +197,8 @@ class ProfileLockArmTests(unittest.TestCase):
         self.assertIsNone(self.win._profile_validation_error_key)
 
     def test_edit_profile_returns_clean_draft_status(self):
-        self._fixture(tol="")
+        self._fixture()
+        self.win.hz_combo.setCurrentText("")
         self.assertFalse(self.win.lock_profile())
         self._fixture(tol="2")
         self.assertTrue(self.win.lock_profile())
@@ -198,10 +206,10 @@ class ProfileLockArmTests(unittest.TestCase):
         self.assertEqual(self.win._current_page, "setup")
         self.assertEqual(self.win.lbl_profile_status.text(), self.win._tr("profile_status_draft"))
 
-    def test_timing_tolerance_zero_locks(self):
+    def test_hidden_timing_tolerance_zero_is_not_stamped(self):
         self._fixture(tol="0")
         self.assertTrue(self.win.lock_profile())
-        self.assertEqual(self.win.profile_locked_settings["fixture_timing_tolerance_ms"], 0.0)
+        self.assertNotIn("fixture_timing_tolerance_ms", self.win.profile_locked_settings)
 
     def test_invalid_auto_stop_blocks_only_when_on(self):
         self._fixture(auto_sec=None)
@@ -230,7 +238,7 @@ class ProfileLockArmTests(unittest.TestCase):
         self.win.timing_tol_edit.setText("9")
         self.win.device_edit.setText("DUT-B")
         self.assertEqual(snap["fixture_reference_hz"], 40.0)
-        self.assertEqual(snap["fixture_timing_tolerance_ms"], 2.0)
+        self.assertNotIn("fixture_timing_tolerance_ms", snap)
         self.assertEqual(self.win.profile_locked_target, "DUT-A")
         self.assertIs(self.win.profile_locked_settings, snap)
 
@@ -575,6 +583,7 @@ class ProfileLockArmTests(unittest.TestCase):
         self._fixture(hz="40", auto_sec="10")
         with mock.patch.object(qt_app, "build_fixture_host_evidence", wraps=build_fixture_host_evidence) as builder:
             self.assertTrue(self.win.lock_profile())
+            apply_explicit_association(self.win, 2.0)
             self._arm_now()
             self._click()
             t1 = self.win.start_time + 0.025

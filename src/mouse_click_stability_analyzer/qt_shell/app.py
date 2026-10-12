@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QScrollArea,
+    QScrollBar,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -603,13 +604,19 @@ def stamp_qt_fixture_timing_tolerance(
     manual: bool,
     tolerance_ms: float | None,
 ) -> dict[str, Any]:
-    """Stamp the Schedule Association Window (``fixture_timing_tolerance_ms``) after legacy normalize.
+    """Stamp the Schedule Association Window after legacy normalize.
 
-    None means not applicable (Manual) or not configured; 0.0 is a real
-    configured tolerance and is never used as a placeholder.
+    Manual: JSON ``null`` (not applicable). Unconfigured Fixture: key absent
+    (not W=0). A finite number including ``0.0`` is an explicit configured window.
     """
     out = dict(settings)
-    out[FIXTURE_TIMING_TOLERANCE_KEY] = None if manual or tolerance_ms is None else float(tolerance_ms)
+    if manual:
+        out[FIXTURE_TIMING_TOLERANCE_KEY] = None
+        return out
+    if tolerance_ms is None:
+        out.pop(FIXTURE_TIMING_TOLERANCE_KEY, None)
+        return out
+    out[FIXTURE_TIMING_TOLERANCE_KEY] = float(tolerance_ms)
     return out
 
 
@@ -755,10 +762,8 @@ def locked_profile_preview_rows(
         hz = settings.get("fixture_reference_hz")
         tol = settings.get(FIXTURE_TIMING_TOLERANCE_KEY)
         rows.append((tr("preview_reference_rate"), f"{float(hz):g} Hz" if isinstance(hz, (int, float)) else "—"))
-        rows.append((
-            tr("preview_timing_tolerance"),
-            format_association_window_ms(tol) if isinstance(tol, (int, float)) else "—",
-        ))
+        if isinstance(tol, (int, float)) and not isinstance(tol, bool):
+            rows.append((tr("preview_timing_tolerance"), format_association_window_ms(tol)))
         comparison = freeze_interval_comparison(settings, manual=False)
         if comparison.get("enabled"):
             basis = comparison["basis"]
@@ -1207,6 +1212,8 @@ class MainWindow(QMainWindow):
             "axis_count", "hold_vs_interval", "hold_over_time", "legend_configured_range",
             "hover_click", "hover_interval", "hover_hold", "hover_interval_delta",
             "legend_within_configured_range", "legend_outside_configured_range",
+            "legend_below_configured_range", "legend_above_configured_range",
+            "legend_click_interval", "legend_hold_duration",
             "hover_observed_interval", "hover_configured_range", "hover_position",
             "hover_distance_above", "hover_distance_below",
             "range_position_below", "range_position_above",
@@ -1455,6 +1462,9 @@ class MainWindow(QMainWindow):
         self.timing_tol_edit.setPlaceholderText("e.g. 2")
         self._setup_field(self.timing_tol_edit)
         config_l.addWidget(self.timing_tol_edit)
+        # Stage 2E: Schedule Association is optional/historical, not part of normal Setup.
+        for widget in (self.lbl_schedule_association, self.timing_tol_label, self.timing_tol_edit):
+            widget.hide()
         self.assoc_context_box = QWidget()
         self.assoc_context_box.setObjectName("AssociationContext")
         assoc_grid = QGridLayout(self.assoc_context_box)
@@ -1483,6 +1493,7 @@ class MainWindow(QMainWindow):
         self.assoc_derived_note.setWordWrap(True)
         assoc_grid.addWidget(self.assoc_derived_note, 5, 0, 1, 2)
         config_l.addWidget(self.assoc_context_box)
+        self.assoc_context_box.hide()
         self.hz_combo.currentTextChanged.connect(self._refresh_association_context)
         self.timing_tol_edit.textChanged.connect(self._refresh_association_context)
 
@@ -1852,6 +1863,7 @@ class MainWindow(QMainWindow):
         viz_l.addWidget(self.btn_chart_zoom_in)
         viz_l.addWidget(self.btn_chart_zoom_out)
         viz_l.addWidget(self.btn_chart_reset)
+        self.btn_chart_reset.hide()
         self.capture_viz_bar = viz
         self.capture_viz_toolbar = viz
         inner_l.addWidget(viz)
@@ -2032,6 +2044,7 @@ class MainWindow(QMainWindow):
         view_row.addWidget(self.btn_results_chart_zoom_in)
         view_row.addWidget(self.btn_results_chart_zoom_out)
         view_row.addWidget(self.btn_results_chart_reset)
+        self.btn_results_chart_reset.hide()
         analysis_header.addLayout(view_row)
         self.btn_overlay = QPushButton("Compare Overlay")
         self.btn_overlay.setObjectName("Secondary")
@@ -3137,11 +3150,11 @@ class MainWindow(QMainWindow):
         self.hz_label.setVisible(not manual)
         self.hz_combo.setVisible(not manual)
         self.hz_interval_label.setVisible(not manual)
-        self.timing_tol_label.setVisible(not manual)
-        self.timing_tol_edit.setVisible(not manual)
-        self.assoc_context_box.setVisible(not manual)
+        self.timing_tol_label.setVisible(False)
+        self.timing_tol_edit.setVisible(False)
+        self.assoc_context_box.setVisible(False)
         if getattr(self, "lbl_schedule_association", None) is not None:
-            self.lbl_schedule_association.setVisible(not manual)
+            self.lbl_schedule_association.setVisible(False)
         if getattr(self, "interval_cmp_box", None) is not None:
             self.interval_cmp_box.setVisible(not manual)
         self._sync_auto_stop_widgets()
@@ -3295,10 +3308,6 @@ class MainWindow(QMainWindow):
                 parse_reference_rate_hz(self.hz_combo.currentText())
             except ValueError as exc:
                 raise ProfileValidationError("reference_rate_invalid") from exc
-            try:
-                parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
-            except ValueError as exc:
-                raise ProfileValidationError("fixture_timing_tolerance_invalid") from exc
             if self._interval_comparison_enabled_ui():
                 try:
                     hz = parse_reference_rate_hz(self.hz_combo.currentText())
@@ -3485,7 +3494,13 @@ class MainWindow(QMainWindow):
             self.results_comparison_summary.hide()
             self.results_evidence_na.show()
             self.results_evidence_body.hide()
+            self._set_evidence_tab_visible(False)
             self.results_click_table.setRowCount(0)
+            self._results_nav_run_id = None
+            self._results_view_run_id = None
+            if getattr(self, "results_interval_chart", None) is not None:
+                for chart in self._results_nav_charts():
+                    chart.clear_navigation()
             return
         model = facts["model"]
         self.val_clicks.setText(str(int(model["run"]["host_press_count"])))
@@ -3540,18 +3555,29 @@ class MainWindow(QMainWindow):
         self.results_comparison_summary.setText(f"{counts}\n{pct}")
         self.results_comparison_summary.show()
 
+    def _association_unavailable_text(self, model: dict[str, Any]) -> str:
+        if model["run"]["manual"]:
+            return self._tr("not_applicable_manual")
+        return self._tr("association_not_available")
+
+    def _set_evidence_tab_visible(self, visible: bool) -> None:
+        index = self.results_tabs.indexOf(self.results_evidence_page)
+        if index < 0:
+            return
+        if not visible and self.results_tabs.currentIndex() == index:
+            self.results_tabs.setCurrentIndex(0)
+        self.results_tabs.setTabVisible(index, visible)
+
     def _populate_evidence_tab(self, model: dict[str, Any]) -> None:
         snapshot = model["host_evidence"]["snapshot"]
         self.lbl_results_evidence.setText(self._tr("results_host_evidence_section").upper())
+        self._set_evidence_tab_visible(snapshot is not None)
         if snapshot is None:
             self.results_evidence_body.hide()
             self.results_occupancy_bar.hide()
             self.results_evidence_note.hide()
             self.results_evidence_na.show()
-            if model["run"]["manual"]:
-                self.results_evidence_na.setText(self._tr("not_applicable_manual"))
-            else:
-                self.results_evidence_na.setText(self._tr("not_applicable_no_duration"))
+            self.results_evidence_na.setText(self._association_unavailable_text(model))
             self.results_evidence_text.setPlainText(self.results_evidence_na.text())
             return
         self.results_evidence_na.hide()
@@ -3836,7 +3862,15 @@ class MainWindow(QMainWindow):
         combo.addItem(self._tr("interval_distribution"), "distribution")
         combo.addItem(self._tr("hold_over_time"), "hold")
         combo.addItem(self._tr("hold_vs_interval"), "scatter")
-        if not model["run"]["manual"] and model["host_evidence"]["snapshot"] is not None:
+        snapshot = (model.get("host_evidence") or {}).get("snapshot")
+        tol = (model.get("run") or {}).get("timing_tolerance_ms")
+        association_configured = (
+            not model["run"]["manual"]
+            and snapshot is not None
+            and isinstance(tol, (int, float))
+            and not isinstance(tol, bool)
+        )
+        if association_configured:
             combo.addItem(self._tr("timing_error"), "timing")
         index = combo.findData(current) if current else -1
         if index < 0:
@@ -3862,7 +3896,10 @@ class MainWindow(QMainWindow):
         overlay_ann = annotate_events(list(self.overlay_events), model["run"]["settings"]) if self.overlay_events else []
         ov_pts, ov_series = self._chart_points(overlay_ann)
         ov_intervals = [pt[1] for pt in ov_series]
-        current_hist, overlay_hist = paired_interval_histograms(analysis["intervals"], ov_intervals)
+        current_hist, overlay_hist = paired_interval_histograms(
+            analysis["intervals"], ov_intervals,
+            contract=self._completed_interval_comparison(model),
+        )
         pal = get_palette(self.theme)
         run_id = str((model.get("run") or {}).get("run_id") or "")
         reset_nav = getattr(self, "_results_nav_run_id", None) != run_id
@@ -3920,7 +3957,7 @@ class MainWindow(QMainWindow):
         snapshot = model["host_evidence"]["snapshot"]
         self.results_timing_title.setText(self._tr("timing_error").upper())
         if snapshot is None:
-            text = self._tr("not_applicable_manual") if model["run"]["manual"] else self._tr("not_applicable_no_duration")
+            text = self._association_unavailable_text(model)
         else:
             matching = snapshot["matching"]
             counts = snapshot["counts"]
@@ -4059,13 +4096,7 @@ class MainWindow(QMainWindow):
         stamped = stamp_qt_reference_rate(contained, manual=manual, reference_rate_hz=hz)
         stamped = stamp_qt_custom_limit_metadata(stamped, manual=manual)
         stamped = stamp_qt_explicit_limits(stamped, limits)
-        tolerance_ms: float | None = None
-        if not manual:
-            try:
-                tolerance_ms = parse_fixture_timing_tolerance_ms(self.timing_tol_edit.text())
-            except ValueError:
-                tolerance_ms = None
-        stamped = stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=tolerance_ms)
+        stamped = stamp_qt_fixture_timing_tolerance(stamped, manual=manual, tolerance_ms=None)
         stamped = stamp_qt_auto_stop_enabled(stamped, enabled=self.auto_stop_on.isChecked())
         cmp_value = None
         try:

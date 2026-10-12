@@ -27,7 +27,7 @@ Before editing a term, read its `note` and `help`. Do not redefine that term’s
 | Schedule Association Window | ± window used to associate a Host observation with a schedule slot | DUT acceptance tolerance, PASS/FAIL threshold |
 | Reference Rate | Configured nominal rate | Fixture Frequency / Fixture Hz wording, a measured cadence |
 | Reference Interval | 1000 / Reference Rate (Setup / report test info) | Observed Interval, matched timing error |
-| Configured reference | Chart comparison marker | Product acceptance target |
+| Configured reference (`term.configured_reference`, shown as “Reference interval”) | Chart comparison marker | Product acceptance target |
 | Host observation | Accepted Host-recorded press | PASS, a “good click” |
 | Measurement only | No Screening or Validation Profile applied | A run result state |
 | Association statuses | Matcher evidence (matched / not matched / ambiguous / outside capture) | DUT PASS/FAIL |

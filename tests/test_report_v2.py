@@ -16,9 +16,12 @@ from unittest import mock
 
 from PySide6.QtCore import QCoreApplication, QEvent
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -28,6 +31,7 @@ from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer import report_v2
 from mouse_click_stability_analyzer.completed_result import build_completed_result_model
 from mouse_click_stability_analyzer.overlay_io import extract_overlay_events, load_overlay_payload
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer.qt_shell import app as qt_app
 
 _RETIRED = ("MISS_CLICK_WARN", "MISS_CLICK_FAIL", "EXCESS_CLICK_COUNT_WARN", "EXCESS_CLICK_COUNT_FAIL")
@@ -94,7 +98,11 @@ _PHYSICAL_CLAIM_CODES = (
     "MISS_OR_SLOW", "HIGH_PROBABILITY_DOUBLE_CLICK", "TRUE_EXTRA_CLICK", "INCOMPLETE_REBOUND",
     "FIXTURE_ACTUATION_TOO_SHORT", "SETUP_ALIGNMENT_SUSPECT", "FIXTURE_HZ_MISMATCH",
 )
-_CHART_TITLES = ("Interval over time", "Interval distribution", "Hold vs Interval")
+_CHART_TITLES = (
+    "Elapsed time vs Click interval",
+    "Click interval distribution",
+    "Click interval vs Hold duration",
+)
 _REF_MS = 1000.0 / 5.6
 _GOLDEN_STEP_MS = 174.0
 _MANUAL_OFFSETS = [0, 300, 610, 905, 1220, 1500, 1790, 2120, 2400, 2715]
@@ -276,6 +284,8 @@ class ReportV2QtTests(unittest.TestCase):
                 self.win.auto_stop_on.setChecked(True)
                 self.win.auto_stop_sec_combo.setCurrentText(auto_sec)
         self.assertTrue(self.win.lock_profile())
+        if not manual:
+            apply_explicit_association(self.win, 2.0)
         self.assertTrue(self.win.arm_capture())
         t0 = float(self.win._arm_boundary_perf) + 0.001
         self.win._begin_session_from_first_click("Left", t0, t0 + 0.04, {})
@@ -389,9 +399,9 @@ class ReportV2QtTests(unittest.TestCase):
             self.assertEqual(xlsx_kv[label], value, label)
         self.assertEqual(html_kv["Host Press count"], "58")
         self.assertEqual(xlsx_kv["Host Press count"], 58)
-        self.assertIn("Interval over time", html_text)
-        self.assertIn("Interval distribution", html_text)
-        self.assertIn("Hold vs Interval", html_text)
+        self.assertIn("Elapsed time vs Click interval", html_text)
+        self.assertIn("Click interval distribution", html_text)
+        self.assertIn("Click interval vs Hold duration", html_text)
 
     def test_host_evidence_numbers_match_snapshot_without_prose(self):
         facts, paths = self._golden()
@@ -445,14 +455,14 @@ class ReportV2QtTests(unittest.TestCase):
         html_text, _ = self._artifacts(paths)
         figures = _html_figures(html_text)
         captions = tuple(figures)
-        self.assertEqual(captions[0], "Interval over time")
-        self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
-        self.assertEqual(captions[2], "Hold over time")
-        self.assertEqual(captions[3], "Hold vs Interval")
-        hold_body = figures.pop("Hold over time")
+        self.assertEqual(captions[0], "Elapsed time vs Click interval")
+        self.assertTrue(captions[1].startswith("Click interval distribution (N="), captions[1])
+        self.assertEqual(captions[2], "Elapsed time vs Hold duration")
+        self.assertEqual(captions[3], "Click interval vs Hold duration")
+        hold_body = figures.pop("Elapsed time vs Hold duration")
         for neutral in ("class='ref'", "class='band'", "class='bnd'", "class='out'", "class='legend'"):
             self.assertNotIn(neutral, hold_body)
-        self.assertIn("Hold (ms)", hold_body)
+        self.assertIn("Hold duration (ms)", hold_body)
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertEqual(body.count("class='ref'"), 1)
@@ -463,7 +473,7 @@ class ReportV2QtTests(unittest.TestCase):
                 legend = re.findall(r"<span class='li'>.*?</span>", body)
                 self.assertEqual(
                     [re.sub(r"<[^>]+>", "", item) for item in legend],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms"],
+                    ["Host observation", f"Reference interval {_REF_MS:.2f} ms"],
                 )
 
     def test_run_context_uses_schedule_association_window_wording(self):
@@ -488,10 +498,10 @@ class ReportV2QtTests(unittest.TestCase):
         html_text, xlsx = self._artifacts(paths)
         figures = _html_figures(html_text)
         captions = tuple(figures)
-        self.assertEqual(captions[0], "Interval over time")
-        self.assertTrue(captions[1].startswith("Press Interval Distribution (N="), captions[1])
-        self.assertEqual(captions[2], "Hold over time")
-        self.assertEqual(captions[3], "Hold vs Interval")
+        self.assertEqual(captions[0], "Elapsed time vs Click interval")
+        self.assertTrue(captions[1].startswith("Click interval distribution (N="), captions[1])
+        self.assertEqual(captions[2], "Elapsed time vs Hold duration")
+        self.assertEqual(captions[3], "Click interval vs Hold duration")
         for title, body in figures.items():
             with self.subTest(chart=title):
                 self.assertNotIn("class='ref'", body)
@@ -509,24 +519,24 @@ class ReportV2QtTests(unittest.TestCase):
     def test_xlsx_charts_keep_axis_sources_and_add_reference_series(self):
         _, paths = self._golden()
         charts = _xlsx_charts(Path(paths["engineering_xlsx"]))
-        hold_over_time = charts.pop("Hold over time")
+        hold_over_time = charts.pop("Elapsed time vs Hold duration")
         self.assertEqual([s["title"] for s in hold_over_time], ["Host observation"])
         self.assertRegex(hold_over_time[0]["x"], r"^'Click Data'!\$B\$2:\$B\$\d+$")
         self.assertRegex(hold_over_time[0]["y"], r"^'Click Data'!\$E\$2:\$E\$\d+$")
         self.assertEqual(set(charts), set(_CHART_TITLES))
-        interval, hold = charts["Interval over time"][0], charts["Hold vs Interval"][0]
+        interval, hold = charts["Elapsed time vs Click interval"][0], charts["Click interval vs Hold duration"][0]
         self.assertRegex(interval["x"], r"^'Click Data'!\$B\$2:\$B\$\d+$")
         self.assertRegex(interval["y"], r"^'Click Data'!\$D\$2:\$D\$\d+$")
         self.assertRegex(hold["x"], r"^'Click Data'!\$D\$2:\$D\$\d+$")
         self.assertRegex(hold["y"], r"^'Click Data'!\$E\$2:\$E\$\d+$")
-        histogram = charts["Interval distribution"][0]
+        histogram = charts["Click interval distribution"][0]
         self.assertTrue(histogram["x"].startswith("'Measurements'!$A$"))
         self.assertTrue(histogram["y"].startswith("'Measurements'!$D$"))
         for title in _CHART_TITLES:
             with self.subTest(chart=title):
                 self.assertEqual(
                     [s["title"] for s in charts[title]],
-                    ["Host observation", f"Configured reference {_REF_MS:.2f} ms"],
+                    ["Host observation", f"Reference interval {_REF_MS:.2f} ms"],
                 )
         wb = load_workbook(paths["engineering_xlsx"])
         try:

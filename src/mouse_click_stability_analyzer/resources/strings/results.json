@@ -15,6 +15,10 @@
     "en": "Association",
     "zh-TW": "對應"
   },
+  "association_not_available": {
+    "en": "Schedule Association evidence is not available for this run.",
+    "zh-TW": "此測試沒有排程關聯證據。"
+  },
   "average_abs_error": {
     "en": "Average absolute matched timing error",
     "zh-TW": "平均絕對匹配時序誤差"
@@ -232,12 +236,12 @@
     ]
   },
   "hold_over_time": {
-    "en": "{@term.hold} over time",
-    "zh-TW": "{@term.hold}隨時間變化"
+    "en": "{@term.elapsed_time} vs {@term.hold}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.hold}"
   },
   "hold_vs_interval": {
-    "en": "{@term.hold} vs {@term.interval}",
-    "zh-TW": "{@term.hold} vs {@term.interval}"
+    "en": "{@term.interval} vs {@term.hold}",
+    "zh-TW": "{@term.interval} vs {@term.hold}"
   },
   "host_observations": {
     "en": "{@term.host_observations}",
@@ -256,8 +260,8 @@
     "zh-TW": "{@term.interval}分布"
   },
   "interval_over_time": {
-    "en": "{@term.interval} over time",
-    "zh-TW": "{@term.interval}隨時間"
+    "en": "{@term.elapsed_time} vs {@term.interval}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.interval}"
   },
   "legend_configured_reference": {
     "en": "{@term.configured_reference}",
@@ -319,10 +323,6 @@
   "not_applicable_manual": {
     "en": "Host Evidence is not applicable to {@term.mode_manual} mode.",
     "zh-TW": "{@term.mode_manual}模式不適用主機觀測證據。"
-  },
-  "not_applicable_no_duration": {
-    "en": "Host Evidence is not applicable when Auto Stop duration is not configured.",
-    "zh-TW": "未設定自動停止時長時不適用主機觀測證據。"
   },
   "obs_actuation_short": {
     "en": "Host-observed holds include short holds.",
@@ -494,8 +494,8 @@
     "zh-TW": "匹配時序誤差標準差"
   },
   "timing_error": {
-    "en": "Matched timing (Host − schedule)",
-    "zh-TW": "匹配時序（主機 − 排程）"
+    "en": "{@term.elapsed_time} vs {@term.schedule_timing_error}",
+    "zh-TW": "{@term.elapsed_time} vs {@term.schedule_timing_error}"
   },
   "timing_error_unavailable": {
     "en": "Per-observation timing-error geometry is not in the frozen Host Evidence snapshot. Aggregate matched-delta statistics are shown instead.",

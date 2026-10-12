@@ -14,9 +14,13 @@ from PySide6.QtWidgets import QComboBox, QFrame, QLineEdit, QScrollArea, QSplitt
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+_TESTS = Path(__file__).resolve().parent
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from association_support import apply_explicit_association
 from mouse_click_stability_analyzer import app as legacy_app
 from mouse_click_stability_analyzer.host_evidence import build_fixture_host_evidence
 from mouse_click_stability_analyzer.i18n import STRINGS, SUPPORTED_LANGS
@@ -93,13 +97,15 @@ class WorkflowShellTests(unittest.TestCase):
             self.win.auto_stop_on.setChecked(True)
             self.win.auto_stop_sec_combo.setCurrentText(auto_sec)
 
-    def _lock_and_arm(self):
+    def _lock_and_arm(self, association_ms=None):
         self.assertTrue(self.win.lock_profile())
+        if association_ms is not None:
+            apply_explicit_association(self.win, association_ms)
         self.assertTrue(self.win.arm_capture())
         self.win._cursor_over_capture_exclusion_ui = lambda: False
 
-    def _run(self, offsets, *, stop=True):
-        self._lock_and_arm()
+    def _run(self, offsets, *, stop=True, association_ms=None):
+        self._lock_and_arm(association_ms)
         t0 = float(self.win._arm_boundary_perf) + 0.001
         self.win._begin_session_from_first_click("Left", t0, t0 + 0.01, {})
         self.assertTrue(self.win.running)
@@ -260,7 +266,7 @@ class WorkflowShellTests(unittest.TestCase):
     def test_navigation_does_not_rebuild_host_evidence(self):
         self._setup_fixture()
         with mock.patch.object(qt_app, "build_fixture_host_evidence", wraps=build_fixture_host_evidence) as builder:
-            self._run([0, 25, 50, 75])
+            self._run([0, 25, 50, 75], association_ms=2.0)
             snap = self.win.host_evidence_snapshot
             for _ in range(2):
                 self.win.nav_setup.click()
@@ -310,7 +316,7 @@ class WorkflowShellTests(unittest.TestCase):
 
     def test_host_evidence_remains_in_review(self):
         self._setup_fixture()
-        self._run([0, 25, 50, 75, 104])
+        self._run([0, 25, 50, 75, 104], association_ms=2.0)
         self.assertIs(self.win.page_stack.currentWidget(), self.win.page_results)
         text = self.win.results_evidence_text.toPlainText()
         self.assertIn("HOST EVIDENCE", text)

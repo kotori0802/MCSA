@@ -3,8 +3,8 @@
     "note": "Canonical engineering terms. Page files reference these with {@term.key}. Read note/help before changing wording. Do not duplicate a term's exact wording in page files."
   },
   "term.configured_reference": {
-    "en": "Configured reference",
-    "zh-TW": "設定參考值",
+    "en": "Reference interval",
+    "zh-TW": "參考間隔",
     "note": "Configured nominal comparison reference shown on Measurement charts. IS NOT a product acceptance target or PASS/FAIL threshold.",
     "help": "The configured comparison marker. It is not a pass or fail line."
   },
@@ -15,8 +15,8 @@
     "help": "The nominal interval derived from the configured Reference Rate, used as Host Evidence context."
   },
   "term.hold": {
-    "en": "Hold",
-    "zh-TW": "按住",
+    "en": "Hold duration",
+    "zh-TW": "按住時間",
     "note": "Same-click release minus press. Distinct from Interval (press-to-press).",
     "help": "How long the button stayed down for that click."
   },
@@ -75,14 +75,14 @@
     "help": "How many accepted button presses the Host recorded."
   },
   "term.above_configured_range": {
-    "en": "Above configured range",
-    "zh-TW": "高於設定範圍",
+    "en": "Above configured interval range",
+    "zh-TW": "高於設定間隔範圍",
     "note": "Observed interval is greater than the configured upper bound. Factual position only. IS NOT FAIL, abnormal, or a DUT verdict.",
     "help": "This interval is longer than the upper bound of the engineer-configured range."
   },
   "term.below_configured_range": {
-    "en": "Below configured range",
-    "zh-TW": "低於設定範圍",
+    "en": "Below configured interval range",
+    "zh-TW": "低於設定間隔範圍",
     "note": "Observed interval is less than the configured lower bound. Factual position only. IS NOT FAIL, abnormal, or a DUT verdict.",
     "help": "This interval is shorter than the lower bound of the engineer-configured range."
   },
@@ -93,14 +93,14 @@
     "help": "The interval bounds the engineer configured for comparison."
   },
   "term.configured_range": {
-    "en": "Configured range",
-    "zh-TW": "設定範圍",
+    "en": "Configured interval range",
+    "zh-TW": "設定間隔範圍",
     "note": "Short chart/legend form of Configured interval range. Presentation band only. IS NOT a pass range, acceptable range, or failure zone.",
     "help": "The engineer-configured interval bounds drawn on the chart."
   },
   "term.interval": {
-    "en": "Interval",
-    "zh-TW": "間隔",
+    "en": "Click interval",
+    "zh-TW": "點擊間隔",
     "note": "Press-to-press interval. Distinct from Hold and from Reference Interval / matched timing error.",
     "help": "Time from one press to the next press."
   },
@@ -111,8 +111,8 @@
     "help": "Compares each observed press-to-press interval with the engineer-configured range."
   },
   "term.outside_configured_range": {
-    "en": "Outside configured range",
-    "zh-TW": "超出設定範圍",
+    "en": "Outside configured interval range",
+    "zh-TW": "超出設定間隔範圍",
     "note": "Observed interval is below or above the configured bounds. Factual position only. IS NOT FAIL.",
     "help": "This interval is outside the engineer-configured range."
   },
@@ -123,8 +123,8 @@
     "help": "Where this observed interval sits relative to the configured range."
   },
   "term.within_configured_range": {
-    "en": "Within configured range",
-    "zh-TW": "在設定範圍內",
+    "en": "Within configured interval range",
+    "zh-TW": "在設定間隔範圍內",
     "note": "Observed interval is inside the inclusive configured bounds. Factual position only. IS NOT PASS or a good click.",
     "help": "This interval is inside the engineer-configured range."
   },
@@ -187,5 +187,23 @@
     "zh-TW": "排程關聯範圍",
     "note": "Schedule-matching half-width only. IS NOT a DUT acceptance tolerance or PASS/FAIL threshold. Persisted as fixture_timing_tolerance_ms.",
     "help": "Defines the ± time window used to associate a Host observation with a nominal schedule slot."
+  },
+  "term.elapsed_time": {
+    "en": "Elapsed time",
+    "zh-TW": "經過時間",
+    "note": "Time from the first accepted Host press. Chart/table axis quantity. Distinct from Hold duration and Click interval.",
+    "help": "Time since the first accepted press in the run."
+  },
+  "term.observation_count": {
+    "en": "Observation count",
+    "zh-TW": "觀測次數",
+    "note": "How many comparable Host observations fall in a distribution bin. IS NOT a PASS count.",
+    "help": "The number of comparable click-interval observations in that bin."
+  },
+  "term.schedule_timing_error": {
+    "en": "Schedule timing error",
+    "zh-TW": "排程時序誤差",
+    "note": "Host press time minus associated schedule slot time. Available only when Schedule Association was explicitly configured. IS NOT a DUT verdict.",
+    "help": "How far a matched Host press sits from its associated schedule slot."
   }
 }

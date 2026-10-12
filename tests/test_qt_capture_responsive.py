@@ -423,7 +423,7 @@ class CaptureResponsiveTests(unittest.TestCase):
             self.win.btn_stop, self.win.btn_arm, self.win.btn_edit_profile,
             self.win.btn_view_stability, self.win.btn_view_interval,
             self.win.btn_chart_fit, self.win.btn_chart_zoom_in,
-            self.win.btn_chart_zoom_out, self.win.btn_chart_reset,
+            self.win.btn_chart_zoom_out,
         ]
 
     def _assert_initial_view_shows_capture_essentials(self, *, min_chart_px: int) -> None:

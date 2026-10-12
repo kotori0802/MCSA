@@ -447,7 +447,7 @@ class ArtifactContractTests(unittest.TestCase):
             self.assertNotIn(name, headers)
         self.assertIsNone(re.search(r"\b(PASS|WARN|FAIL)\b", html))
         self.assertIn("Measurement only", html)
-        self.assertIn("Within configured range", html)
+        self.assertIn("Within configured interval range", html)
         self.assertIn("100.00–150.00 ms", html)
         self.assertNotIn("DUT result", html)
 

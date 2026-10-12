@@ -231,7 +231,8 @@ window relative to T (W / T × 100), and whether adjacent windows overlap
 never blocks Profile Lock.
 
 The window applies to timestamps, not intervals. Interval-domain charts
-(Capture Stability Map, Interval Trend, report charts) show only the configured
+(Elapsed time vs Click interval, Click interval distribution, Click interval vs
+Hold duration — in Capture, Results and report charts) show only the configured
 reference interval and no association band.
 
 Fixed ms, period-relative percentage, hybrid, or drift handling is not decided.

@@ -18,7 +18,13 @@ from .app import (
 )
 from .artifact_contract import AUTO_STOP_ENABLED_KEY
 from .cadence import cadence_ms, is_extreme_cadence
-from .interval_comparison import classify_interval, freeze_interval_comparison
+from .interval_comparison import (
+    POSITION_ABOVE,
+    POSITION_BELOW,
+    POSITION_WITHIN,
+    classify_interval,
+    freeze_interval_comparison,
+)
 from .measurements import actual_run_duration_s
 
 _QT_HIDDEN_PRESENTATION_TAGS = frozenset({"OPERATOR_FATIGUE", "HOLD_VARIATION_WARN"})
@@ -325,18 +331,148 @@ def interval_histogram_bins(values: list[float], *, max_bins: int = 16) -> list[
     return count_histogram(values, histogram_bin_edges(values, max_bins=max_bins))
 
 
+def inject_bound_splits(
+    edges: list[tuple[float, float]],
+    *bounds: Any,
+) -> list[tuple[float, float]]:
+    """Split histogram edges at configured bounds so no bin straddles a classification boundary."""
+    if not edges:
+        return []
+    points = [float(edges[0][0])]
+    for _lo, hi in edges:
+        points.append(float(hi))
+    lo0, hi1 = points[0], points[-1]
+    span = hi1 - lo0
+    eps = max(abs(span) * 1e-12, 1e-12)
+    extra: list[float] = []
+    for bound in bounds:
+        if bound is None or isinstance(bound, bool):
+            continue
+        try:
+            value = float(bound)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        if lo0 + eps < value < hi1 - eps:
+            extra.append(value)
+    if extra:
+        points.extend(extra)
+        points.sort()
+    uniq: list[float] = []
+    for point in points:
+        if not uniq or point - uniq[-1] > eps:
+            uniq.append(point)
+    if len(uniq) < 2:
+        return edges
+    return [(uniq[i], uniq[i + 1]) for i in range(len(uniq) - 1)]
+
+
+def _bin_range_position(lo: float, hi: float, lower: float, upper: float) -> str:
+    if hi <= lower:
+        return POSITION_BELOW
+    if lo >= upper:
+        return POSITION_ABOVE
+    return POSITION_WITHIN
+
+
+def _value_in_classified_bin(
+    value: float,
+    lo: float,
+    hi: float,
+    position: str,
+    *,
+    lower: float,
+    upper: float,
+    last_of_kind: bool,
+) -> bool:
+    if position == POSITION_BELOW:
+        return value < lower and lo <= value and (value < hi or last_of_kind)
+    if position == POSITION_ABOVE:
+        return value > upper and value <= hi and (lo < value or lo >= upper)
+    if last_of_kind or hi >= upper:
+        return lower <= value <= upper and lo <= value <= hi
+    return lower <= value <= upper and lo <= value < hi
+
+
+def classified_interval_histogram(
+    values: list[float],
+    contract: dict[str, Any] | None = None,
+    *,
+    max_bins: int = 16,
+    edges: list[tuple[float, float]] | None = None,
+) -> list[dict[str, Any]]:
+    """Full-run interval distribution. Classification is applied before bin placement.
+
+    When comparison is enabled, configured lower/upper bounds split any bin they
+    intersect. Exact lower and exact upper stay Within. Viewport/zoom is not an input.
+    """
+    finite = _finite_intervals(values)
+    enabled = bool(contract and contract.get("enabled"))
+    if edges is None:
+        edges = histogram_bin_edges(finite, max_bins=max_bins)
+    if enabled:
+        lower = float(contract["lower_bound_ms"])
+        upper = float(contract["upper_bound_ms"])
+        edges = inject_bound_splits(edges, lower, upper)
+    if not edges:
+        return []
+    if not enabled:
+        return count_histogram(finite, edges)
+    lower = float(contract["lower_bound_ms"])
+    upper = float(contract["upper_bound_ms"])
+    bins: list[dict[str, Any]] = []
+    last_index: dict[str, int] = {}
+    for lo, hi in edges:
+        position = _bin_range_position(lo, hi, lower, upper)
+        last_index[position] = len(bins)
+        bins.append({"lo": lo, "hi": hi, "count": 0, "position": position})
+    for value in finite:
+        position = classify_interval(value, contract)
+        if position not in last_index:
+            continue
+        placed = False
+        last = last_index[position]
+        for index, item in enumerate(bins):
+            if item["position"] != position:
+                continue
+            if _value_in_classified_bin(
+                value, float(item["lo"]), float(item["hi"]), position,
+                lower=lower, upper=upper, last_of_kind=index == last,
+            ):
+                item["count"] = int(item["count"]) + 1
+                placed = True
+                break
+        if not placed:
+            bins[last]["count"] = int(bins[last]["count"]) + 1
+    return bins
+
+
 def paired_interval_histograms(
     current: list[float],
     overlay: list[float],
     *,
     max_bins: int = 16,
-) -> tuple[list[dict[str, float | int]], list[dict[str, float | int]]]:
-    """Current and overlay counts against the same edges when overlay is present."""
+    contract: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Current (optionally classified) and overlay counts against the same edges.
+
+    Overlay is never classified with the current run's configured range.
+    """
     overlay_finite = _finite_intervals(overlay)
     if not overlay_finite:
-        return interval_histogram_bins(current, max_bins=max_bins), []
+        return classified_interval_histogram(current, contract, max_bins=max_bins), []
     edges = histogram_bin_edges(_finite_intervals(current) + overlay_finite, max_bins=max_bins)
-    return count_histogram(current, edges), count_histogram(overlay, edges)
+    current_bins = classified_interval_histogram(current, contract, max_bins=max_bins, edges=edges)
+    overlay_edges = [(float(item["lo"]), float(item["hi"])) for item in current_bins] or edges
+    overlay_bins = count_histogram(overlay, overlay_edges)
+    for item in overlay_bins:
+        item["position"] = None
+    return current_bins, overlay_bins
+
+
+def histogram_observation_count(bins: list[dict[str, Any]] | None) -> int:
+    return sum(int(item.get("count") or 0) for item in (bins or []))
 
 
 def _finite(value: Any) -> float | None:
@@ -447,6 +583,7 @@ def _analysis_payload(
     *,
     manual: bool,
     reference_ms: float | None,
+    settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     series: list[tuple[float, float]] = []
     points: list[tuple[float, float, str]] = []
@@ -467,12 +604,13 @@ def _analysis_payload(
                 series.append((elapsed, interval))
             if hold is not None:
                 points.append((interval, hold, cls))
+    comparison = freeze_interval_comparison(settings, manual=manual)
     return {
         "interval_series": series,
         "scatter_points": points,
         "hold_series": hold_series,
         "intervals": intervals,
-        "histogram": interval_histogram_bins(intervals),
+        "histogram": classified_interval_histogram(intervals, comparison),
         "reference_interval_ms": None if manual else reference_ms,
         "timing_error_available": False,
         "timing_error_reason": TIMING_ERROR_UNAVAILABLE_REASON,
@@ -541,7 +679,9 @@ def build_completed_result_model(
         "observations": _build_observations(
             visible_tags, metrics=metrics, settings=settings, reference_ms=reference_ms,
         ),
-        "analysis": _analysis_payload(annotated, manual=manual, reference_ms=reference_ms),
+        "analysis": _analysis_payload(
+            annotated, manual=manual, reference_ms=reference_ms, settings=settings,
+        ),
         "host_evidence": {
             "applicable": snapshot is not None,
             "snapshot": snapshot,

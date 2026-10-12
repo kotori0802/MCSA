@@ -84,7 +84,7 @@ class StampFixtureTimingToleranceTests(unittest.TestCase):
 
     def test_unconfigured_fixture_is_none(self):
         out = stamp_qt_fixture_timing_tolerance({}, manual=False, tolerance_ms=None)
-        self.assertIsNone(out[FIXTURE_TIMING_TOLERANCE_KEY])
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, out)
 
     def test_input_not_mutated(self):
         src = {"x": 1}
@@ -185,69 +185,66 @@ class MainWindowToleranceTests(unittest.TestCase):
         self.assertEqual(self.win.timing_tol_edit.text(), "")
         self.assertTrue(self.win.timing_tol_edit.placeholderText())
 
-    def test_settings_captures_entered_value(self):
+    def test_settings_ignores_hidden_field(self):
         self._fixture("2.5")
-        self.assertEqual(self.win.settings()[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.settings())
         self._fixture("0")
-        self.assertEqual(self.win.settings()[FIXTURE_TIMING_TOLERANCE_KEY], 0.0)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.settings())
+        self._fixture("10")
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.settings())
 
     def test_settings_does_not_raise_when_unconfigured(self):
         self._fixture("")
-        self.assertIsNone(self.win.settings()[FIXTURE_TIMING_TOLERANCE_KEY])
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.settings())
 
-    def test_blank_fixture_blocks_session_start(self):
+    def test_blank_fixture_locks_without_association(self):
         self._fixture("")
-        self.assertFalse(self.win.lock_profile())
-        self.assertFalse(self.win.running)
-        self.assertIsNone(self.win.locked)
-        self.assertIsNone(self.win.profile_locked_settings)
+        self.assertTrue(self.win.lock_profile())
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.profile_locked_settings)
         self.assertEqual(self.win.events, [])
-        self.assertEqual(self.win.alert_label.text(), self.win._tr("fixture_timing_tolerance_invalid"))
 
-    def test_invalid_fixture_values_block_session_start(self):
+    def test_invalid_hidden_text_does_not_block_lock(self):
         for text in ("-1", "abc", "nan", "inf", "-inf"):
             with self.subTest(text=text):
                 self._fixture(text)
-                self.assertFalse(self.win.lock_profile())
-                self.assertFalse(self.win.running)
-                self.assertIsNone(self.win.locked)
-                self.assertIsNone(self.win.profile_locked_settings)
+                self.assertTrue(self.win.lock_profile())
+                self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.profile_locked_settings)
+                self.assertTrue(self.win.edit_profile())
 
-    def test_valid_fixture_locks_value(self):
+    def test_normal_fixture_run_has_no_association_window(self):
         self._fixture("2.5")
         self._begin()
         self.assertTrue(self.win.running)
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
         self.assertEqual(self.win.events[0]["press_elapsed_ms"], 0.0)
 
-    def test_zero_fixture_locks_zero(self):
+    def test_hidden_zero_is_not_synthesized(self):
         self._fixture("0")
         self._begin()
         self.assertTrue(self.win.running)
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 0.0)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
 
-    def test_overlapping_value_accepted(self):
-        self._fixture("13", hz="40")
-        self._begin()
-        self.assertTrue(self.win.running)
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 13.0)
-
-    def test_auto_stop_off_still_requires_and_preserves(self):
+    def test_auto_stop_off_locks_without_association(self):
         self._fixture("", auto_stop=False)
-        self.assertFalse(self.win.lock_profile())
-        self.assertFalse(self.win.running)
-        self._fixture("2.5", auto_stop=False)
         self._begin()
         self.assertTrue(self.win.running)
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
         self.assertEqual(self.win.locked["duration_sec"], 0)
 
-    def test_auto_stop_on_preserves(self):
+    def test_auto_stop_on_does_not_stamp_hidden_window(self):
         self._fixture("1.5", auto_stop=True)
         self._begin()
         self.assertTrue(self.win.running)
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 1.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
         self.assertEqual(self.win.locked["duration_sec"], 1.0)
+
+    def test_fixture_setup_hides_association_widgets(self):
+        self.win.radio_fixture.setChecked(True)
+        for widget in (
+            self.win.lbl_schedule_association, self.win.timing_tol_label,
+            self.win.timing_tol_edit, self.win.assoc_context_box,
+        ):
+            self.assertFalse(widget.isVisibleTo(self.win), widget)
 
     def test_manual_blank_is_valid_and_not_applicable(self):
         self.win.radio_manual.setChecked(True)
@@ -264,14 +261,14 @@ class MainWindowToleranceTests(unittest.TestCase):
         self._begin()
         self.assertIsNone(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY])
 
-    def test_locked_value_immutable_after_widget_change(self):
+    def test_locked_absence_immutable_after_widget_change(self):
         self._fixture("2.5")
         self._begin()
         self.win.timing_tol_edit.setText("9")
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
         self.win.stop_run()
         self.win.timing_tol_edit.setText("7")
-        self.assertEqual(self.win.locked[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, self.win.locked)
 
     def test_setup_lock_follows_other_controls(self):
         self._fixture("2.5")
@@ -303,7 +300,7 @@ class MainWindowToleranceTests(unittest.TestCase):
         self._fixture("2.5")
         s = self.win.settings()
         self.assertIn(s.get("fixture_match_tolerance_ms", 0.0), (0.0, None))
-        self.assertEqual(s[FIXTURE_TIMING_TOLERANCE_KEY], 2.5)
+        self.assertNotIn(FIXTURE_TIMING_TOLERANCE_KEY, s)
 
     def test_settings_auto_stop_enabled_follows_toggle(self):
         self._fixture("2.5", auto_stop=True)
