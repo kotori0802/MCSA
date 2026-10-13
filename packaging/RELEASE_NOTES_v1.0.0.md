@@ -25,7 +25,12 @@ next to the executable under `reports\`.
 - No formal DUT validation / screening profile is applied.
 - Schedule Association is optional / historical. No recommended Association
   Window (W) is published. Real 4E-B2 characterization has not started.
-- The Windows EXE is unsigned. Windows SmartScreen may show a reputation prompt.
+- MCSA v1.0.0 is unsigned; code signing is not configured. Windows SmartScreen
+  may show a reputation prompt.
+- On Windows 11 systems where Smart App Control enforces blocking of unsigned or
+  untrusted applications, `MCSA.exe` may be blocked before launch. Clean-machine
+  validation recorded: Smart App Control ON, launch blocked; Smart App Control
+  OFF, the application ran normally.
 - No custom application icon is bundled.
 - Third-party license texts for Python, openpyxl, et-xmlfile, the PyInstaller
   bootloader, and PySide6 / Qt 6.11.0 (LGPL-3.0, GPL-3.0, GPL-2.0, taken from

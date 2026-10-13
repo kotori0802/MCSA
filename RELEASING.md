@@ -140,6 +140,14 @@ git push <remote> v1.0.0
 GitHub Release title: `MCSA v1.0.0`. Attach `MCSA-1.0.0-win64.zip` and the SHA-256.
 Code signing is not configured; unsigned SmartScreen prompts are expected.
 
+Smart App Control (Windows 11): v1.0.0 is unsigned. On systems where Smart App
+Control enforces blocking of unsigned or untrusted applications, `MCSA.exe` may
+be blocked before launch. Clean-machine validation of the v1.0.0 candidate
+(Windows 11 26H2, build 26300.9550) recorded: Smart App Control ON, launch
+blocked; Smart App Control OFF, the application ran normally. Treat this as a
+known unsigned-distribution limitation, not a runtime defect. Do not document
+disabling Defender as a normal step.
+
 Custom application icon: not included (no existing project icon). Default EXE icon is a documented polish item, not a packaging blocker.
 
 ---
