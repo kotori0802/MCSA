@@ -27,6 +27,14 @@ No administrator rights are required for normal operation.
 
 ---
 
+## Why MCSA
+
+Intermittent mouse-click timing issues can be difficult to communicate using video or subjective descriptions alone. MCSA converts host-observed button activity into repeatable timing measurements and reviewable evidence for engineering investigation.
+
+MCSA measures what the Windows host observed. It does not diagnose the physical switch and does not qualify the DUT.
+
+---
+
 ## Results at a Glance
 
 ![MCSA v1.0.0 - Click interval distribution](docs/images/mcsa-v1-results-distribution.png)
@@ -229,6 +237,8 @@ Run Status describes the run. It is not a product verdict.
 
 ## Evidence Package
 
+![MCSA v1.0.0 - Generated evidence package](docs/images/mcsa-v1-evidence-package.png)
+
 Selecting **Generate Report** creates exactly four artifacts for each run:
 
 ```text
@@ -264,6 +274,8 @@ The CSV intentionally contains no DUT verdict fields.
 
 ### HTML Report
 
+![MCSA v1.0.0 - Generated HTML report](docs/images/mcsa-v1-report.png)
+
 A standalone human-readable engineering report. The generated HTML can be opened without MCSA or Python.
 
 ### XLSX Report
@@ -295,7 +307,7 @@ The portable Windows package contains its required runtime and does not depend o
 8. Generate Report
 ```
 
-Reports are written locally under `reports\\` next to the executable.
+Reports are written locally under `reports/` next to the executable.
 
 ---
 
