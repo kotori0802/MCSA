@@ -1,154 +1,470 @@
-# Mouse Click Stability Analyzer
+﻿# MCSA - Mouse Click Stability Analyzer
 
-> **An independent QA prototype for capturing, measuring, visualizing, and reporting mouse click behavior.**
+> **A Windows engineering tool for host-observed mouse click timing measurement, visualization, comparison, and evidence reporting.**
 
-Author: **Leo Cheng, PMP** · License: [MIT](LICENSE)
+**MCSA is measurement only.**
+It records what the Windows host observed. It does not issue a DUT PASS/FAIL verdict, a score, or a product qualification recommendation.
 
-## Screenshots
+**Author:** Leo Cheng, PMP
+**License:** [MIT](LICENSE)
 
-**Dark theme — LISTEN (ready to test)**
+---
 
-![MCSA dark UI — listen phase](docs/images/mcsa-ui-dark-listen.png)
+## Download
 
-**30-second workflow**
+The current public release is **MCSA v1.0.0**.
 
-![MCSA workflow](./docs/images/mcsa-workflow.png)
+**Windows 10/11 - 64-bit**
 
-| Step | Action |
-|------|--------|
-| 1 | `install.bat` → `run.bat` |
-| 2 | Choose **Manual** or **Fixture**, button, Reference Rate, optional interval comparison, Auto Stop ON/OFF |
-| 3 | Click in **Test Area** — first click starts recording |
-| 4 | **F5 / Esc** to stop (avoids contaminating data) |
-| 5 | **Generate Report** → evidence JSON, events CSV, HTML and XLSX locally |
+Download the portable Windows package from:
 
-## Why I Built This
+**[MCSA v1.0.0 - GitHub Release](https://github.com/kotori0802/MCSA/releases/tag/v1.0.0)**
 
-Intermittent mouse click issues are difficult to explain with words or video alone. This project converts raw mouse events into measurable engineering evidence: press/release timing, hold duration and click intervals.
+Extract `MCSA-1.0.0-win64.zip`, then run `MCSA.exe`.
 
-MCSA is **measurement only**. It records and visualizes what the host observed; it does not issue a PASS/FAIL verdict, a DUT score or a pass recommendation.
+No Python installation is required for the packaged release.
+No administrator rights are required for normal operation.
 
-## What It Measures
+---
 
-- **Click interval** — press-to-press time between host-observed presses
-- **Hold duration** — press-to-release time of each press
-- **Configured interval range** (optional, Fixture) — inclusive bounds around the Reference Interval, set as ± ms or ± %. Intervals are counted as Below / Within / Above the range. This is a presentation of the configured range, **not** a PASS/FAIL criterion.
-- **Auto Stop** — an explicit ON/OFF setting recorded in the evidence; ON stops recording after the configured duration
-- **Schedule Association** (optional, historical) — readable only in runs that explicitly configured a Schedule Association Window. Normal runs do not configure one, and MCSA does not recommend a window value.
+## Results at a Glance
 
-## Requirements
+![MCSA v1.0.0 - Click interval distribution](docs/images/mcsa-v1-results-distribution.png)
 
-- **Windows 10/11** (Phase 1 — Raw Input capture)
-- **Python 3.12 64-bit** for this release line (library metadata still allows 3.10+; that is not a production support claim)
-- Verified GUI packages: `PySide6==6.11.0`, `openpyxl==3.1.5` (see `requirements-gui.txt`)
+MCSA turns host-observed mouse button events into measurable engineering evidence.
 
-Recommended install folder: **`C:\MCSA\`** or **`C:\Tools\MCSA\`**. A deep OneDrive / Desktop path can push PySide6 files inside `.venv` past 260 characters on PCs without Windows long-path support.
+The example above shows a completed Fixture run with:
+
+- Reference Interval
+- Configured Interval Range
+- Below / Within / Above interval counts
+- Host-observed Click intervals
+- Measurement-only analysis scope
+
+The configured interval range is a factual comparison aid. It is **not** a PASS/FAIL threshold.
+
+---
+
+## What MCSA Measures
+
+### Click Interval
+
+Press-to-press time between consecutive host-observed button presses.
+
+```text
+Press N -> Press N+1
+```
+
+The first accepted press has no previous press, so its Click interval is blank.
+
+### Hold Duration
+
+Time between the host-observed press and release of the same button.
+
+```text
+Press -> Release
+```
+
+### Reference Rate and Reference Interval
+
+Fixture mode can be configured with a Reference Rate.
+
+For example:
+
+```text
+Reference Rate:      2 Hz
+Reference Interval:  500.00 ms
+```
+
+Reference Rate is configuration vocabulary. Milliseconds are used for timing analysis.
+
+### Configured Interval Range
+
+Fixture mode can optionally compare observed intervals with an inclusive range around the Reference Interval.
+
+The range can be configured as +/- milliseconds or +/- percent.
+
+MCSA then reports each comparable interval as:
+
+- **Below configured interval range**
+- **Within configured interval range**
+- **Above configured interval range**
+
+These describe measurement position only. They are not DUT verdicts.
+
+### Auto Stop
+
+Auto Stop is an explicit ON/OFF run setting.
+
+When enabled, capture ends after the configured duration. Its state is recorded explicitly in the evidence rather than inferred from elapsed time.
+
+---
+
+## Setup
+
+![MCSA v1.0.0 - Setup and locked Fixture profile](docs/images/mcsa-v1-setup.png)
+
+The Setup workspace defines the measurement conditions before capture.
+
+Available configuration includes:
+
+- Optional Device / DUT name
+- Mouse button
+- Manual or Fixture mode
+- Reference Rate for Fixture mode
+- Optional interval comparison
+- Range basis and tolerance
+- Auto Stop
+- Duration
+
+The profile is locked before capture so the completed run has a stable configuration record.
+
+MCSA v1.0.0 uses:
+
+```text
+Analysis scope: Measurement only
+```
+
+No approved screening or validation profile is applied.
+
+---
+
+## Capture
+
+![MCSA v1.0.0 - Completed Capture workspace](docs/images/mcsa-v1-capture.png)
+
+The Windows release captures host-observed mouse button activity through the Windows Raw Input path.
+
+During a run, MCSA records and presents:
+
+- Host Press count
+- Click interval
+- Hold duration
+- Elapsed time
+- Run state
+- Measurement charts
+
+A completed run enters **REVIEW** and can be opened in the Results workspace.
+
+`COMPLETE` means the run completed with accepted Host press evidence. It does **not** mean the DUT passed.
+
+---
+
+## Results
+
+The Results workspace provides four primary chart views:
+
+- **Elapsed time vs Click interval**
+- **Click interval distribution**
+- **Elapsed time vs Hold duration**
+- **Click interval vs Hold duration**
+
+For configured interval comparison:
+
+- **Orange** - Below configured interval range
+- **Blue** - Within configured interval range
+- **Red** - Above configured interval range
+- **Green band** - Configured interval range
+- **Green reference line** - Reference Interval
+
+These colors describe measured timing relative to the engineer-configured range. They do not represent PASS/WARN/FAIL states.
+
+---
+
+## Event-Level Evidence
+
+![MCSA v1.0.0 - Click Data](docs/images/mcsa-v1-click-data.png)
+
+The **Click Data** view exposes event-level measurement evidence.
+
+Fields include:
+
+- Event index
+- Elapsed time
+- Button
+- Click interval
+- Hold duration
+- Interval delta vs Reference Interval
+- Range position
+
+This provides a direct path from summary charts back to individual host-observed events.
+
+---
+
+## Manual and Fixture Workflows
+
+### Manual
+
+Manual mode records host-observed mouse timing without a configured reference cadence.
+
+It can be used to inspect Click intervals, Hold durations, timing variation, and raw host-observed event evidence.
+
+### Fixture
+
+Fixture mode adds a configured Reference Rate and derived Reference Interval.
+
+Optional interval comparison can then show how observed intervals relate to the configured range.
+
+---
+
+## Compare Overlay
+
+A completed run can be visually compared with a previous MCSA run.
+
+Compare Overlay is intended for engineering review of measurement patterns. It does not reclassify the current run and does not turn either run into a DUT PASS/FAIL result.
+
+---
+
+## Run Status
+
+MCSA uses factual run-state terminology.
+
+- **COMPLETE** - At least one accepted Host press was recorded and the completed run is available for review.
+- **NO_DATA** - No accepted Host presses were recorded.
+- **INVALID** - The capture contains a validity condition that prevents it from being treated as a normal completed measurement.
+
+Run Status describes the run. It is not a product verdict.
+
+---
+
+## Evidence Package
+
+Selecting **Generate Report** creates exactly four artifacts for each run:
+
+```text
+reports/
+  mcsa_<run_id>/
+    mcsa_<run_id>_evidence.json
+    mcsa_<run_id>_events.csv
+    mcsa_<run_id>_report.html
+    mcsa_<run_id>_report.xlsx
+```
+
+### Evidence JSON
+
+Structured machine-readable run evidence using `MCSA_EVIDENCE_V1`.
+
+### Events CSV
+
+The factual event table contains:
+
+```text
+click_index
+index
+button
+accepted
+press_elapsed_ms
+press_interval_ms
+hold_ms
+capture_source
+device_source
+```
+
+The CSV intentionally contains no DUT verdict fields.
+
+### HTML Report
+
+A standalone human-readable engineering report. The generated HTML can be opened without MCSA or Python.
+
+### XLSX Report
+
+Spreadsheet representation of the completed-run evidence for engineering review.
+
+---
+
+## Windows Raw Input
+
+MCSA v1.0.0 uses the Windows Raw Input path for host-observed mouse button capture.
+
+No custom mouse driver is installed.
+
+The portable Windows package contains its required runtime and does not depend on a system Python installation.
+
+---
 
 ## Quick Start
 
-**Portable Windows EXE (no Python required):** extract `MCSA-1.0.0-win64.zip`, open the folder, and run `MCSA.exe`. Reports are written to `reports\` next to the executable. See `QUICK_START.txt` in that folder.
-
-**From source (Python 3.12):**
-
-```bat
-cd C:\MCSA
-install.bat
-run.bat
+```text
+1. Download MCSA-1.0.0-win64.zip
+2. Extract the ZIP to a writable folder
+3. Run MCSA.exe
+4. Configure Setup
+5. Lock the profile
+6. Start Capture
+7. Review Results
+8. Generate Report
 ```
 
-`install.bat` creates a **project-local `.venv`** with Python 3.12 and installs the Qt GUI extras there. It does not install into global Python and does not require Administrator.
+Reports are written locally under `reports\\` next to the executable.
 
-`run.bat` always runs **this folder's** `src\` with that `.venv` (or `py -3.12` / a 3.12 `python` if `.venv` is not present yet). It will not pick a newer Python, and it will not fall back to the legacy Tk UI.
+---
 
-If the window flashes and closes, run `run_diagnose.bat`.
+## Requirements
 
-Headless self-test (synthetic data, no GUI):
+### Portable Windows Release
 
-```bat
-run.bat --mode self-test
+- Windows 10 or Windows 11
+- 64-bit Windows
+- Physical mouse for real device measurement
+- Writable folder for locally generated reports
+
+Python is **not required** for the packaged release.
+
+### From Source
+
+The validated v1.0.0 development/build environment uses:
+
+```text
+Python      3.12 64-bit
+PySide6     6.11.0
+openpyxl    3.1.5
 ```
 
-The legacy Tk UI is available only by explicit request (`run.bat --ui tk`) and is not used for production.
+---
 
-Reports are written to `reports/` **after you complete a local run**. This repository does not ship real device sessions.
+## Known Limitation - Windows Smart App Control
 
-Before publishing: run `clean_local.bat` to remove local test reports and build cache (see [RELEASING.md](RELEASING.md)).
+MCSA v1.0.0 is currently **unsigned**.
 
-## Typical Workflow
+Windows SmartScreen may display a reputation warning.
 
-1. Launch (`run.bat`) — app opens in **LISTEN**
-2. Set Manual/Fixture, button, rules (left rail)
-3. Move cursor to **Test Area**, click target button to **start**
-4. Stop with **F5** or **Esc** (not the Stop button, to keep data clean)
-5. Review the Results charts (Elapsed time vs Click interval, Click interval distribution, Elapsed time vs Hold duration, Click interval vs Hold duration) → **New Run** or **Generate Report**
-6. Optional: **Compare Overlay** with a previous run's `mcsa_<run_id>_evidence.json` (from its `reports/mcsa_<run_id>/` package). Older flat `*_detail.json` files from before Stage 2C are still readable as legacy input but are no longer generated.
+On Windows 11 systems where **Smart App Control** is enforcing unsigned application blocking, Windows may prevent `MCSA.exe` from launching.
 
-Reports land in `reports/` on your machine only (never committed — see [RELEASING.md](RELEASING.md)).
+This is a known limitation of the unsigned v1.0.0 distribution.
 
-## Reading a Report — Demo Mouse A (fictional)
+Code signing is not configured for this release.
 
-This example uses a **fictional device** for teaching only. Your real reports appear only after a local test.
+---
 
-| Field | Demo Mouse A example |
-|-------|----------------------|
-| Device | Demo Mouse A |
-| Mode | Fixture, Reference Rate 3 Hz (Reference Interval 333.33 ms) |
-| Run Status | COMPLETE |
-| Analysis scope | Measurement only |
-| Host Presses / intervals | 58 / 57 |
-| Configured interval range | ±20 % → 266.67–400.00 ms |
-| Within / Below / Above | 30 / 14 / 13 (Within 52.63 %) |
+## Release Validation
 
-**How to interpret:**
+The portable v1.0.0 candidate was validated on a clean Windows 11 environment without an MCSA source checkout, project `.venv`, or system Python.
 
-- **Run Status COMPLETE** means the capture finished and all four artifacts were written — it is not a pass.
-- **Within / Below / Above** describe where each click interval falls relative to the range you configured. They are not PASS/FAIL results.
-- The **Click interval distribution** colours bars by range position; bars never cross the range bounds.
+The packaged application was validated with a real physical mouse for:
+
+- Application startup
+- Windows Raw Input capture
+- Host Press recording
+- Click interval measurement
+- Hold duration measurement
+- Auto Stop
+- COMPLETE run state
+- Results charts
+- Configured Interval Range presentation
+- Four-artifact report generation
+- HTML report
+- XLSX report
+- Application restart
+
+The generated XLSX was also validated by opening it with Microsoft Excel during release acceptance.
+
+Smart App Control enforcement blocked the unsigned executable before launch; with Smart App Control not enforcing the block, the packaged application completed the runtime validation above.
+
+---
+
+## Schedule Association
+
+Schedule Association remains an optional/historical analysis path.
+
+Normal MCSA v1.0.0 runs do not configure a Schedule Association Window.
+
+MCSA v1.0.0 does not publish or recommend an Association Window value.
+
+Real 4E-B2 Association Window characterization has not started.
+
+---
 
 ## Project Structure
 
 ```text
 src/mouse_click_stability_analyzer/
-  app.py          # Tk GUI + reporting (legacy / fallback)
-  qt_shell/       # PySide6 portfolio shell (default when installed)
-  core.py         # Metrics engine (importable)
-  cadence.py      # Reference Rate / Reference Interval helpers
-  schema.py       # MCSA_EVIDENCE_V1 schema constants and tool version
-  cli.py          # mcsa command
-  adapters/       # Windows Raw Input capture
+  cli.py
+  core.py
+  cadence.py
+  schema.py
+  runtime.py
+  adapters/
+  qt_shell/
 ```
 
-## Roadmap
+Release and packaging tooling is maintained under `packaging/`.
 
-- [x] Phase 1A–1B: Public repo, MCSA schema, standalone GUI + self-test
-- [x] Phase UI: PySide6 shell (Listen → first click → charts → review/report)
-- [x] Phase UI+: Chart axes/legends, compare overlay, rules preset, dark theme, EFIGS+CJK UI
-- [ ] Phase 1C: Device scan & bind (mouse HID enumeration)
-- [ ] Phase 1D: Report localization beyond EN/ZH
-- [ ] Phase 2: macOS capture adapter, packaging, CI
+The production Windows interface uses **PySide6 / Qt**.
 
+---
 
-## Library API (preview)
+## Source Development
 
-```python
-from mouse_click_stability_analyzer import build_payload, compute_metrics, make_synthetic_events
+Typical source setup:
 
-events = make_synthetic_events(count=100, interval_ms=100.0, hold_ms=12.0)
-payload = build_payload("Demo Mouse A", "", {"fixture_hz": 10}, events, run_id="demo")
-metrics = payload["metrics"]
+```bat
+install.bat
+run.bat
 ```
+
+A project-local `.venv` is used for development dependencies.
+
+Headless synthetic self-test:
+
+```bat
+run.bat --mode self-test
+```
+
+Release engineering information is documented in [RELEASING.md](RELEASING.md).
+
+---
 
 ## Privacy
 
-See **[PRIVACY.md](PRIVACY.md)** for what data MCSA stores locally and what it does **not** collect.
+See [PRIVACY.md](PRIVACY.md).
 
-See **[SECURITY.md](SECURITY.md)** for vulnerability reporting and the local-only security model.
+- Operator name is optional.
+- Real test reports remain local unless the user explicitly shares them.
+- `reports/` is not intended to be committed.
+- Device source information may contain hardware identifiers such as VID/PID.
+- MCSA does not require a cloud service for measurement or report generation.
 
-- Operator name is **optional** (not auto-filled from Windows username)
-- Do not commit `reports/` — real VID/PID sessions stay local
-- Compare overlay JSON is capped at **32 MiB / 150,000 events**
-- GitHub repo ships **no real test sessions** (`reports/*` is gitignored; only `reports/.gitkeep` is tracked)
+---
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and the local application security model.
+
+---
+
+## Scope
+
+MCSA v1.0.0 is intended for:
+
+- Engineering measurement
+- QA investigation
+- Timing evidence collection
+- Reproduction support
+- Run-to-run comparison
+- Evidence reporting
+
+It is not positioned as:
+
+- A hardware certification system
+- A DUT qualification authority
+- A physical switch chatter diagnosis system
+- A formal PASS/FAIL engine
+- An ML/AI inference system
+
+---
+
+## License
+
+MCSA is released under the [MIT License](LICENSE).
+
+Third-party runtime licenses and notices for the packaged Windows distribution are included with the release package.
+
+---
 
 ## Acknowledgements
 
-Built as a personal portfolio project. Development methodology used AI-assisted iteration; the analysis logic is deterministic event processing, not ML inference.
+MCSA is an independent personal engineering project.
+
+Development used AI-assisted iteration for requirements refinement, implementation support, testing, and documentation.
+
+The measurement pipeline itself is deterministic event processing, not machine-learning inference.
