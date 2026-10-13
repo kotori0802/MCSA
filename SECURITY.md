@@ -1,6 +1,6 @@
 # Security Policy
 
-**Mouse Click Stability Analyzer (MCSA)** is an independent portfolio project maintained by Leo Cheng.
+**Mouse Click Stability Analyzer (MCSA)** is an independent personal engineering project maintained by Leo Cheng.
 
 ## Supported versions
 
@@ -12,7 +12,7 @@
 
 Please **do not open a public GitHub issue** for security vulnerabilities or include sensitive technical details in public discussions.
 
-1. Use [GitHub private vulnerability reporting](https://github.com/kotori0802/mouse-click-stability-analyzer/security/advisories/new) if it is enabled for this repository.
+1. Use [GitHub private vulnerability reporting](https://github.com/kotori0802/MCSA/security/advisories/new) if it is enabled for this repository.
 2. If private vulnerability reporting is unavailable, use a professional contact method listed on the maintainer's GitHub profile, if one is provided.
 
 When reporting a vulnerability, please include:
@@ -51,7 +51,7 @@ We aim to acknowledge valid vulnerability reports within **7 business days**. Fi
 
 ## Security model
 
-MCSA is designed as a **local, offline QA utility**.
+MCSA is designed as a **local Windows engineering measurement utility**.
 
 By design, MCSA:
 
@@ -68,7 +68,7 @@ Reports generated locally may also contain limited environment metadata, such as
 
 - Operating-system platform information
 - Python version
-- Optional device VID/PID information when device scanning is enabled
+- Limited device-source identifiers, such as VID/PID, when available from the capture path or imported evidence
 - Test configuration and timing data
 
 Users should review generated reports before sharing them outside their own environment.
@@ -97,7 +97,7 @@ See [`PRIVACY.md`](PRIVACY.md) for additional information about local data handl
 - Download MCSA only from the official repository or releases you trust.
 - Verify release checksums when checksums are provided.
 - Do not commit the contents of `reports/` to a public repository without reviewing and sanitizing the data first.
-- When using **Compare Overlay**, load only `*_detail.json` files created by you or received from a trusted source.
+- When using **Compare Overlay**, load only MCSA evidence JSON files created by you or received from a trusted source. Current run packages use `mcsa_<run_id>_evidence.json`; older `*_detail.json` files may be readable only as legacy input.
 - Overlay files are limited to approximately **32 MiB / 150,000 events** to reduce the risk of excessive memory use from unexpectedly large or malicious JSON input.
 - Run MCSA with normal user privileges unless a specific troubleshooting scenario requires otherwise.
 
